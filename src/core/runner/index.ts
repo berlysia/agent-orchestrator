@@ -79,7 +79,13 @@ export class Runner {
   }
 }
 
-// Re-export
+// New functional implementation exports
+export { createRunTask } from './run-task.ts';
+export type { RunnerEffects, AgentOutput } from './runner-effects.ts';
+export { createRunnerEffects, type RunnerEffectsOptions } from './runner-effects-impl.ts';
+export * from './prompt-builder.ts';
+
+// Re-export (legacy, will be removed after migration)
 export { ProcessRunner, type ProcessResult, type ProcessRunnerOptions } from './process-runner.ts';
 export { LogWriter, type LogWriterOptions } from './log-writer.ts';
 export { ClaudeRunner, type ClaudeRunnerOptions, type ClaudeRunResult } from './claude-runner.ts';

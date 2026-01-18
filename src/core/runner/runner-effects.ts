@@ -72,4 +72,18 @@ export interface RunnerEffects {
    * @param run Run オブジェクト
    */
   saveRunMetadata(run: Run): Promise<Result<void, RunnerError>>;
+
+  /**
+   * Run メタデータを読み込み
+   * @param runId Run ID（文字列形式）
+   * @returns Run オブジェクト（存在しない場合はエラー）
+   */
+  loadRunMetadata(runId: string): Promise<Result<Run, RunnerError>>;
+
+  /**
+   * ログファイル全体を読み込み
+   * @param runId Run ID（文字列形式）
+   * @returns ログ内容（存在しない場合はエラー）
+   */
+  readLog(runId: string): Promise<Result<string, RunnerError>>;
 }
