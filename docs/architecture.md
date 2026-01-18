@@ -48,20 +48,28 @@ Worktreeで各Workerは独立した作業ディレクトリを持ちますが、
 **TaskStore インターフェース**:
 
 ```typescript
+import type { Result } from 'option-t/plain_result';
+
 interface TaskStore {
-  createTask(task: Task): Promise<void>;
-  readTask(taskId: string): Promise<Task>;
-  listTasks(): Promise<Task[]>;
-  deleteTask(taskId: string): Promise<void>;
+  createTask(task: Task): Promise<Result<void, TaskStoreError>>;
+  readTask(taskId: TaskId): Promise<Result<Task, TaskStoreError>>;
+  listTasks(): Promise<Result<Task[], TaskStoreError>>;
+  deleteTask(taskId: TaskId): Promise<Result<void, TaskStoreError>>;
   updateTaskCAS(
-    taskId: string,
+    taskId: TaskId,
     expectedVersion: number,
     updateFn: (task: Task) => Task,
-  ): Promise<Task>;
-  writeRun(run: Run): Promise<void>;
-  writeCheck(check: Check): Promise<void>;
+  ): Promise<Result<Task, TaskStoreError>>;
+  writeRun(run: Run): Promise<Result<void, TaskStoreError>>;
+  writeCheck(check: Check): Promise<Result<void, TaskStoreError>>;
 }
 ```
+
+**エラーハンドリング** (Phase 2実装):
+
+- `option-t` Result型による統一されたエラーハンドリング
+- `TaskStoreError` 型定義: NotFound, CASConflict, IOError, ValidationError等
+- Branded Types: `TaskId`, `RunId`, `WorkerId`, `RepoPath`等による型安全性向上
 
 **実装**: FileStore（JSONファイルベース）
 
@@ -71,6 +79,45 @@ agent-coord/
   runs/<runId>.json         # Worker実行結果
   checks/<checkId>.json     # CI/lint結果
   .locks/<taskId>/          # CASロック
+```
+
+### 4. Error Handling Strategy
+
+**Result型ベースのエラーハンドリング** (Phase 2実装):
+
+すべてのTaskStore操作は`Result<T, TaskStoreError>`を返却し、明示的なエラーハンドリングを強制します：
+
+```typescript
+// エラーハンドリングの例
+const taskResult = await taskStore.readTask(taskId);
+
+if (!taskResult.ok) {
+  // エラーハンドリング
+  console.error(`Failed to read task: ${taskResult.err.message}`);
+  return;
+}
+
+const task = taskResult.val; // 成功時のみ値を取得
+```
+
+**TaskStoreError型階層**:
+
+- `NotFoundError`: リソースが見つからない
+- `CASConflictError`: バージョン競合（楽観的ロック失敗）
+- `IOError`: ファイルI/O エラー
+- `ValidationError`: データ検証エラー
+- `LockError`: ロック取得失敗
+
+**Branded Types**:
+
+型安全なドメイン識別子により、異なる種類のIDを誤って混同することを防ぎます：
+
+```typescript
+type TaskId = Brand<'TaskId', string>;
+type WorkerId = Brand<'WorkerId', string>;
+
+// コンパイルエラー: TaskIdとWorkerIdは互換性がない
+const taskId: TaskId = workerId; // ❌
 ```
 
 ## Design Decisions

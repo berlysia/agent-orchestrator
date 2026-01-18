@@ -31,7 +31,7 @@
 - Story 4.2: エージェント実行インターフェース（ClaudeRunner、CodexRunner、Runner統合）
 - Story 4.3: CI/Lint実行（P1、後回し）
 
-**✅ Epic 5: Orchestrator** - 完了（2026-01-18）
+**✅ Epic 5: Orchestrator** - 完了（2026-01-19）
 
 - Story 5.1: タスクスケジューラ（Scheduler実装、並列度制御、タスク完了処理）
 - Story 5.2: Planner/Worker/Judge遷移
@@ -39,6 +39,14 @@
   - Worker実行フロー（worktree作成→Worker起動→コミット→push）
   - Judge実行フロー（簡易判定、CI統合は後回し）
   - Orchestrator統合（Planner→Worker→Judgeの1サイクル実行）
+- **Phase 2**: Result型エラーハンドリング統一（2026-01-19）
+  - option-t Result型の導入
+  - Branded Types（TaskId, WorkerId, RepoPath等）
+  - TaskStoreError型定義（NotFound, CASConflict, IOError等）
+  - TaskStore interface全面Result型対応
+  - file-store.ts全面リファクタリング（wrapAsyncヘルパー導入）
+  - Orchestrator呼び出し元のResult型対応（scheduler, judge, planner, index）
+  - ビルドエラー解消（テスト対応はPhase 3）
 
 **🚧 Epic 6: CLI基本コマンド** - 未着手
 **🚧 Epic 7: 統合テストとドキュメント** - 未着手
