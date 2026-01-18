@@ -76,7 +76,10 @@ const wrapAsync = async <T>(
 /**
  * ロックを取得（mkdirベース）
  */
-const acquireLock = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
+const acquireLock = async (
+  basePath: string,
+  taskId: TaskId,
+): Promise<Result<void, TaskStoreError>> => {
   const lockPath = getLockPath(basePath, taskId);
   return wrapAsync('acquireLock', async () => {
     // 親ディレクトリ（.locks/）を作成
@@ -91,7 +94,10 @@ const acquireLock = async (basePath: string, taskId: TaskId): Promise<Result<voi
 /**
  * ロックを解放
  */
-const releaseLock = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
+const releaseLock = async (
+  basePath: string,
+  taskId: TaskId,
+): Promise<Result<void, TaskStoreError>> => {
   const lockPath = getLockPath(basePath, taskId);
   return wrapAsync('releaseLock', async () => {
     await fs.rmdir(lockPath);
@@ -103,7 +109,10 @@ const releaseLock = async (basePath: string, taskId: TaskId): Promise<Result<voi
 /**
  * タスクを読み込む
  */
-const readTask = async (basePath: string, taskId: TaskId): Promise<Result<Task, TaskStoreError>> => {
+const readTask = async (
+  basePath: string,
+  taskId: TaskId,
+): Promise<Result<Task, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, taskId);
   return wrapAsync(
     'readTask',
@@ -117,7 +126,7 @@ const readTask = async (basePath: string, taskId: TaskId): Promise<Result<Task, 
         return taskNotFound(taskId);
       }
       return ioError('readTask', err);
-    }
+    },
   );
 };
 
@@ -152,7 +161,7 @@ const createTask = async (basePath: string, task: Task): Promise<Result<void, Ta
         return null as any; // ファイルが存在しない = 正常（nullを返す）
       }
       return ioError('createTask.access', err);
-    }
+    },
   );
 
   // accessがエラーを返した場合（ENOENT以外のエラー）
@@ -199,7 +208,10 @@ const listTasks = async (basePath: string): Promise<Result<Task[], TaskStoreErro
 /**
  * タスクを削除
  */
-const deleteTask = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
+const deleteTask = async (
+  basePath: string,
+  taskId: TaskId,
+): Promise<Result<void, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, taskId);
   return wrapAsync(
     'deleteTask',
@@ -211,7 +223,7 @@ const deleteTask = async (basePath: string, taskId: TaskId): Promise<Result<void
         return taskNotFound(taskId);
       }
       return ioError('deleteTask', err);
-    }
+    },
   );
 };
 
@@ -279,7 +291,10 @@ const writeRun = async (basePath: string, run: Run): Promise<Result<void, TaskSt
 /**
  * Checkを書き込む
  */
-const writeCheck = async (basePath: string, check: Check): Promise<Result<void, TaskStoreError>> => {
+const writeCheck = async (
+  basePath: string,
+  check: Check,
+): Promise<Result<void, TaskStoreError>> => {
   const checkPath = getCheckPath(basePath, String(check.id));
   return wrapAsync('writeCheck', async () => {
     const dir = path.dirname(checkPath);

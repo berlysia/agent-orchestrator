@@ -89,7 +89,10 @@ export class Scheduler {
     );
 
     if (!updatedTaskResult.ok) {
-      console.error(`Failed to claim task ${rawTaskId} for ${rawWorkerId}:`, updatedTaskResult.err.message);
+      console.error(
+        `Failed to claim task ${rawTaskId} for ${rawWorkerId}:`,
+        updatedTaskResult.err.message,
+      );
       return null;
     }
 

@@ -14,6 +14,9 @@ importers:
       '@openai/codex-sdk':
         specifier: 0.80.0
         version: 0.80.0
+      commander:
+        specifier: 14.0.2
+        version: 14.0.2
       option-t:
         specifier: 55.1.0
         version: 55.1.0
@@ -234,6 +237,10 @@ packages:
     resolution: {integrity: sha512-nfSxvmTUZSSIyaO1qCP0iyy59UnEu24wXqq6xG5qpAN3HKh6UKfB1XJowzmHsO8k3MOO41QbLwvzWk6MA65HvA==}
     hasBin: true
 
+  commander@14.0.2:
+    resolution: {integrity: sha512-TywoWNNRbhoD0BXs1P3ZEScW8W5iKrnbithIl0YH+uCmBd0QpPOA8yc82DS3BIE5Ma6FnBVUsJ7wVUDz4dvOWQ==}
+    engines: {node: '>=20'}
+
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
     engines: {node: '>=6.0'}
@@ -416,6 +423,8 @@ snapshots:
       '@typescript/native-preview-linux-x64': 7.0.0-dev.20260111.1
       '@typescript/native-preview-win32-arm64': 7.0.0-dev.20260111.1
       '@typescript/native-preview-win32-x64': 7.0.0-dev.20260111.1
+
+  commander@14.0.2: {}
 
   debug@4.4.3:
     dependencies:

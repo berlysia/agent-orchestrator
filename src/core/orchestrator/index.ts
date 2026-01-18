@@ -48,7 +48,6 @@ export class Orchestrator {
   private judge: Judge;
 
   constructor(options: OrchestratorOptions) {
-
     this.scheduler = new Scheduler({
       taskStore: options.taskStore,
       maxWorkers: options.maxWorkers,
@@ -142,7 +141,9 @@ export class Orchestrator {
       }
 
       const success = failedTaskIds.length === 0;
-      console.log(`\n${success ? '🎉' : '⚠️ '} Orchestration ${success ? 'completed' : 'finished with errors'}`);
+      console.log(
+        `\n${success ? '🎉' : '⚠️ '} Orchestration ${success ? 'completed' : 'finished with errors'}`,
+      );
       console.log(`  Completed: ${completedTaskIds.length}`);
       console.log(`  Failed: ${failedTaskIds.length}`);
 

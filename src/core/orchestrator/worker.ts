@@ -115,7 +115,11 @@ export class Worker {
     const branchExists = branches.all.includes(task.branch);
 
     // Worktreeを作成（createBranchフラグでブランチも同時作成）
-    const worktreePath = await this.worktreeAdapter.createWorktree(task.id, task.branch, !branchExists);
+    const worktreePath = await this.worktreeAdapter.createWorktree(
+      task.id,
+      task.branch,
+      !branchExists,
+    );
 
     return worktreePath;
   }

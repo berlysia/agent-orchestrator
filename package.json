@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsgo --noEmit",
+    "compile": "tsgo",
     "test": "node --test tests/unit/**/*.test.ts",
     "dev": "node --watch src/cli/index.ts",
     "lint": "oxlint src/",
@@ -38,6 +39,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.4",
     "@openai/codex-sdk": "0.80.0",
+    "commander": "14.0.2",
     "option-t": "55.1.0",
     "simple-git": "3.30.0",
     "zod": "4.3.5"

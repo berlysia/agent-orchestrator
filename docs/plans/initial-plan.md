@@ -48,7 +48,14 @@
   - Orchestrator呼び出し元のResult型対応（scheduler, judge, planner, index）
   - ビルドエラー解消（テスト対応はPhase 3）
 
-**🚧 Epic 6: CLI基本コマンド** - 未着手
+**✅ Epic 6: CLI基本コマンド** - 完了（2026-01-19）
+
+- Story 6.1: CLIフレームワーク構築（commander導入、エントリーポイント作成）
+- Story 6.2: `agent init` コマンド（設定ファイル生成、agent-coord構造作成）
+- Story 6.3: `agent run` コマンド（Orchestrator統合、タスク実行）
+- Story 6.4: `agent status` コマンド（タスク一覧表示、状態確認）
+- Story 6.5: `agent stop` コマンド（実行中タスクの中断）
+
 **🚧 Epic 7: 統合テストとドキュメント** - 未着手
 
 ### 実装方針
