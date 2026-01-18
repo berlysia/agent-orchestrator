@@ -58,6 +58,44 @@ node dist/cli/index.js init \
 
 **Note**: パスは相対パスで指定できます。相対パスは`.agent/config.json`が配置されるディレクトリ（app-repoルート）を基準に解決されます。
 
+### GitHub連携の設定（オプション）
+
+GitHub連携は `src/adapters/github/` が担当する想定です（計画中）。設定は `.agent/config.json` に追加します。
+
+PATを使う例:
+
+```json
+{
+  "github": {
+    "apiBaseUrl": "https://api.github.com",
+    "owner": "org-or-user",
+    "repo": "repo-name",
+    "auth": {
+      "type": "pat",
+      "token": "${GITHUB_TOKEN}"
+    }
+  }
+}
+```
+
+GitHub Appを使う例:
+
+```json
+{
+  "github": {
+    "apiBaseUrl": "https://api.github.com",
+    "owner": "org-or-user",
+    "repo": "repo-name",
+    "auth": {
+      "type": "app",
+      "appId": 12345,
+      "installationId": 67890,
+      "privateKeyPath": ".agent/github-app.pem"
+    }
+  }
+}
+```
+
 ### 4. エイリアスの設定（推奨）
 
 `~/.zshrc` または `~/.bashrc` に以下を追加：

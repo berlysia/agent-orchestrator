@@ -81,7 +81,23 @@ agent-coord/
   .locks/<taskId>/          # CASロック
 ```
 
-### 4. Error Handling Strategy
+### 4. Adapter Layer (VCS / GitHub)
+
+外部サービスとのI/Oは `src/adapters/` に隔離し、CoreからはEffectsインターフェースで利用します。
+
+- `src/adapters/vcs/`: Git/Worktree操作（実装済み）
+- `src/adapters/github/`: GitHub API連携（計画中）
+  - PR作成・コメント投稿・チェック/ステータス更新・Actions参照を担当
+
+**GitHub設定項目（`.agent/config.json` の想定）**:
+
+- `github.apiBaseUrl`（例: `https://api.github.com`）
+- `github.owner` / `github.repo`
+- `github.auth.type`: `pat` | `app`
+- `github.auth.token`（PAT時）
+- `github.auth.appId` / `github.auth.installationId` / `github.auth.privateKeyPath`（App時）
+
+### 5. Error Handling Strategy
 
 **Result型ベースのエラーハンドリング** (Phase 2実装):
 
