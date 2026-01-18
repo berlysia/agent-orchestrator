@@ -63,6 +63,12 @@ export const TaskSchema = z.object({
   /** 受け入れ基準（完了判定条件のテキスト） */
   acceptance: z.string(),
 
+  /** タスクタイプ */
+  taskType: z.enum(['implementation', 'documentation', 'investigation', 'integration']),
+
+  /** タスク実行に必要なコンテキスト情報 */
+  context: z.string(),
+
   /** CI/Lintチェック結果への参照（checkId） */
   check: z
     .string()
@@ -90,6 +96,8 @@ export function createInitialTask(params: {
   branch: BranchName;
   scopePaths: string[];
   acceptance: string;
+  taskType: 'implementation' | 'documentation' | 'investigation' | 'integration';
+  context: string;
 }): Task {
   const now = new Date().toISOString();
   return {
@@ -101,6 +109,8 @@ export function createInitialTask(params: {
     branch: params.branch,
     scopePaths: params.scopePaths,
     acceptance: params.acceptance,
+    taskType: params.taskType,
+    context: params.context,
     check: null,
     createdAt: now,
     updatedAt: now,

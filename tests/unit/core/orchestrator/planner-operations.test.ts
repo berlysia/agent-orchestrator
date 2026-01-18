@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { parseAgentOutput, buildPlanningPrompt } from '../../../../src/core/orchestrator/planner-operations.ts';
+import {
+  parseAgentOutput,
+  parseAgentOutputWithErrors,
+  buildPlanningPrompt,
+  TaskTypeEnum,
+} from '../../../../src/core/orchestrator/planner-operations.ts';
 
 describe('Planner Operations', () => {
   describe('buildPlanningPrompt', () => {
@@ -12,16 +17,38 @@ describe('Planner Operations', () => {
       assert(prompt.includes('task planner'));
       assert(prompt.includes('JSON array'));
     });
+
+    it('should include new required fields (type, estimatedDuration, context)', () => {
+      const prompt = buildPlanningPrompt('test');
+
+      assert(prompt.includes('type'));
+      assert(prompt.includes('estimatedDuration'));
+      assert(prompt.includes('context'));
+      assert(prompt.includes('implementation'));
+      assert(prompt.includes('documentation'));
+      assert(prompt.includes('investigation'));
+      assert(prompt.includes('integration'));
+    });
+
+    it('should include granularity guidelines', () => {
+      const prompt = buildPlanningPrompt('test');
+
+      assert(prompt.includes('1-4 hour'));
+      assert(prompt.includes('ALL fields are REQUIRED'));
+    });
   });
 
   describe('parseAgentOutput', () => {
-    it('should parse valid JSON array', () => {
+    it('should parse valid JSON array with all required fields', () => {
       const output = JSON.stringify([
         {
           description: 'Implement user authentication',
           branch: 'feature/auth',
           scopePaths: ['src/auth/'],
           acceptance: 'Users can login and logout',
+          type: 'implementation',
+          estimatedDuration: 3.0,
+          context: 'Use bcrypt for password hashing',
         },
       ]);
 
@@ -32,6 +59,9 @@ describe('Planner Operations', () => {
       assert.strictEqual(result[0].branch, 'feature/auth');
       assert.deepStrictEqual(result[0].scopePaths, ['src/auth/']);
       assert.strictEqual(result[0].acceptance, 'Users can login and logout');
+      assert.strictEqual(result[0].type, 'implementation');
+      assert.strictEqual(result[0].estimatedDuration, 3.0);
+      assert.strictEqual(result[0].context, 'Use bcrypt for password hashing');
     });
 
     it('should extract JSON from markdown code blocks', () => {
@@ -43,7 +73,10 @@ describe('Planner Operations', () => {
     "description": "Add login form",
     "branch": "feature/login-ui",
     "scopePaths": ["src/components/"],
-    "acceptance": "Login form is displayed"
+    "acceptance": "Login form is displayed",
+    "type": "implementation",
+    "estimatedDuration": 2.0,
+    "context": "Use existing form components"
   }
 ]
 \`\`\`
@@ -54,6 +87,7 @@ This is the recommended approach.`;
 
       assert.strictEqual(result.length, 1);
       assert.strictEqual(result[0].description, 'Add login form');
+      assert.strictEqual(result[0].type, 'implementation');
     });
 
     it('should handle invalid output gracefully', () => {
@@ -64,24 +98,33 @@ This is the recommended approach.`;
       assert.strictEqual(result.length, 0);
     });
 
-    it('should filter out invalid task breakdown items', () => {
+    it('should filter out invalid task breakdown items (Zod validation)', () => {
       const output = JSON.stringify([
         {
           description: 'Valid task',
           branch: 'feature/valid',
           scopePaths: ['src/'],
           acceptance: 'Task is valid',
+          type: 'implementation',
+          estimatedDuration: 2.0,
+          context: 'Valid context',
         },
         {
-          description: 'Invalid task - missing branch',
-          scopePaths: ['src/'],
-          acceptance: 'This should be filtered out',
-        },
-        {
-          description: 123, // Invalid type
+          description: 'Invalid task - missing type',
           branch: 'feature/invalid',
           scopePaths: ['src/'],
-          acceptance: 'Invalid description type',
+          acceptance: 'This should be filtered out',
+          estimatedDuration: 2.0,
+          context: 'Missing type field',
+        },
+        {
+          description: 'Invalid task - invalid estimatedDuration',
+          branch: 'feature/invalid2',
+          scopePaths: ['src/'],
+          acceptance: 'Invalid duration',
+          type: 'implementation',
+          estimatedDuration: 10.0, // Exceeds max (8)
+          context: 'Duration too high',
         },
       ]);
 
@@ -97,6 +140,9 @@ This is the recommended approach.`;
         branch: 'feature/single',
         scopePaths: ['src/'],
         acceptance: 'Task is single',
+        type: 'implementation',
+        estimatedDuration: 1.5,
+        context: 'Single task context',
       });
 
       const result = parseAgentOutput(output);
@@ -119,13 +165,19 @@ This is the recommended approach.`;
           "description": "Create database schema",
           "branch": "feature/db-schema",
           "scopePaths": ["db/migrations/"],
-          "acceptance": "Schema is created and tested"
+          "acceptance": "Schema is created and tested",
+          "type": "implementation",
+          "estimatedDuration": 3.5,
+          "context": "Use existing migration tools"
         },
         {
           "description": "Implement API endpoints",
           "branch": "feature/api",
           "scopePaths": ["src/api/"],
-          "acceptance": "Endpoints are functional"
+          "acceptance": "Endpoints are functional",
+          "type": "implementation",
+          "estimatedDuration": 4.0,
+          "context": "Follow REST best practices"
         }
       ]`;
 
@@ -134,6 +186,106 @@ This is the recommended approach.`;
       assert.strictEqual(result.length, 2);
       assert.strictEqual(result[0].description, 'Create database schema');
       assert.strictEqual(result[1].description, 'Implement API endpoints');
+    });
+
+    it('should return errors for tasks with missing required fields', () => {
+      const output = JSON.stringify([
+        {
+          description: 'Task without type',
+          branch: 'feature/test',
+          scopePaths: ['src/'],
+          acceptance: 'Test acceptance',
+          // Missing: type, estimatedDuration, context
+        },
+      ]);
+
+      const result = parseAgentOutputWithErrors(output);
+
+      assert.strictEqual(result.tasks.length, 0);
+      assert.strictEqual(result.errors.length > 0, true);
+      assert(result.errors[0].includes('type'));
+    });
+
+    it('should validate all TaskType enum values', () => {
+      const validTypes = ['implementation', 'documentation', 'investigation', 'integration'];
+
+      validTypes.forEach((type) => {
+        const output = JSON.stringify([
+          {
+            description: `Task with type ${type}`,
+            branch: 'feature/test',
+            scopePaths: ['src/'],
+            acceptance: 'Test',
+            type: type,
+            estimatedDuration: 2.0,
+            context: 'Test context',
+          },
+        ]);
+
+        const result = parseAgentOutput(output);
+        assert.strictEqual(result.length, 1);
+        assert.strictEqual(result[0].type, type);
+      });
+    });
+
+    it('should reject invalid task types', () => {
+      const output = JSON.stringify([
+        {
+          description: 'Task with invalid type',
+          branch: 'feature/test',
+          scopePaths: ['src/'],
+          acceptance: 'Test',
+          type: 'invalid-type',
+          estimatedDuration: 2.0,
+          context: 'Test context',
+        },
+      ]);
+
+      const result = parseAgentOutputWithErrors(output);
+
+      assert.strictEqual(result.tasks.length, 0);
+      assert(result.errors.length > 0);
+      assert(result.errors[0].includes('type'));
+    });
+
+    it('should validate estimatedDuration range (0.5-8)', () => {
+      const invalidDurations = [0.3, 0, -1, 10, 100];
+
+      invalidDurations.forEach((duration) => {
+        const output = JSON.stringify([
+          {
+            description: 'Task',
+            branch: 'feature/test',
+            scopePaths: ['src/'],
+            acceptance: 'Test',
+            type: 'implementation',
+            estimatedDuration: duration,
+            context: 'Test',
+          },
+        ]);
+
+        const result = parseAgentOutputWithErrors(output);
+        assert.strictEqual(result.tasks.length, 0, `Duration ${duration} should be invalid`);
+      });
+
+      // Valid durations
+      const validDurations = [0.5, 1.0, 4.0, 8.0];
+      validDurations.forEach((duration) => {
+        const output = JSON.stringify([
+          {
+            description: 'Task',
+            branch: 'feature/test',
+            scopePaths: ['src/'],
+            acceptance: 'Test',
+            type: 'implementation',
+            estimatedDuration: duration,
+            context: 'Test',
+          },
+        ]);
+
+        const result = parseAgentOutput(output);
+        assert.strictEqual(result.length, 1, `Duration ${duration} should be valid`);
+      });
     });
   });
 });

@@ -24,6 +24,8 @@ test('FileStore: CRUD operations', async (t) => {
       branch: branchName('feat/task-1'),
       scopePaths: ['src/'],
       acceptance: 'Task completed',
+      taskType: 'implementation',
+      context: 'Test task context',
     });
 
     const createResult = await store.createTask(task);
@@ -44,6 +46,8 @@ test('FileStore: CRUD operations', async (t) => {
       branch: branchName('feat/task-1'),
       scopePaths: ['src/'],
       acceptance: 'Task completed',
+      taskType: 'implementation',
+      context: 'Test task context',
     });
 
     const result = await store.createTask(task);
@@ -58,6 +62,8 @@ test('FileStore: CRUD operations', async (t) => {
       branch: branchName('feat/task-2'),
       scopePaths: ['lib/'],
       acceptance: 'Task 2 completed',
+      taskType: 'documentation',
+      context: 'Test task 2 context',
     });
 
     const createResult = await store.createTask(task2);
