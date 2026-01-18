@@ -1,0 +1,42 @@
+{
+  "name": "agent-orchestrator",
+  "version": "0.1.0",
+  "description": "Multi-agent collaborative development tool with Planner/Worker/Judge architecture",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "agent": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsgo --noEmit",
+    "dev": "node --watch src/cli/index.ts",
+    "lint": "oxlint src/",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "keywords": [
+    "agent",
+    "orchestrator",
+    "multi-agent",
+    "worktree",
+    "claude",
+    "codex"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "devDependencies": {
+    "@types/node": "25.0.9",
+    "@typescript/native-preview": "^7.0.0-dev.20260118.1",
+    "oxlint": "^0.17.0",
+    "prettier": "^3.4.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@openai/codex-sdk": "^0.87.0",
+    "zod": "^3.24.1"
+  }
+}
