@@ -293,7 +293,13 @@ For each task, provide:
 1. description: Clear description of what needs to be done
 2. branch: Git branch name (e.g., "feature/add-login")
 3. scopePaths: Array of file/directory paths that will be modified (e.g., ["src/auth/", "tests/auth/"])
-4. acceptance: Acceptance criteria for completion
+4. acceptance: COMPLETE, VERIFIABLE acceptance criteria (REQUIRED)
+   - Must be specific enough to verify task completion without ambiguity
+   - Include WHAT to verify (e.g., "User can login with email/password")
+   - Include HOW to verify (e.g., "Test with valid/invalid credentials, check JWT token generation")
+   - Specify edge cases and error scenarios to test
+   - Define performance/security requirements if applicable
+   - Example: "Users can login with email/password. Valid credentials generate JWT token with 24h expiry. Invalid credentials return 401 with error message. Rate limiting allows 5 attempts per minute."
 5. type: Task type (REQUIRED) - one of:
    - "implementation": New features or existing feature modifications
    - "documentation": Documentation creation or updates
@@ -302,10 +308,18 @@ For each task, provide:
 6. estimatedDuration: Estimated hours (REQUIRED) - number between 0.5 and 8
    - Aim for 1-4 hours per task (smaller, focused tasks preferred)
    - If a task exceeds 4 hours, consider breaking it down further
-7. context: Context information needed to execute the task (REQUIRED)
-   - Include relevant background, constraints, dependencies
-   - Reference related files, patterns, or design decisions
-   - Specify any special considerations or gotchas
+7. context: COMPLETE implementation context (REQUIRED)
+   This field must contain ALL information needed to execute the task WITHOUT referring to external sources.
+   Include the following:
+   - Technical approach: Specific libraries, patterns, or techniques to use
+   - Dependencies: What must exist or be completed first
+   - Constraints: Technical limitations, compatibility requirements, performance targets
+   - Existing patterns: Reference similar implementations in the codebase with file paths
+   - Data models: Expected input/output formats, schema definitions
+   - Error handling: How to handle failures and edge cases
+   - Security: Authentication, authorization, validation requirements
+   - Testing: What types of tests are needed and what they should cover
+   Example: "Implement JWT authentication using jsonwebtoken library. Use bcrypt for password hashing (cost factor 10). Store user credentials in existing users table (src/db/schema.sql). Follow existing auth pattern in src/auth/oauth.ts. Tokens expire in 24h, store in HTTP-only cookies. Handle login failures with exponential backoff. Validate email format before lookup. Add unit tests for token generation/validation, integration tests for login flow. Must pass OWASP security review."
 
 Output format (JSON array):
 [
@@ -335,19 +349,19 @@ Example:
     "description": "Implement user authentication with JWT",
     "branch": "feature/auth-jwt",
     "scopePaths": ["src/auth/", "tests/auth/"],
-    "acceptance": "Users can log in with email/password and receive JWT token. Token validation works correctly.",
+    "acceptance": "Users can login with email/password and receive JWT token with 24h expiry. VERIFY: (1) Valid credentials (test@example.com / password123) generate token and return 200. (2) Invalid credentials return 401 with error message 'Invalid credentials'. (3) Missing email/password returns 400 with validation errors. (4) Token validation succeeds for valid tokens, fails for expired/invalid tokens. (5) Rate limiting blocks after 5 failed attempts per minute per IP. (6) All tests pass including unit tests for token generation/validation and integration tests for full login flow.",
     "type": "implementation",
     "estimatedDuration": 3.0,
-    "context": "Using existing database schema. Follow OWASP security guidelines for password hashing (bcrypt). JWT expires in 24 hours."
+    "context": "Implement using jsonwebtoken v9.0+ library for JWT generation/validation. Use bcrypt with cost factor 10 for password hashing. Store user credentials in existing 'users' table defined in src/db/schema.sql (columns: id, email, password_hash, created_at). Follow the authentication pattern from src/auth/oauth.ts for middleware structure. JWT payload: {userId, email, exp}. Store token in HTTP-only cookie named 'auth_token'. Implement rate limiting using existing RateLimiter class in src/middleware/rate-limit.ts (5 attempts per minute per IP). Handle errors: validation errors (400), authentication failures (401), server errors (500). Add unit tests in tests/auth/jwt.test.ts for token generation, validation, expiry. Add integration tests in tests/auth/login.test.ts for full login flow with database. Security: validate email format with regex, sanitize inputs, use constant-time comparison for passwords. Must pass existing security linter rules in .eslintrc.json."
   },
   {
     "description": "Document authentication flow and API endpoints",
     "branch": "docs/auth-api",
     "scopePaths": ["docs/api/"],
-    "acceptance": "API documentation includes all auth endpoints with request/response examples",
+    "acceptance": "API documentation includes all authentication endpoints with complete request/response examples. VERIFY: (1) POST /auth/login documented with example request body {email, password}, success response {token, user}, error responses 400/401/429/500. (2) POST /auth/logout documented with cookie clearing behavior. (3) GET /auth/verify documented with token validation. (4) Authentication flow diagram shows login -> token generation -> cookie storage -> subsequent requests. (5) Rate limiting rules documented (5 attempts/minute). (6) Security considerations section includes password requirements, token expiry, HTTPS requirement. (7) All examples are copy-pasteable and work with actual API.",
     "type": "documentation",
     "estimatedDuration": 1.5,
-    "context": "Follow existing API documentation format in docs/api/. Include error responses and rate limiting details."
+    "context": "Follow existing API documentation format in docs/api/README.md (uses Markdown with code blocks). Reference the authentication implementation in src/auth/ for accurate technical details. Include complete curl examples for each endpoint. Document all HTTP status codes: 200 (success), 400 (validation error), 401 (authentication failed), 429 (rate limited), 500 (server error). Add Mermaid sequence diagram for authentication flow (see docs/diagrams/ for examples). Cross-reference related docs: docs/security/authentication.md for security details, docs/setup/environment.md for HTTPS setup. Include troubleshooting section for common issues: cookie not set (check HTTPS), rate limited (wait 1 minute), token expired (re-login). Validation: run through examples manually and verify they work with local dev server."
   }
 ]
 
