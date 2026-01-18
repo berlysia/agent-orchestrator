@@ -31,7 +31,15 @@
 - Story 4.2: エージェント実行インターフェース（ClaudeRunner、CodexRunner、Runner統合）
 - Story 4.3: CI/Lint実行（P1、後回し）
 
-**🚧 Epic 5: Orchestrator** - 未着手
+**✅ Epic 5: Orchestrator** - 完了（2026-01-18）
+
+- Story 5.1: タスクスケジューラ（Scheduler実装、並列度制御、タスク完了処理）
+- Story 5.2: Planner/Worker/Judge遷移
+  - Planner実行フロー（簡易実装、実際のエージェント統合は後回し）
+  - Worker実行フロー（worktree作成→Worker起動→コミット→push）
+  - Judge実行フロー（簡易判定、CI統合は後回し）
+  - Orchestrator統合（Planner→Worker→Judgeの1サイクル実行）
+
 **🚧 Epic 6: CLI基本コマンド** - 未着手
 **🚧 Epic 7: 統合テストとドキュメント** - 未着手
 

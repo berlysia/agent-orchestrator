@@ -39,7 +39,7 @@ pnpm format
 
 ## Implementation Status
 
-### ✅ Completed
+### ✅ Completed (2026-01-18)
 
 - **Epic 1: Project Foundation**
   - TypeScript development environment setup
@@ -48,12 +48,19 @@ pnpm format
   - JSON file-based task storage
   - CRUD operations with CAS (Compare-And-Swap) concurrency control
   - mkdir-based locking mechanism
+- **Epic 3: VCS Adapter**
+  - Git basic operations wrapper (simple-git)
+  - Worktree management (child_process)
+- **Epic 4: Runner**
+  - Process execution infrastructure (ProcessRunner, LogWriter)
+  - Agent execution interfaces (ClaudeRunner, CodexRunner, Runner integration)
+- **Epic 5: Orchestrator**
+  - Task scheduler with concurrency control
+  - Planner/Worker/Judge state machine
+  - Full orchestration cycle (Planner→Worker→Judge)
 
 ### 🚧 In Progress
 
-- Epic 3: VCS Adapter (Git operations)
-- Epic 4: Runner (Agent execution engine)
-- Epic 5: Orchestrator (Planner/Worker/Judge state machine)
 - Epic 6: CLI commands
 - Epic 7: Integration tests and documentation
 
