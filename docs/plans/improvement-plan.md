@@ -22,7 +22,7 @@
 | Phase | 優先度 | ステータス | 推定工数 | 完了日 | コミット |
 |-------|--------|-----------|----------|--------|----------|
 | Phase 5.9: モデルの使い分け | 低 | ✅ 完了 | 2-3時間 | 2026-01-19 | 95114c4 |
-| Phase 5.1: プランナーの品質向上 | 高 | 📋 計画中 | 4-6時間 | - | - |
+| Phase 5.1: プランナーの品質向上 | 高 | ✅ 完了 | 4-6時間 | 2026-01-19 | ab6fcea, 2a4f003 |
 | Phase 5.2: ジャッジによるタスク品質評価 | 高 | 📋 計画中 | 6-8時間 | - | - |
 | Phase 5.3: 並列実行サポート | 高 | 📋 計画中 | 8-12時間 | - | - |
 | Phase 5.4: 直列タスクの変更統合 | 中 | 📋 計画中 | 6-8時間 | - | - |
@@ -32,6 +32,8 @@
 | Phase 5.8: プランナーの継続性 | 低 | 📋 計画中 | 4-6時間 | - | - |
 
 **推奨実装順序**: Phase 5.9 → Phase 5.1 → Phase 5.2 → Phase 5.3 → Phase 5.4 → Phase 5.5 → Phase 5.6 → Phase 5.7 → Phase 5.8
+
+**Phase 5.1完了**: プランナーが生成するタスクの品質を大幅に向上
 
 **成果**:
 - ✅ Worker実行ログが`runs/`ディレクトリに自動保存される
@@ -44,8 +46,15 @@
   - 各役割ごとに `type` (claude/codex) と `model` をセットで指定可能
   - Zod 4の `toJSONSchema()` で JSON スキーマを自動生成
   - `??` フォールバック演算子を削除し、Config のデフォルト値を使用
+- ✅ **Phase 5.1完了**: プランナーが生成するタスクの品質を大幅に向上
+  - TaskBreakdown型にZodスキーマ（v2）を導入し、type/estimatedDuration/contextフィールドを必須化
+  - Task型にtaskTypeとcontextフィールドを追加して永続化
+  - buildPlanningPromptを大幅改善（タスクタイプ、粒度ガイドライン、完全なacceptance/context要求）
+  - parseAgentOutputをZodバリデーションで厳格化し、不正なタスクを明確に拒否
+  - ダミータスクフォールバックを削除し、エージェント失敗時はエラー終了
+  - acceptanceとcontextに完全な実装情報を要求（外部参照なしで実行可能に）
 
-**テスト**: 17/17テストが成功（パーサーのエッジケース対応含む）
+**テスト**: 23/23テストが成功（Phase 5.1のZodバリデーション、estimatedDuration範囲検証、TaskType enum検証を含む）
 
 **🔴 発見された問題**:
 - Phase 2実装後のテスト実行で`runClaudeAgent`のバグを発見
@@ -791,74 +800,92 @@ describe('parseAgentOutput', () => {
 Phase 1-3の実装後、実際の運用を通じて新たな問題点と改善の必要性が明らかになった。
 以下の観点を追加で検討・実装する必要がある。
 
-### 5.1 プランナーの品質向上 【優先度: 高】
+### 5.1 プランナーの品質向上 【優先度: 高】【ステータス: ✅ 完了】
+
+**完了日**: 2026-01-19
 
 #### 問題点
 - タスクの内容が不明確（例: 文書作成指示に対して実装タスクが混入）
 - タスクの粒度がバラバラ（一部は大きすぎ、一部は小さすぎ）
 - 元の指示の意図が正しく反映されない
 - 親タスクから子タスクへのコンテキスト伝達が不十分
+- acceptanceとcontextが不完全で、タスク実行に必要な情報が不足
 
-#### 改善内容
+#### 改善内容（実装済み）
 
-**5.1.1 プロンプトの改善**
+**5.1.1 TaskBreakdown型のZodスキーマ定義（必須化）**
 
-`buildPlanningPrompt`の拡張:
-- タスクタイプの明示（実装 vs 文書化 vs 調査）
-- 粒度ガイドライン（1タスク = 1-2時間の作業量目安）
-- コンテキスト継承の明示
+スキーマバージョン2として定義:
+- `type`: タスクタイプ（implementation/documentation/investigation/integration）
+- `estimatedDuration`: 見積時間（0.5-8時間、1-4時間推奨）
+- `context`: タスク実行に必要な完全なコンテキスト情報
 
 ```typescript
-export const buildPlanningPrompt = (userInstruction: string): string => {
-  return `You are a task planner for a multi-agent development system.
-
-USER INSTRUCTION:
-${userInstruction}
-
-Your task is to break down this instruction into concrete, implementable tasks.
-
-For each task, provide:
-1. description: Clear description of what needs to be done
-2. type: Task type ("implementation", "documentation", "investigation", "integration")
-3. branch: Git branch name (e.g., "feature/add-login")
-4. scopePaths: Array of file/directory paths that will be modified
-5. acceptance: Acceptance criteria for completion
-6. estimatedDuration: Estimated hours (1-4 hours per task ideal)
-7. context: Important context from the parent instruction
-
-Output format (JSON array):
-[
-  {
-    "description": "Task description",
-    "type": "implementation",
-    "branch": "feature/branch-name",
-    "scopePaths": ["path1/", "path2/"],
-    "acceptance": "Acceptance criteria",
-    "estimatedDuration": 2,
-    "context": "Important background information"
-  }
-]
-
-Rules:
-- Match task type to user instruction intent (documentation -> documentation tasks)
-- Create 1-5 tasks (prefer smaller, focused tasks)
-- Each task should be 1-4 hours of work
-- Each task should be independently implementable
-- Include context that workers need to understand the task
-
-Output only the JSON array, no additional text.`;
-};
+export const TaskBreakdownSchema = z.object({
+  description: z.string().min(1),
+  branch: z.string().min(1),
+  scopePaths: z.array(z.string()).min(1),
+  acceptance: z.string().min(1),
+  type: z.enum(['implementation', 'documentation', 'investigation', 'integration']),
+  estimatedDuration: z.number().min(0.5).max(8),
+  context: z.string().min(1),
+});
 ```
 
-**5.1.2 タスク品質のバリデーション**
+**5.1.2 Task型の拡張**
 
-`parseAgentOutput`の拡張:
-- タスクタイプの検証
-- 粒度チェック（estimatedDuration）
-- 元の指示との整合性チェック
+永続化時に新フィールドを保持:
+- `taskType`: タスクタイプ
+- `context`: コンテキスト情報
+
+**5.1.3 プロンプトの大幅改善**
+
+`buildPlanningPrompt`を拡張:
+- タスクタイプの詳細説明
+- 粒度ガイドライン（1-4時間目安、最大8時間）
+- **COMPLETE acceptance基準**: WHAT（何を）とHOW（検証方法）を明示、エッジケース・エラーシナリオを含む
+- **COMPLETE context**: 外部参照なしで完全実行可能な全情報（技術的アプローチ、依存関係、制約、既存パターン、データモデル、エラーハンドリング、セキュリティ、テスト）
+- 具体的な例（認証実装、ドキュメント作成）
+
+**5.1.4 Zodバリデーションによる厳格化**
+
+`parseAgentOutput`を改善:
+- Zodスキーマによる厳格なバリデーション
+- 詳細なエラーメッセージ（`parseAgentOutputWithErrors`）
+- 新フィールド欠落時は明確に拒否
+
+**5.1.5 エラーハンドリングの改善**
+
+- ダミータスクフォールバックを削除
+- エージェント失敗時は明確にエラー終了
+- バリデーションエラーをログに詳細記録
+
+#### 実装ファイル
+- `src/core/orchestrator/planner-operations.ts`: TaskBreakdownSchema、プロンプト、パーサー
+- `src/types/task.ts`: Task型拡張、createInitialTask更新
+- `tests/unit/core/orchestrator/planner-operations.test.ts`: テスト拡充
+- `tests/unit/file-store.test.ts`: 新フィールド対応
 
 #### 推定工数
-4-6時間
+4-6時間（実績: 約5時間）
+
+#### 将来的な拡張性
+
+現在は`context`と`acceptance`に全情報を含めることでタスクが自己完結的に実行可能。
+
+**Phase 5.4（直列タスクサポート）実装後**は、以下のフローもサポート可能:
+1. **仕様書作成タスク**: 詳細な要件/設計文書を作成
+2. **実装タスク**: その文書を`context`で参照して実装
+
+例:
+```json
+{
+  "description": "Implement authentication based on spec",
+  "type": "implementation",
+  "context": "Refer to auth-spec.md created in previous task for detailed requirements. Implement JWT authentication with bcrypt password hashing as specified.",
+  "dependencies": ["Create authentication specification document"]
+}
+```
 
 ---
 
