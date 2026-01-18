@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsgo --noEmit",
+    "test": "node --test tests/unit/**/*.test.ts",
     "dev": "node --watch src/cli/index.ts",
     "lint": "oxlint src/",
     "format": "prettier --write .",

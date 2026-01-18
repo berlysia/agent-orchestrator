@@ -14,6 +14,21 @@
 2. **ローカル環境に十分**: 現在の要件（並列度3以下、ローカル実行）に適合
 3. **将来の拡張性**: リモート共有が必要になった際にGit commit方式へ移行可能
 
+## CASが必要な理由
+
+Worktreeにより各Workerは独立した作業ディレクトリを持ちますが、**タスク状態管理（agent-coord repo）は共有**されます。
+
+**競合シナリオ**:
+
+```
+時刻 T1: Worker A が READY タスクを検索 → task-1 発見
+時刻 T2: Worker B が READY タスクを検索 → task-1 発見
+時刻 T3: Worker A が task-1 を RUNNING に変更（version 0→1）
+時刻 T4: Worker B が task-1 を RUNNING に変更（version 0→1）← 競合！
+```
+
+CASにより、Worker Bの更新はversion不一致でエラーとなり、競合を検出できます。
+
 ## 実装方式
 
 ### mkdirベースロック

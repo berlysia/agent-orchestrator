@@ -24,8 +24,11 @@ pnpm install
 ## Development
 
 ```bash
-# Build
+# Type check
 pnpm build
+
+# Run tests
+node --test tests/unit/**/*.test.ts
 
 # Lint
 pnpm lint
@@ -33,6 +36,26 @@ pnpm lint
 # Format
 pnpm format
 ```
+
+## Implementation Status
+
+### ✅ Completed
+
+- **Epic 1: Project Foundation**
+  - TypeScript development environment setup
+  - Type definitions (Task, Run, Check, Config)
+- **Epic 2: Task Store**
+  - JSON file-based task storage
+  - CRUD operations with CAS (Compare-And-Swap) concurrency control
+  - mkdir-based locking mechanism
+
+### 🚧 In Progress
+
+- Epic 3: VCS Adapter (Git operations)
+- Epic 4: Runner (Agent execution engine)
+- Epic 5: Orchestrator (Planner/Worker/Judge state machine)
+- Epic 6: CLI commands
+- Epic 7: Integration tests and documentation
 
 ## Architecture
 

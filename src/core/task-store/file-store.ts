@@ -48,6 +48,11 @@ const getCheckPath = (basePath: string, checkId: string): string =>
 const acquireLock = async (basePath: string, taskId: string): Promise<void> => {
   const lockPath = getLockPath(basePath, taskId);
   try {
+    // 親ディレクトリ（.locks/）を作成
+    const locksDir = path.dirname(lockPath);
+    await fs.mkdir(locksDir, { recursive: true });
+
+    // ロックディレクトリを作成（atomicにするためrecursive: false）
     await fs.mkdir(lockPath, { recursive: false });
   } catch (err) {
     if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
