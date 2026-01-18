@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ConfigSchema, type Config } from '../../types/config.ts';
+import { toDisplayPath } from './display-path.ts';
 
 /**
  * 設定ファイルを読み込む
@@ -31,7 +32,7 @@ export async function loadConfig(configPath?: string): Promise<Config> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
-        `Configuration file not found: ${resolvedConfigPath}\nRun 'agent init' to create it.`,
+        `Configuration file not found: ${toDisplayPath(resolvedConfigPath)}\nRun 'agent init' to create it.`,
       );
     }
     throw error;

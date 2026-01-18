@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { createDefaultConfig, ConfigSchema } from '../../types/config.ts';
+import { toDisplayPath } from '../utils/display-path.ts';
 
 /**
  * `agent init` コマンドの実装
@@ -52,7 +53,9 @@ async function initializeProject(params: {
   if (!force) {
     try {
       await fs.access(configPath);
-      console.error(`Configuration file already exists: ${configPath}\nUse --force to overwrite`);
+      console.error(
+        `Configuration file already exists: ${toDisplayPath(configPath)}\nUse --force to overwrite`,
+      );
       process.exit(1);
     } catch {
       // ファイルが存在しない場合は続行
@@ -74,7 +77,7 @@ async function initializeProject(params: {
   // config.json 書き込み
   await fs.writeFile(configPath, JSON.stringify(validatedConfig, null, 2) + '\n', 'utf-8');
 
-  console.log(`✓ Configuration file created: ${configPath}`);
+  console.log(`✓ Configuration file created: ${toDisplayPath(configPath)}`);
 
   // agent-coord リポジトリのディレクトリ構造作成
   await createCoordRepoStructure(agentCoordPath);
@@ -99,7 +102,7 @@ async function createCoordRepoStructure(coordPath: string): Promise<void> {
     await fs.mkdir(dir, { recursive: true });
   }
 
-  console.log(`✓ Coordination repository structure created: ${coordPath}`);
+  console.log(`✓ Coordination repository structure created: ${toDisplayPath(coordPath)}`);
 
   // .gitkeep ファイルを各ディレクトリに作成（Git管理用）
   for (const dir of directories) {

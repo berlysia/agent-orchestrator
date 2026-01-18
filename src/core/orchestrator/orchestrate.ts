@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
@@ -18,6 +19,7 @@ export interface OrchestrateDeps {
   readonly gitEffects: GitEffects;
   readonly runnerEffects: RunnerEffects;
   readonly appRepoPath: string;
+  readonly agentCoordPath?: string;
   readonly agentType: AgentType;
   readonly maxWorkers?: number;
 }
@@ -56,6 +58,20 @@ export interface OrchestratorError {
  * @returns Orchestrator操作オブジェクト
  */
 export const createOrchestrator = (deps: OrchestrateDeps) => {
+  const toRelativePath = (targetPath: string): string => {
+    const absolutePath = path.resolve(targetPath);
+    const relativePath = path.relative(process.cwd(), absolutePath);
+    return relativePath === '' ? '.' : relativePath;
+  };
+
+  const getRunDisplayPath = (runId: string, ext: 'log' | 'json'): string => {
+    if (!deps.agentCoordPath) {
+      return `runs/${runId}.${ext}`;
+    }
+
+    return toRelativePath(path.join(deps.agentCoordPath, 'runs', `${runId}.${ext}`));
+  };
+
   // 各コンポーネントの操作を生成
   const schedulerOps = createSchedulerOperations({ taskStore: deps.taskStore });
   const plannerOps = createPlannerOperations({
@@ -140,8 +156,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           const result = workerResult.val;
           // ログファイルの場所を表示
-          console.log(`  📝 Execution log: runs/${result.runId}.log`);
-          console.log(`  📊 Metadata: runs/${result.runId}.json`);
+          console.log(`  📝 Execution log: ${getRunDisplayPath(result.runId, 'log')}`);
+          console.log(`  📊 Metadata: ${getRunDisplayPath(result.runId, 'json')}`);
 
           if (!result.success) {
             console.log(`  ❌ Task execution failed: ${result.error ?? 'Unknown error'}`);
