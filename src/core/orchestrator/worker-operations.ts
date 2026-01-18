@@ -16,6 +16,7 @@ import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
+import { AGENT_CONFIG } from '../config/models.ts';
 
 /**
  * Worker依存関係
@@ -183,13 +184,14 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     await deps.runnerEffects.appendLog(theRunId, `Worktree: ${worktreePath}\n\n`);
 
     // 5. エージェントを実行
+    // WHY: 役割ごとに最適なモデルを使用（Worker = Sonnet）
     const agentPrompt = `Execute task: ${task.acceptance}`;
     const agentResult =
       agentType === 'claude'
         ? await deps.runnerEffects.runClaudeAgent(
             agentPrompt,
             worktreePath as string,
-            'claude-sonnet-4-5-20250929',
+            AGENT_CONFIG.worker.model!,
           )
         : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string);
 
