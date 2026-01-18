@@ -179,10 +179,7 @@ export const createRunTask = (deps: RunTaskDeps) => {
     // 実行ログ記録
     await deps.effects.appendLog(rawRunId, `Thread ID: ${threadId}\n\n`);
     await deps.effects.appendLog(rawRunId, `\n=== Execution Result ===\n`);
-    await deps.effects.appendLog(
-      rawRunId,
-      `Final Response: ${agentResult.val.finalResponse}\n`,
-    );
+    await deps.effects.appendLog(rawRunId, `Final Response: ${agentResult.val.finalResponse}\n`);
     await deps.effects.appendLog(
       rawRunId,
       `Items: ${JSON.stringify(agentResult.val.items, null, 2)}\n`,

@@ -191,9 +191,7 @@ export const createSpawnGitEffects = (): Pick<
     }
 
     if (result.val.exitCode !== 0) {
-      return createErr(
-        gitCommandFailed('worktree remove', result.val.stderr, result.val.exitCode),
-      );
+      return createErr(gitCommandFailed('worktree remove', result.val.stderr, result.val.exitCode));
     }
 
     return createOk(undefined);
@@ -222,9 +220,7 @@ export const createSpawnGitEffects = (): Pick<
     }
 
     if (result.val.exitCode !== 0) {
-      return createErr(
-        gitCommandFailed('worktree prune', result.val.stderr, result.val.exitCode),
-      );
+      return createErr(gitCommandFailed('worktree prune', result.val.stderr, result.val.exitCode));
     }
 
     return createOk(undefined);

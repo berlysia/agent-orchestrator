@@ -9,7 +9,11 @@ export { createWorkerOperations, generateCommitMessage } from './worker-operatio
 export type { WorkerDeps, WorkerResult, AgentType } from './worker-operations.ts';
 export * from './scheduler-state.ts';
 export { createSchedulerOperations } from './scheduler-operations.ts';
-export type { SchedulerOperations, SchedulerDeps, ClaimTaskResult } from './scheduler-operations.ts';
+export type {
+  SchedulerOperations,
+  SchedulerDeps,
+  ClaimTaskResult,
+} from './scheduler-operations.ts';
 export { createPlannerOperations } from './planner-operations.ts';
 export type {
   PlannerOperations,

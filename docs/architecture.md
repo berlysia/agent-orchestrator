@@ -152,6 +152,7 @@ const taskId: TaskId = workerId; // ❌
 - child_process によるworktree管理
 
 実装ファイル:
+
 - `src/adapters/vcs/git-effects.ts` - Git Effects インターフェース定義
 - `src/adapters/vcs/simple-git-effects.ts` - simple-git実装
 - `src/adapters/vcs/spawn-git-effects.ts` - worktree管理（child_process）
@@ -166,6 +167,7 @@ const taskId: TaskId = workerId; // ❌
 - 関数型アーキテクチャによるRunner実装
 
 実装ファイル:
+
 - `src/core/runner/runner-effects.ts` - Runner Effects インターフェース定義
 - `src/core/runner/runner-effects-impl.ts` - エージェント実行実装
 - `src/core/runner/run-task.ts` - タスク実行フロー
@@ -181,6 +183,7 @@ const taskId: TaskId = workerId; // ❌
 - Result型によるエラーハンドリング
 
 実装ファイル:
+
 - `src/core/orchestrator/orchestrate.ts` - オーケストレーション全体フロー
 - `src/core/orchestrator/scheduler-state.ts` - スケジューラー状態管理
 - `src/core/orchestrator/scheduler-operations.ts` - スケジューラー操作
@@ -198,6 +201,7 @@ const taskId: TaskId = workerId; // ❌
 - `agent stop` - タスク中断
 
 実装ファイル:
+
 - `src/cli/index.ts` - CLIエントリーポイント
 - `src/cli/commands/init.ts` - initコマンド
 - `src/cli/commands/run.ts` - runコマンド
@@ -213,5 +217,6 @@ const taskId: TaskId = workerId; // ❌
 - サンプルプロジェクト (tests/fixtures/)
 
 テストファイル:
+
 - `tests/unit/file-store.test.ts` - TaskStore CRUD/CAS操作テスト
 - `tests/e2e/cli-basic.test.ts` - CLI基本コマンドE2Eテスト

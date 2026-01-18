@@ -28,9 +28,4 @@ export const createGitEffects = (): GitEffects => {
 };
 
 // 型やインターフェースの再エクスポート
-export type {
-  GitEffects,
-  BranchInfo,
-  GitStatus,
-  WorktreeInfo,
-} from './git-effects.ts';
+export type { GitEffects, BranchInfo, GitStatus, WorktreeInfo } from './git-effects.ts';

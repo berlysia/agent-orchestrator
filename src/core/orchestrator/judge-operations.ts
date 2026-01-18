@@ -43,9 +43,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
    * @param tid 判定するタスクのID
    * @returns 判定結果（Result型）
    */
-  const judgeTask = async (
-    tid: TaskId,
-  ): Promise<Result<JudgementResult, TaskStoreError>> => {
+  const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStoreError>> => {
     const taskResult = await deps.taskStore.readTask(tid);
 
     // Result型のエラーハンドリング

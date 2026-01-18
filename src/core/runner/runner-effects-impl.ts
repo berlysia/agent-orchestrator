@@ -39,9 +39,11 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   };
 
   // エラー変換ヘルパー
-  const toRunnerError = (operation: string) => (e: unknown): RunnerError => {
-    return agentExecutionError(operation, e);
-  };
+  const toRunnerError =
+    (operation: string) =>
+    (e: unknown): RunnerError => {
+      return agentExecutionError(operation, e);
+    };
 
   // ===== ログ記録実装 =====
 
@@ -52,7 +54,10 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
     return mapErrForResult(result, toRunnerError('ensureRunsDir'));
   };
 
-  const appendLog = async (theRunId: string, content: string): Promise<Result<void, RunnerError>> => {
+  const appendLog = async (
+    theRunId: string,
+    content: string,
+  ): Promise<Result<void, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       const logPath = getLogFilePath(theRunId);
       await fs.appendFile(logPath, content, 'utf-8');

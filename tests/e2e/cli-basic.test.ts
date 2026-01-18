@@ -18,7 +18,10 @@ const CLI_PATH = path.resolve(PROJECT_ROOT, 'src', 'cli', 'index.ts');
  *
  * Node.js 24+のTypeScript直接実行機能を使用
  */
-async function runCLI(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+async function runCLI(
+  args: string[],
+  cwd: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve) => {
     const proc = spawn('node', [CLI_PATH, ...args], {
       cwd,
@@ -58,14 +61,8 @@ test('E2E: CLI basic commands', async (t) => {
 
   await t.test('agent init - should create config file', async () => {
     const result = await runCLI(
-      [
-        'init',
-        '--app-repo',
-        testProjectPath,
-        '--agent-coord',
-        agentCoordPath,
-      ],
-      TEST_BASE_PATH
+      ['init', '--app-repo', testProjectPath, '--agent-coord', agentCoordPath],
+      TEST_BASE_PATH,
     );
 
     assert.strictEqual(result.exitCode, 0, 'init command should succeed');
@@ -74,7 +71,7 @@ test('E2E: CLI basic commands', async (t) => {
     const configPath = path.join(testProjectPath, '.agent', 'config.json');
     const configExists = await fs.stat(configPath).then(
       () => true,
-      () => false
+      () => false,
     );
     assert.strictEqual(configExists, true, 'config.json should be created');
 
@@ -82,21 +79,21 @@ test('E2E: CLI basic commands', async (t) => {
     const tasksDir = path.join(agentCoordPath, 'tasks');
     const tasksDirExists = await fs.stat(tasksDir).then(
       () => true,
-      () => false
+      () => false,
     );
     assert.strictEqual(tasksDirExists, true, 'tasks/ directory should be created');
 
     const runsDir = path.join(agentCoordPath, 'runs');
     const runsDirExists = await fs.stat(runsDir).then(
       () => true,
-      () => false
+      () => false,
     );
     assert.strictEqual(runsDirExists, true, 'runs/ directory should be created');
 
     const checksDir = path.join(agentCoordPath, 'checks');
     const checksDirExists = await fs.stat(checksDir).then(
       () => true,
-      () => false
+      () => false,
     );
     assert.strictEqual(checksDirExists, true, 'checks/ directory should be created');
   });

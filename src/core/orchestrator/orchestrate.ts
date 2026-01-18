@@ -3,11 +3,7 @@ import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
-import {
-  createWorkerOperations,
-  type WorkerDeps,
-  type AgentType,
-} from './worker-operations.ts';
+import { createWorkerOperations, type WorkerDeps, type AgentType } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
 import { initialSchedulerState, removeRunningWorker } from './scheduler-state.ts';
 import { taskId, workerId, repoPath } from '../../types/branded.ts';
@@ -115,11 +111,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         // 2. Scheduler: タスク割り当て
         const wid = `worker-${rawTaskId}`;
-        const claimResult = await schedulerOps.claimTask(
-          schedulerState,
-          rawTaskId,
-          wid,
-        );
+        const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
 
         if (isErr(claimResult)) {
           console.log(`⚠️  Failed to claim task: ${claimResult.err.message}`);
@@ -135,10 +127,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         try {
           // 3. Worker: タスク実行
           console.log(`  🚀 Executing task...`);
-          const workerResult = await workerOps.executeTaskWithWorktree(
-            claimedTask,
-            deps.agentType,
-          );
+          const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, deps.agentType);
 
           if (isErr(workerResult)) {
             console.log(`  ❌ Task execution failed: ${workerResult.err.message}`);

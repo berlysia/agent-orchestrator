@@ -17,10 +17,12 @@ import type { GitEffects, BranchInfo, GitStatus } from './git-effects.ts';
 /**
  * エラーをGitErrorに変換するヘルパー
  */
-const toGitError = (operation: string) => (err: unknown): GitError => {
-  const stderr = err instanceof Error ? err.message : String(err);
-  return gitCommandFailed(operation, stderr, -1);
-};
+const toGitError =
+  (operation: string) =>
+  (err: unknown): GitError => {
+    const stderr = err instanceof Error ? err.message : String(err);
+    return gitCommandFailed(operation, stderr, -1);
+  };
 
 /**
  * simple-git を使用した GitEffects 実装を作成
