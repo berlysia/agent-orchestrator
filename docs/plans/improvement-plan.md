@@ -1,8 +1,8 @@
 # Agent Orchestrator - 改善計画
 
 **作成日**: 2026-01-19
-**ステータス**: Phase 1-3 完了、Phase 2.4 修正中、Phase 4 は別Epic
-**更新日**: 2026-01-19 (Phase 2実装バグ発見)
+**ステータス**: Phase 1-3 完了、Phase 2.4 修正中、Phase 4 は別Epic、**Phase 5以降（新規観点）追加**
+**更新日**: 2026-01-19 (Phase 5以降の新規観点を追加)
 **関連**: [current-issues.md](./current-issues.md)
 
 ## 実装ステータス
@@ -16,6 +16,22 @@
 | Phase 4: Judge判定の強化 | 低 | 🔜 別Epic | - | - |
 
 **実装順序**: Phase 1 → Phase 3 → Phase 2 → **Phase 2.4（緊急バグ修正）**
+
+### Phase 5以降（新規観点）
+
+| Phase | 優先度 | ステータス | 推定工数 |
+|-------|--------|-----------|----------|
+| Phase 5.1: プランナーの品質向上 | 高 | 📋 計画中 | 4-6時間 |
+| Phase 5.2: ジャッジによるタスク品質評価 | 高 | 📋 計画中 | 6-8時間 |
+| Phase 5.3: 並列実行サポート | 高 | 📋 計画中 | 8-12時間 |
+| Phase 5.4: 直列タスクの変更統合 | 中 | 📋 計画中 | 6-8時間 |
+| Phase 5.5: 統合処理とコンフリクト解決 | 中 | 📋 計画中 | 8-10時間 |
+| Phase 5.6: ジャッジ判定の高度化 | 中 | 📋 計画中 | 4-6時間 |
+| Phase 5.7: 全体完了判定 | 中 | 📋 計画中 | 4-6時間 |
+| Phase 5.8: プランナーの継続性 | 低 | 📋 計画中 | 4-6時間 |
+| Phase 5.9: モデルの使い分け | 低 | 📋 計画中 | 2-3時間 |
+
+**推奨実装順序**: Phase 5.9 → Phase 5.1 → Phase 5.2 → Phase 5.3 → Phase 5.4 → Phase 5.5 → Phase 5.6 → Phase 5.7 → Phase 5.8
 
 **成果**:
 - ✅ Worker実行ログが`runs/`ディレクトリに自動保存される
@@ -758,6 +774,665 @@ describe('parseAgentOutput', () => {
 1. Phase 2.4完了後、システム全体の動作確認
 2. Phase 4（Judge判定の強化）を別Epicとして計画
 3. 本番運用に向けた準備
+
+---
+
+---
+
+## Phase 5以降: 新規観点の追加改善 【優先度: 検討中】
+
+### 背景
+
+Phase 1-3の実装後、実際の運用を通じて新たな問題点と改善の必要性が明らかになった。
+以下の観点を追加で検討・実装する必要がある。
+
+### 5.1 プランナーの品質向上 【優先度: 高】
+
+#### 問題点
+- タスクの内容が不明確（例: 文書作成指示に対して実装タスクが混入）
+- タスクの粒度がバラバラ（一部は大きすぎ、一部は小さすぎ）
+- 元の指示の意図が正しく反映されない
+- 親タスクから子タスクへのコンテキスト伝達が不十分
+
+#### 改善内容
+
+**5.1.1 プロンプトの改善**
+
+`buildPlanningPrompt`の拡張:
+- タスクタイプの明示（実装 vs 文書化 vs 調査）
+- 粒度ガイドライン（1タスク = 1-2時間の作業量目安）
+- コンテキスト継承の明示
+
+```typescript
+export const buildPlanningPrompt = (userInstruction: string): string => {
+  return `You are a task planner for a multi-agent development system.
+
+USER INSTRUCTION:
+${userInstruction}
+
+Your task is to break down this instruction into concrete, implementable tasks.
+
+For each task, provide:
+1. description: Clear description of what needs to be done
+2. type: Task type ("implementation", "documentation", "investigation", "integration")
+3. branch: Git branch name (e.g., "feature/add-login")
+4. scopePaths: Array of file/directory paths that will be modified
+5. acceptance: Acceptance criteria for completion
+6. estimatedDuration: Estimated hours (1-4 hours per task ideal)
+7. context: Important context from the parent instruction
+
+Output format (JSON array):
+[
+  {
+    "description": "Task description",
+    "type": "implementation",
+    "branch": "feature/branch-name",
+    "scopePaths": ["path1/", "path2/"],
+    "acceptance": "Acceptance criteria",
+    "estimatedDuration": 2,
+    "context": "Important background information"
+  }
+]
+
+Rules:
+- Match task type to user instruction intent (documentation -> documentation tasks)
+- Create 1-5 tasks (prefer smaller, focused tasks)
+- Each task should be 1-4 hours of work
+- Each task should be independently implementable
+- Include context that workers need to understand the task
+
+Output only the JSON array, no additional text.`;
+};
+```
+
+**5.1.2 タスク品質のバリデーション**
+
+`parseAgentOutput`の拡張:
+- タスクタイプの検証
+- 粒度チェック（estimatedDuration）
+- 元の指示との整合性チェック
+
+#### 推定工数
+4-6時間
+
+---
+
+### 5.2 ジャッジによるタスク品質評価 【優先度: 高】
+
+#### 問題点
+- プランナーが生成したタスクの品質を誰も評価していない
+- 不明確なタスクがそのまま実行されてしまう
+
+#### 改善内容
+
+**5.2.1 タスク生成直後の品質評価**
+
+新しい関数 `judgeTaskQuality` の追加:
+```typescript
+interface TaskQualityJudgement {
+  isAcceptable: boolean;
+  issues: string[];
+  suggestions: string[];
+}
+
+const judgeTaskQuality = async (
+  taskBreakdowns: TaskBreakdown[],
+  originalInstruction: string
+): Promise<TaskQualityJudgement> => {
+  // エージェントに品質評価を依頼
+  const judgementPrompt = buildTaskQualityPrompt(taskBreakdowns, originalInstruction);
+  const result = await runnerEffects.runClaudeAgent(
+    judgementPrompt,
+    appRepoPath,
+    'claude-haiku-4-5-20250929', // 軽量モデル使用
+  );
+
+  return parseQualityJudgement(result.val.finalResponse);
+};
+```
+
+**5.2.2 品質不足時の再生成フロー**
+
+`planTasks`を拡張:
+```typescript
+const planTasks = async (userInstruction: string) => {
+  let attempts = 0;
+  const maxAttempts = 3;
+
+  while (attempts < maxAttempts) {
+    const taskBreakdowns = await generateTaskBreakdowns(userInstruction);
+    const quality = await judgeTaskQuality(taskBreakdowns, userInstruction);
+
+    if (quality.isAcceptable) {
+      return saveAndReturnTasks(taskBreakdowns);
+    }
+
+    // フィードバックを含めて再生成
+    userInstruction = appendFeedback(userInstruction, quality.issues, quality.suggestions);
+    attempts++;
+  }
+
+  // 最大試行回数を超えた場合はエラー
+  throw new Error('Failed to generate acceptable tasks after 3 attempts');
+};
+```
+
+#### 推定工数
+6-8時間
+
+---
+
+### 5.3 並列実行サポート 【優先度: 高】
+
+#### 問題点
+- `maxWorkers`パラメータが存在するが、実際には直列実行されている（orchestrate.ts:118のforループ）
+- タスク間の依存関係が考慮されていない
+
+#### 改善内容
+
+**5.3.1 タスク依存関係の定義**
+
+`TaskBreakdown`型の拡張:
+```typescript
+export interface TaskBreakdown {
+  description: string;
+  type: 'implementation' | 'documentation' | 'investigation' | 'integration';
+  branch: string;
+  scopePaths: string[];
+  acceptance: string;
+  dependencies: string[]; // 依存するタスクのdescriptionまたはID
+  canRunInParallel: boolean; // 並列実行可能かどうか
+}
+```
+
+**5.3.2 プランナープロンプトの拡張**
+
+依存関係情報を含めるように`buildPlanningPrompt`を更新:
+```typescript
+For each task, provide:
+...
+6. dependencies: Array of task descriptions this task depends on (empty array if independent)
+7. canRunInParallel: true if this task can run in parallel with others
+```
+
+**5.3.3 並列実行ロジックの実装**
+
+`orchestrate.ts`の`executeInstruction`を書き換え:
+```typescript
+// 依存関係グラフを構築
+const taskGraph = buildDependencyGraph(taskBreakdowns);
+
+// トポロジカルソートで実行順序を決定
+const executionLevels = topologicalSort(taskGraph);
+
+// 各レベルを並列実行
+for (const level of executionLevels) {
+  const results = await Promise.allSettled(
+    level.map(taskId => executeTaskInWorker(taskId))
+  );
+
+  // 結果を処理
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      failedTaskIds.push(result.reason.taskId);
+    } else {
+      completedTaskIds.push(result.value.taskId);
+    }
+  }
+}
+```
+
+#### 推定工数
+8-12時間
+
+---
+
+### 5.4 直列タスクの変更統合 【優先度: 中】
+
+#### 問題点
+- 直列タスクの場合、前のタスクの変更結果を次のタスクが受け取れない
+- 各worktreeに結果が散らばったまま
+
+#### 改善内容
+
+**5.4.1 直列タスクの検出**
+
+依存関係グラフから直列チェーンを検出:
+```typescript
+const detectSerialChains = (taskGraph: DependencyGraph): TaskId[][] => {
+  // A -> B -> C のような直線的な依存関係を検出
+  return findLinearDependencyChains(taskGraph);
+};
+```
+
+**5.4.2 同一worktreeでの実行**
+
+直列チェーンは同じworktreeを再利用:
+```typescript
+const executeSerialChain = async (chain: TaskId[]) => {
+  let worktreePath = null;
+
+  for (const taskId of chain) {
+    if (!worktreePath) {
+      // 最初のタスク: 新しいworktreeを作成
+      worktreePath = await createWorktree(taskId);
+    } else {
+      // 後続タスク: 既存のworktreeを再利用
+      // 前のタスクの変更をコミット
+      await commitChanges(worktreePath, taskId);
+    }
+
+    await executeTaskInWorktree(taskId, worktreePath);
+  }
+
+  // チェーン完了後にworktreeをクリーンアップ
+  await cleanupWorktree(worktreePath);
+};
+```
+
+**5.4.3 フィードバックの伝達**
+
+前のタスクの実行結果を次のタスクに渡す:
+```typescript
+const executeTaskInWorktree = async (
+  taskId: TaskId,
+  worktreePath: WorktreePath,
+  previousTaskFeedback?: string
+) => {
+  const prompt = previousTaskFeedback
+    ? `Execute task: ${task.acceptance}\n\nPrevious task feedback:\n${previousTaskFeedback}`
+    : `Execute task: ${task.acceptance}`;
+
+  // エージェント実行
+  const result = await runAgent(prompt, worktreePath);
+
+  return {
+    success: result.success,
+    feedback: extractFeedback(result.output),
+  };
+};
+```
+
+#### 推定工数
+6-8時間
+
+---
+
+### 5.5 統合処理とコンフリクト解決 【優先度: 中】
+
+#### 問題点
+- 並列実行されたタスクの結果がそれぞれのworktreeに散らばっている
+- 統合時にコンフリクトが発生する可能性
+
+#### 改善内容
+
+**5.5.1 統合タスクの自動生成**
+
+並列タスク完了後に統合タスクを生成:
+```typescript
+const createIntegrationTask = (completedParallelTasks: Task[]): Task => {
+  return createInitialTask({
+    id: taskId(`integration-${randomUUID()}`),
+    repo: repoPath(appRepoPath),
+    branch: branchName('integration/merge-parallel-changes'),
+    scopePaths: mergeScopePaths(completedParallelTasks),
+    acceptance: 'All parallel changes are merged without conflicts',
+  });
+};
+```
+
+**5.5.2 コンフリクト検出と解決タスク化**
+
+統合時にコンフリクトを検出:
+```typescript
+const integrateParallelChanges = async (tasks: Task[]) => {
+  const mergeResult = await attemptMerge(tasks);
+
+  if (mergeResult.hasConflicts) {
+    // コンフリクト解決タスクを生成
+    const resolutionTask = createConflictResolutionTask(
+      mergeResult.conflicts
+    );
+
+    // タスクストアに追加して実行
+    await taskStore.createTask(resolutionTask);
+    return { needsResolution: true, resolutionTaskId: resolutionTask.id };
+  }
+
+  return { needsResolution: false };
+};
+```
+
+**5.5.3 コンフリクト解決プロンプト**
+
+```typescript
+const buildConflictResolutionPrompt = (conflicts: GitConflict[]): string => {
+  return `You are tasked with resolving Git merge conflicts.
+
+CONFLICTS:
+${conflicts.map(c => `
+File: ${c.filePath}
+<<<<<<< HEAD
+${c.oursContent}
+=======
+${c.theirsContent}
+>>>>>>> ${c.theirBranch}
+`).join('\n\n')}
+
+Your task:
+1. Analyze both versions
+2. Resolve conflicts by choosing the best combination
+3. Ensure the final code is syntactically correct
+4. Preserve functionality from both sides when possible
+
+Output the resolved content for each file.`;
+};
+```
+
+#### 推定工数
+8-10時間
+
+---
+
+### 5.6 ジャッジ判定の高度化 【優先度: 中】
+
+#### 問題点
+- 現在の判定が単純すぎる（RUNNING = 成功）
+- タスク内容に対する十分性を評価していない
+
+#### 改善内容
+
+**5.6.1 エージェントベースの判定**
+
+`judgeTask`をエージェント呼び出しに置き換え:
+```typescript
+const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStoreError>> => {
+  const taskResult = await deps.taskStore.readTask(tid);
+  if (!taskResult.ok) return createErr(taskResult.err);
+
+  const task = taskResult.val;
+
+  // 実行ログを読み込み
+  const runLog = await loadTaskRunLog(tid);
+
+  // エージェントに判定を依頼
+  const judgementPrompt = buildJudgementPrompt(task, runLog);
+  const result = await runnerEffects.runClaudeAgent(
+    judgementPrompt,
+    appRepoPath,
+    'claude-haiku-4-5-20250929', // 軽量モデル使用
+  );
+
+  return parseJudgementResult(result.val.finalResponse);
+};
+```
+
+**5.6.2 判定プロンプト**
+
+```typescript
+const buildJudgementPrompt = (task: Task, runLog: string): string => {
+  return `You are a task completion judge.
+
+TASK ACCEPTANCE CRITERIA:
+${task.acceptance}
+
+EXECUTION LOG:
+${runLog}
+
+Your task:
+1. Determine if the acceptance criteria were met
+2. Check if the implementation is complete and functional
+3. Identify any missing requirements or issues
+
+Output (JSON):
+{
+  "success": true/false,
+  "reason": "Detailed explanation",
+  "missingRequirements": ["req1", "req2"],
+  "shouldContinue": true/false
+}`;
+};
+```
+
+#### 推定工数
+4-6時間
+
+---
+
+### 5.7 全体完了判定 【優先度: 中】
+
+#### 問題点
+- 全タスク完了後に、本当に元の指示が達成されたかを確認していない
+
+#### 改善内容
+
+**5.7.1 最終判定フェーズの追加**
+
+`executeInstruction`の最後に最終判定を追加:
+```typescript
+const executeInstruction = async (userInstruction: string) => {
+  // ... 既存のタスク実行 ...
+
+  // 全タスク完了後の最終判定
+  const finalJudgement = await judgeFinalCompletion(
+    userInstruction,
+    completedTaskIds,
+    failedTaskIds
+  );
+
+  if (!finalJudgement.isComplete) {
+    console.log('⚠️  Original instruction not fully satisfied. Generating additional tasks...');
+
+    // 追加タスクを生成
+    const additionalTasks = await planAdditionalTasks(
+      userInstruction,
+      finalJudgement.missingAspects
+    );
+
+    // 追加タスクを実行
+    return executeAdditionalTasks(additionalTasks);
+  }
+
+  return createOk({ success: true, ... });
+};
+```
+
+**5.7.2 最終判定プロンプト**
+
+```typescript
+const buildFinalJudgementPrompt = (
+  instruction: string,
+  completedTasks: Task[],
+  failedTasks: Task[]
+): string => {
+  return `You are judging if the original user instruction was fully completed.
+
+ORIGINAL INSTRUCTION:
+${instruction}
+
+COMPLETED TASKS:
+${completedTasks.map(t => `- ${t.acceptance}`).join('\n')}
+
+FAILED TASKS:
+${failedTasks.map(t => `- ${t.acceptance}`).join('\n')}
+
+Your task:
+1. Determine if the original instruction is fully satisfied
+2. Identify any missing aspects
+3. Suggest additional tasks if needed
+
+Output (JSON):
+{
+  "isComplete": true/false,
+  "missingAspects": ["aspect1", "aspect2"],
+  "additionalTaskSuggestions": ["task1", "task2"]
+}`;
+};
+```
+
+#### 推定工数
+4-6時間
+
+---
+
+### 5.8 プランナーの継続性 【優先度: 低】
+
+#### 問題点
+- プランナーが前回のやり取りを継続できない
+- 追加タスク生成時に前回のコンテキストが失われる
+
+#### 改善内容
+
+**5.8.1 会話履歴の保存**
+
+```typescript
+interface PlannerSession {
+  sessionId: string;
+  instruction: string;
+  conversationHistory: { role: string; content: string }[];
+  generatedTasks: TaskBreakdown[];
+}
+
+const savePlannerSession = async (session: PlannerSession): Promise<void> => {
+  await fs.writeFile(
+    `${coordRepoPath}/planner-sessions/${session.sessionId}.json`,
+    JSON.stringify(session, null, 2)
+  );
+};
+```
+
+**5.8.2 会話履歴を使った追加タスク生成**
+
+```typescript
+const planAdditionalTasks = async (
+  sessionId: string,
+  missingAspects: string[]
+) => {
+  const session = await loadPlannerSession(sessionId);
+
+  const prompt = `
+Previous conversation:
+${session.conversationHistory.map(m => `${m.role}: ${m.content}`).join('\n\n')}
+
+Based on the above context, the following aspects are still missing:
+${missingAspects.join('\n')}
+
+Generate additional tasks to address these missing aspects.
+`;
+
+  // エージェント呼び出し
+  const result = await runClaudeAgent(prompt, ...);
+
+  // 会話履歴を更新
+  session.conversationHistory.push(
+    { role: 'user', content: prompt },
+    { role: 'assistant', content: result.val.finalResponse }
+  );
+  await savePlannerSession(session);
+
+  return parseAgentOutput(result.val.finalResponse);
+};
+```
+
+#### 推定工数
+4-6時間
+
+---
+
+### 5.9 モデルの使い分け 【優先度: 低】
+
+#### 問題点
+- すべての役割で同じモデルを使用している
+- コスト効率が悪い
+
+#### 改善内容
+
+**5.9.1 役割別モデル定義**
+
+```typescript
+const MODEL_CONFIG = {
+  planner: 'claude-opus-4-5-20251101',    // 高度な計画能力が必要
+  worker: 'claude-sonnet-4-5-20250929',   // バランス型
+  judge: 'claude-haiku-4-5-20250929',     // 軽量で高速
+  qualityCheck: 'claude-haiku-4-5-20250929', // 軽量で高速
+  conflictResolution: 'claude-sonnet-4-5-20250929', // 中程度の複雑さ
+} as const;
+```
+
+**5.9.2 各操作での適用**
+
+```typescript
+// Planner
+const runResult = await deps.runnerEffects.runClaudeAgent(
+  planningPrompt,
+  deps.appRepoPath,
+  MODEL_CONFIG.planner,  // Opus使用
+);
+
+// Judge
+const result = await runnerEffects.runClaudeAgent(
+  judgementPrompt,
+  appRepoPath,
+  MODEL_CONFIG.judge,  // Haiku使用
+);
+
+// Worker
+const agentResult = await deps.runnerEffects.runClaudeAgent(
+  agentPrompt,
+  worktreePath,
+  MODEL_CONFIG.worker,  // Sonnet使用
+);
+```
+
+#### 推定工数
+2-3時間
+
+---
+
+## 新規観点の実装順序
+
+### 推奨実装順序
+
+1. **Phase 5.9**: モデルの使い分け（2-3時間）
+   - 即座にコスト削減効果
+   - 他のフェーズの実装コストも下がる
+
+2. **Phase 5.1**: プランナーの品質向上（4-6時間）
+   - タスク品質の基盤改善
+   - 後続フェーズの効果を高める
+
+3. **Phase 5.2**: ジャッジによるタスク品質評価（6-8時間）
+   - プランナー改善と相乗効果
+   - 品質保証の基盤
+
+4. **Phase 5.3**: 並列実行サポート（8-12時間）
+   - パフォーマンス大幅改善
+   - ユーザー体験の向上
+
+5. **Phase 5.4**: 直列タスクの変更統合（6-8時間）
+   - 並列実行と組み合わせて真価を発揮
+
+6. **Phase 5.5**: 統合処理とコンフリクト解決（8-10時間）
+   - 並列実行の完成形
+
+7. **Phase 5.6**: ジャッジ判定の高度化（4-6時間）
+   - 品質保証の完成
+
+8. **Phase 5.7**: 全体完了判定（4-6時間）
+   - システムの自律性向上
+
+9. **Phase 5.8**: プランナーの継続性（4-6時間）
+   - より高度な使用ケースへの対応
+
+### クイックウィン（優先実装）
+
+時間が限られている場合は、以下の順序を推奨:
+
+1. **Phase 5.9**: モデルの使い分け（2-3時間）
+2. **Phase 5.1**: プランナーの品質向上（4-6時間）
+3. **Phase 5.2**: ジャッジによるタスク品質評価（6-8時間）
+
+これらだけで、タスク品質が大幅に向上し、コストも削減できる。
 
 ---
 
