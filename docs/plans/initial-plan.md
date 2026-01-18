@@ -25,7 +25,12 @@
 - Story 3.1: Git基本操作ラッパー（simple-git採用）
 - Story 3.2: Worktree管理（child_process経由）
 
-**🚧 Epic 4: Runner** - 未着手
+**✅ Epic 4: Runner** - 完了
+
+- Story 4.1: プロセス実行基盤（ProcessRunner、LogWriter）
+- Story 4.2: エージェント実行インターフェース（ClaudeRunner、CodexRunner、Runner統合）
+- Story 4.3: CI/Lint実行（P1、後回し）
+
 **🚧 Epic 5: Orchestrator** - 未着手
 **🚧 Epic 6: CLI基本コマンド** - 未着手
 **🚧 Epic 7: 統合テストとドキュメント** - 未着手
