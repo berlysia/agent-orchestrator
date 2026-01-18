@@ -3,11 +3,31 @@
 ## 前提情報
 
 ### プロジェクト状況
-- **現状**: 新規プロジェクト（実装コードなし）
+
+- **現状**: Epic 1-2完了（2026-01-18時点）
 - **設計状況**: アーキテクチャ設計完了（[.tmp/chatgpt-tasks-summary.md](.tmp/chatgpt-tasks-summary.md)）
 - **アプローチ**: Cursor流（Planner/Worker/Judge分離、worktree並列、CAS楽観的並行制御）
 
+### 実装進捗（2026-01-18更新）
+
+**✅ Epic 1: プロジェクト基盤構築** - 完了
+
+- Story 1.1: TypeScript開発環境セットアップ
+- Story 1.2: 基本型定義とスキーマ設計
+
+**✅ Epic 2: Task Store** - 完了
+
+- Story 2.1: JSONファイルストア基本実装（CAS実装含む）
+- Story 2.2: TaskStoreインターフェース抽象化
+
+**🚧 Epic 3: VCS Adapter** - 未着手
+**🚧 Epic 4: Runner** - 未着手
+**🚧 Epic 5: Orchestrator** - 未着手
+**🚧 Epic 6: CLI基本コマンド** - 未着手
+**🚧 Epic 7: 統合テストとドキュメント** - 未着手
+
 ### 実装方針
+
 - **言語**: TypeScript
 - **パッケージマネージャー**: pnpm
 - **リポジトリ構成**: 2リポジトリ方式
@@ -19,12 +39,14 @@
 ## タスク分解の観点
 
 ### 階層構造
+
 1. **フェーズ**: 大きな実装段階（CLI/GitHub/GUI）
 2. **エピック**: 機能領域（Task Store、VCS、Orchestrator等）
 3. **ストーリー**: 実装可能単位（1-3日）
 4. **タスク**: 実装最小単位（1-8時間）
 
 ### 依存関係の原則
+
 - **垂直依存**: 基盤 → 応用（Core → CLI → GitHub → GUI）
 - **水平依存**: 同一フェーズ内は並列可能
 - **クリティカルパス**: Task Store → Orchestrator → CLI基本実装
@@ -34,6 +56,7 @@
 ## 実装タスク分解（Phase 1: CLIコア）
 
 ### 全体方針
+
 - **目標**: 4週間でTier 2 MVP（実用レベル）を完成
 - **優先**: 動作優先、完璧より実装スピード
 - **テスト**: 手動テストでOK、自動テストは後回し
@@ -42,12 +65,14 @@
 ### MVP定義（2段階）
 
 #### Tier 1: P0のみ（約3週間、最低限動く）
+
 - `agent init`で設定ファイル生成
 - `agent run "指示文"`でPlanner→Worker→Judgeの1サイクル実行
 - タスクがJSONで管理され、worktreeで並列実行
 - **デモシナリオ**: 「`agent run "計算機CLIを作る"`で3タスクに分解し、並列実行して完成」
 
 #### Tier 2: P0+P1（約4週間、実用レベル）← **本計画のゴール**
+
 - Tier 1の機能に加えて:
   - `agent status`でタスク一覧・進捗確認
   - `agent stop`でタスク中断
@@ -65,6 +90,7 @@
 #### ✅ **SDK経由を推奨（CLI経由より容易）**
 
 **Claude Agent SDK** ([公式リポジトリ](https://github.com/anthropics/claude-agent-sdk-typescript)):
+
 - パッケージ: `@anthropic-ai/claude-agent-sdk`（旧: `@anthropic-ai/claude-code`）
 - ストリーミングメッセージ取得、MCP tool統合対応
 - TypeScript型安全、構造化出力対応
@@ -74,12 +100,13 @@
   import { Agent } from '@anthropic-ai/claude-agent-sdk';
   const agent = new Agent();
   const result = await agent.run({
-    prompt: "プロンプト",
+    prompt: 'プロンプト',
     // tools, context等を指定
   });
   ```
 
 **OpenAI Codex SDK** ([npm](https://www.npmjs.com/package/@openai/codex-sdk)):
+
 - パッケージ: `@openai/codex-sdk`
 - 最新版: 0.87.0（2026-01-16リリース）
 - デフォルトモデル: gpt-5.2-codex（2026-01-14以降）
@@ -91,7 +118,7 @@
   const codex = new Codex();
   const thread = await codex.threads.create();
   const result = await thread.run({
-    prompt: "プロンプト",
+    prompt: 'プロンプト',
     // environment, workingDirectory等を指定
   });
   ```
@@ -99,6 +126,7 @@
 #### **CLI経由は代替案として保持** ⚠️
 
 CLI経由でもプログラム起動可能（検証済み）:
+
 - Claude Code: `claude --print "プロンプト"`
 - Codex: `codex exec "プロンプト"`
 
@@ -106,6 +134,7 @@ CLI経由でもプログラム起動可能（検証済み）:
 
 **検証日時**: 2026-01-18
 **参考**:
+
 - [Claude Agent SDK on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
 - [Claude Agent SDK Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart)
 - [Codex SDK on npm](https://www.npmjs.com/package/@openai/codex-sdk)
@@ -161,11 +190,13 @@ Week 3: CLI統合
 ### Epic 1: プロジェクト基盤構築
 
 #### Story 1.1: TypeScript開発環境セットアップ [P0/M]
+
 **依存**: なし
 **見積もり**: 3-5h
 **技術**: TypeScript、pnpm、tsconfig、oxlint、prettier
 
 **タスク**:
+
 1. **[E1-S1-T1]** pnpmプロジェクト初期化 (S)
    - `package.json`作成（name: `agent-orchestrator`、type: `module`）
    - TypeScript、型定義インストール
@@ -175,6 +206,7 @@ Week 3: CLI統合
    - strict: true、module: `NodeNext`、target: `ESNext`
    - moduleResolution: `NodeNext`
    - esModuleInterop: true、skipLibCheck: true
+   - verbatimModuleSyntax: true
    - **実験的機能** (TypeScript 5.7+):
      - erasableSyntaxOnly: true (型のみimport/exportを自動判定)
      - allowImportingTsExtensions: true (.ts拡張子付きimport許可)
@@ -190,6 +222,7 @@ Week 3: CLI統合
    - 受け入れ: `pnpm lint`成功
 
 4. **[E1-S1-T4]** ディレクトリ構造作成 (S)
+
    ```
    src/
      core/          # コアロジック
@@ -198,16 +231,19 @@ Week 3: CLI統合
      types/         # 型定義
    tests/           # テストコード
    ```
+
    - 受け入れ: ディレクトリ作成、各README.md配置
 
 ---
 
 #### Story 1.2: 基本型定義とスキーマ設計 [P0/M]
+
 **依存**: Story 1.1
 **見積もり**: 3-5h
 **技術**: TypeScript、zod
 
 **タスク**:
+
 1. **[E1-S2-T1]** Task型定義 (M)
    - `src/types/task.ts`作成
    - Task interface（id、state、version、owner、repo、branch、scopePaths、acceptance、check）
@@ -229,19 +265,20 @@ Week 3: CLI統合
 ### Epic 2: Task Store（タスク状態管理）
 
 #### Story 2.1: JSONファイルストア基本実装 [P0/L]
+
 **依存**: Story 1.2
 **見積もり**: 6-8h
 **技術**: fs/promises、JSON操作、CAS（Compare-And-Swap）
 **リスク**: 並行制御の複雑度（CAS理解が必要）
 
-**タスク**:
-0. **[E2-S1-T0]** CAS実装方式の選定 (S) ⚠️**事前タスク**
-   - JSONファイルベースのCAS実装方式を検証
-   - 方式候補:
-     - (1) Git commit方式（推奨）: versionフィールド+push競合検出、2リポジトリ方式と整合
-     - (2) mkdirベースロック: シンプルだがGit管理外、並列度3以下なら十分
-   - **推奨**: Git commit方式（agent-coord repoにコミット→push→競合時リトライ）
-   - 受け入れ: 実装方式決定、プロトタイプ動作確認
+**タスク**: 0. **[E2-S1-T0]** CAS実装方式の選定 (S) ⚠️**事前タスク**
+
+- JSONファイルベースのCAS実装方式を検証
+- 方式候補:
+  - (1) Git commit方式（推奨）: versionフィールド+push競合検出、2リポジトリ方式と整合
+  - (2) mkdirベースロック: シンプルだがGit管理外、並列度3以下なら十分
+- **推奨**: Git commit方式（agent-coord repoにコミット→push→競合時リトライ）
+- 受け入れ: 実装方式決定、プロトタイプ動作確認
 
 1. **[E2-S1-T1]** ファイルストア基盤 (M)
    - `src/core/task-store/file-store.ts`作成
@@ -269,11 +306,13 @@ Week 3: CLI統合
 ---
 
 #### Story 2.2: TaskStoreインターフェース抽象化 [P1/S]
+
 **依存**: Story 2.1
 **見積もり**: 1-2h
 **技術**: TypeScript interface
 
 **タスク**:
+
 1. **[E2-S2-T1]** TaskStore interface定義 (S)
    - `src/core/task-store/interface.ts`作成
    - CRUD+CAS操作をinterfaceで定義
@@ -285,12 +324,14 @@ Week 3: CLI統合
 ### Epic 3: VCS Adapter（Git操作抽象化）
 
 #### Story 3.1: Git基本操作ラッパー [P0/L]
+
 **依存**: Story 1.2
 **見積もり**: 6-8h
 **技術**: simple-git or isomorphic-git
 **リスク**: Git操作の複雑度、エラーハンドリング
 
 **タスク**:
+
 1. **[E3-S1-T1]** Gitライブラリ選定とセットアップ (S)
    - simple-git vs isomorphic-git検証
    - インストールと基本動作確認
@@ -314,12 +355,14 @@ Week 3: CLI統合
 ---
 
 #### Story 3.2: Worktree管理 [P0/L]
+
 **依存**: Story 3.1
 **見積もり**: 6-8h
 **技術**: git worktree CLI、child_process
 **リスク**: worktreeはgitコマンド直接実行が必要（ライブラリサポート薄い）
 
 **タスク**:
+
 1. **[E3-S2-T1]** Worktree CLI実行基盤 (M)
    - `src/adapters/vcs/worktree-adapter.ts`作成
    - child_processでgit worktreeコマンド実行
@@ -342,12 +385,14 @@ Week 3: CLI統合
 ### Epic 4: Runner（エージェント実行）
 
 #### Story 4.1: プロセス実行基盤 [P0/M]
+
 **依存**: Story 1.2
 **見積もり**: 3-5h
 **技術**: child_process、stdio capture、タイムアウト制御
 **リスク**: プロセス制御の複雑度
 
 **タスク**:
+
 1. **[E4-S1-T1]** プロセス実行ラッパー (M)
    - `src/core/runner/process-runner.ts`作成
    - spawn/execでプロセス起動
@@ -362,12 +407,14 @@ Week 3: CLI統合
 ---
 
 #### Story 4.2: エージェント実行インターフェース [P0/L]
+
 **依存**: Story 4.1
 **見積もり**: 6-8h → **4-6h（SDK利用で簡素化）**
 **技術**: ~~Claude Code CLI、Codex CLI~~ → **Claude Agent SDK、Codex SDK**
 **リスク**: ~~各CLIの起動方法・引数の理解が必要~~ → **解決済み（SDK利用）**
 
 **タスク**:
+
 1. **[E4-S2-T1]** Claude Agent SDK実行 (M)
    - `src/core/runner/claude-runner.ts`作成
    - `@anthropic-ai/claude-agent-sdk`インストール（Zod ^3.24.1も必要）
@@ -392,12 +439,14 @@ Week 3: CLI統合
 ---
 
 #### Story 4.3: CI/Lint実行 [P1/M]
+
 **依存**: Story 4.1
 **見積もり**: 3-5h
 **技術**: package.json scripts実行
 **備考**: 初期はスキップ可、後で実装
 
 **タスク**:
+
 1. **[E4-S3-T1]** CI実行 (M)
    - `src/core/runner/ci-runner.ts`作成
    - `pnpm test`, `pnpm lint`等のスクリプト実行
@@ -409,12 +458,14 @@ Week 3: CLI統合
 ### Epic 5: Orchestrator（状態機械）⚠️最難関
 
 #### Story 5.1: タスクスケジューラ [P0/L]
+
 **依存**: Story 2.1、Story 3.2
 **見積もり**: 6-8h
 **技術**: 状態機械、タスクキュー
 **リスク**: 並列制御の複雑度（Workerの最大並列数管理）
 
 **タスク**:
+
 1. **[E5-S1-T1]** タスクキュー基本実装 (M)
    - `src/core/orchestrator/scheduler.ts`作成
    - READY状態タスクの取得
@@ -434,12 +485,14 @@ Week 3: CLI統合
 ---
 
 #### Story 5.2: Planner/Worker/Judge遷移 [P0/XL]
+
 **依存**: Story 5.1、Story 4.2
 **見積もり**: 1-3日
 **技術**: 状態機械、イベント駆動
 **リスク**: 複雑度高（全体統合の中核）
 
 **タスク**:
+
 1. **[E5-S2-T1]** Planner実行フロー (L)
    - `src/core/orchestrator/planner.ts`作成
    - Plannerエージェント起動（mainブランチでコードベース探索）
@@ -468,11 +521,13 @@ Week 3: CLI統合
 ### Epic 6: CLI基本コマンド
 
 #### Story 6.1: CLIフレームワーク構築 [P0/M]
+
 **依存**: Story 1.1
 **見積もり**: 3-5h
 **技術**: commander or yargs
 
 **タスク**:
+
 1. **[E6-S1-T1]** CLIフレームワーク選定 (S)
    - commander vs yargs検証
    - インストールと基本動作確認
@@ -487,11 +542,13 @@ Week 3: CLI統合
 ---
 
 #### Story 6.2: `agent init` コマンド [P0/M]
+
 **依存**: Story 6.1、Story 2.1
 **見積もり**: 3-5h
 **技術**: fs/promises、設定ファイル生成
 
 **タスク**:
+
 1. **[E6-S2-T1]** 設定ファイル生成 (M)
    - `src/cli/commands/init.ts`作成
    - `.agent/config.json`生成（app-repo path、agent-coord path）
@@ -506,11 +563,13 @@ Week 3: CLI統合
 ---
 
 #### Story 6.3: `agent run` コマンド [P0/M]
+
 **依存**: Story 6.1、Story 5.2
 **見積もり**: 3-5h
 **技術**: Orchestrator統合
 
 **タスク**:
+
 1. **[E6-S3-T1]** runコマンド実装 (M)
    - `src/cli/commands/run.ts`作成
    - 引数: `agent run "指示文"`
@@ -524,11 +583,13 @@ Week 3: CLI統合
 ---
 
 #### Story 6.4: `agent status` コマンド [P1/S]
+
 **依存**: Story 6.1、Story 2.1
 **見積もり**: 1-2h
 **技術**: Task Store読み取り
 
 **タスク**:
+
 1. **[E6-S4-T1]** status表示 (S)
    - `src/cli/commands/status.ts`作成
    - 全タスク一覧表示（state、owner、branch）
@@ -538,11 +599,13 @@ Week 3: CLI統合
 ---
 
 #### Story 6.5: `agent stop` コマンド [P1/S]
+
 **依存**: Story 6.1、Story 5.1
 **見積もり**: 1-2h
 **技術**: プロセス制御、タスク中断
 
 **タスク**:
+
 1. **[E6-S5-T1]** stop実装 (S)
    - `src/cli/commands/stop.ts`作成
    - 実行中タスクの中断（プロセスkill）
@@ -554,11 +617,13 @@ Week 3: CLI統合
 ### Epic 7: 統合テストとドキュメント
 
 #### Story 7.1: E2Eテストシナリオ [P1/M]
+
 **依存**: Story 6.3
 **見積もり**: 3-5h
 **技術**: node:test、サンプルプロジェクト
 
 **タスク**:
+
 1. **[E7-S1-T1]** サンプルプロジェクト作成 (S)
    - 簡単なTypeScriptプロジェクト（Hello World）
    - tests/fixtures/に配置
@@ -572,11 +637,13 @@ Week 3: CLI統合
 ---
 
 #### Story 7.2: READMEとドキュメント [P1/M]
+
 **依存**: Story 6.3
 **見積もり**: 3-5h
 **技術**: Markdown
 
 **タスク**:
+
 1. **[E7-S2-T1]** README.md作成 (M)
    - プロジェクト概要
    - インストール手順
@@ -594,37 +661,41 @@ Week 3: CLI統合
 
 ## 技術的リスク
 
-| リスク | 優先度 | 影響度 | 対策 | ステータス |
-|--------|--------|--------|------|-----------|
-| **CAS並行制御の理解不足** | P0 | 高 | Story 2.1 T0でGit commit方式（推奨）を検証 | 🟡 要対策 |
-| **Worktree操作の複雑度** | P0 | 高 | git worktreeコマンド手動実験 | 🟡 要対策 |
-| **Orchestrator状態機械の複雑度** | P0 | 高 | シンプルな状態遷移から開始、段階的拡張 | 🟡 要対策 |
-| **SDK利用方法の理解** | ~~P0~~ | ~~高~~ | ~~各CLI手動実行で引数確認~~ **SDK利用に変更、検証完了（2026-01-18）** | ✅ **解決** |
-| **Git操作のコンフリクト** | P0 | 高 | Epic 5.2 T4でrebase戦略定義、リトライロジック実装 | 🟡 要対策 |
-| **エラーハンドリングの網羅性不足** | P1 | 中 | 初期は基本的なエラーのみ対応、Epic 5.2 T4で分類表作成 | 🟡 要対策 |
-| **依存パッケージの互換性** | P1 | 中 | README.mdにSDK最小バージョン要件を明記（Claude: Node 18+、Codex: 0.87.0） | 🟡 要対策 |
-| **ディスク容量** | P2 | 中 | worktree数の上限設定（デフォルト3、設定可能） | 🟢 許容 |
-| **テストの不足** | P2 | 低 | 手動テスト優先、自動テストは後回し | 🟢 許容 |
+| リスク                             | 優先度 | 影響度 | 対策                                                                      | ステータス    |
+| ---------------------------------- | ------ | ------ | ------------------------------------------------------------------------- | ------------- |
+| **CAS並行制御の理解不足**          | ~~P0~~ | ~~高~~ | **mkdirベースロック実装完了（2026-01-18）**                               | ✅ **解決**   |
+| **Worktree操作の複雑度**           | P0     | 高     | git worktreeコマンド手動実験                                              | 🟡 要対策     |
+| **Orchestrator状態機械の複雑度**   | P0     | 高     | シンプルな状態遷移から開始、段階的拡張                                    | 🟡 要対策     |
+| **SDK利用方法の理解**              | ~~P0~~ | ~~高~~ | ~~各CLI手動実行で引数確認~~ **SDK利用に変更、検証完了（2026-01-18）**     | ✅ **解決**   |
+| **Git操作のコンフリクト**          | P0     | 高     | Epic 5.2 T4でrebase戦略定義、リトライロジック実装                         | 🟡 要対策     |
+| **エラーハンドリングの網羅性不足** | P1     | 中     | 初期は基本的なエラーのみ対応、Epic 5.2 T4で分類表作成                     | 🟡 要対策     |
+| **依存パッケージの互換性**         | P1     | 中     | README.mdにSDK最小バージョン要件を明記（Claude: Node 18+、Codex: 0.87.0） | 🟡 要対策     |
+| **ディスク容量**                   | P2     | 中     | worktree数の上限設定（デフォルト3、設定可能）                             | 🟢 許容       |
+| **テストの不足**                   | ~~P2~~ | ~~低~~ | **ユニットテスト実装開始（2026-01-18、Epic 1-2カバー）**                  | ✅ **対応中** |
 
 ---
 
 ## 実装戦略
 
 ### 1. 動くMVP優先
+
 - 完璧な設計より、まず動くものを作る
 - エラーハンドリングは最小限でOK
 - テストは手動で十分
 
 ### 2. 段階的実装
+
 - 各Epicを完全に終わらせてから次へ
 - 並列実装は避ける（開発者1名）
 - デバッグ時間を十分確保
 
 ### 3. プロトタイプ先行
+
 - CAS更新、worktree操作は小規模検証を先に実施
 - Orchestratorは簡単な状態遷移から開始
 
 ### 4. ドキュメント後回し
+
 - README.mdは最小限でOK
 - 詳細ドキュメントはPhase 1完了後
 
@@ -632,16 +703,16 @@ Week 3: CLI統合
 
 ## タスクサマリー
 
-| Epic | Story数 | 総見積もり | 優先度P0 Story数 |
-|------|---------|------------|----------|
-| Epic 1: 基盤 | 2 | 6-10h | 2 |
-| Epic 2: Task Store | 2 | 7-10h | 1 |
-| Epic 3: VCS | 2 | 12-16h | 2 |
-| Epic 4: Runner | 3 | 10-16h | 2 |
-| Epic 5: Orchestrator | 2 | 1-4日 | 2 |
-| Epic 6: CLI | 5 | 10-16h | 3 |
-| Epic 7: 統合 | 2 | 6-10h | 0 |
-| **合計** | **18** | **2-4週間** | **12** |
+| Epic                 | Story数 | 総見積もり  | 優先度P0 Story数 |
+| -------------------- | ------- | ----------- | ---------------- |
+| Epic 1: 基盤         | 2       | 6-10h       | 2                |
+| Epic 2: Task Store   | 2       | 7-10h       | 1                |
+| Epic 3: VCS          | 2       | 12-16h      | 2                |
+| Epic 4: Runner       | 3       | 10-16h      | 2                |
+| Epic 5: Orchestrator | 2       | 1-4日       | 2                |
+| Epic 6: CLI          | 5       | 10-16h      | 3                |
+| Epic 7: 統合         | 2       | 6-10h       | 0                |
+| **合計**             | **18**  | **2-4週間** | **12**           |
 
 ---
 
@@ -657,9 +728,51 @@ Week 3: CLI統合
 
 ## 次のアクション
 
-計画承認後の最初のステップ:
-1. [E1-S1-T1] pnpmプロジェクト初期化
-2. [E1-S1-T2] tsconfig.json設定
-3. [E1-S1-T3] Linter/Formatter設定
-4. [E1-S1-T4] ディレクトリ構造作成
+**Epic 3: VCS Adapter** から継続:
 
+1. [E3-S1-T1] Gitライブラリ選定とセットアップ
+2. [E3-S1-T2] Branch操作実装
+3. [E3-S1-T3] Commit/Push操作実装
+4. [E3-S1-T4] Status/Diff操作実装
+
+---
+
+## 実装ワークフロー指示
+
+**重要**: 各エピック、ストーリー、タスク完了時に以下を必ず実施すること
+
+### タスク完了時
+
+- テストを実行して動作確認
+- 型チェック（`pnpm build`）を実行
+
+### ストーリー完了時
+
+1. コードフォーマット適用（`pnpm format`）
+2. コミット作成（Conventional Commits形式）
+   - タイトル: `feat(epic番号): 概要`
+   - 本文: Story完了内容の詳細
+3. 必要に応じてドキュメント更新
+
+### エピック完了時
+
+1. この文書（initial-plan.md）の実装進捗を更新
+2. README.mdの実装ステータスを更新
+3. 技術的リスク表を更新
+4. 統合テスト実施（可能な範囲で）
+5. コミット作成（更新内容を反映）
+
+### コミットメッセージ形式
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+```
+
+**type**: feat, fix, refactor, test, docs, chore
+**scope**: epic番号（epic1, epic2等）
