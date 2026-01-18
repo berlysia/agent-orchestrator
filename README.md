@@ -11,14 +11,19 @@ Multi-agent collaborative development tool with Planner/Worker/Judge architectur
 
 ## Requirements
 
-- Node.js >= 18.0.0
+- Node.js >= 24.13.0
 - pnpm >= 9.15.4
 - Git with worktree support
+
+## Setup
+
+For using Agent Orchestrator to develop itself (dogfooding), see [docs/SETUP.md](docs/SETUP.md).
 
 ## Installation
 
 ```bash
 pnpm install
+pnpm compile
 ```
 
 ## Development
@@ -27,8 +32,12 @@ pnpm install
 # Type check
 pnpm build
 
+# Compile TypeScript
+pnpm compile
+
 # Run tests
-node --test tests/unit/**/*.test.ts
+pnpm test              # Unit tests
+pnpm test:e2e          # E2E tests
 
 # Lint
 pnpm lint
