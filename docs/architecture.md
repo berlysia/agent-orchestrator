@@ -140,26 +140,78 @@ const taskId: TaskId = workerId; // ❌
 - TypeScript strict モード
 - 実験的機能: `erasableSyntaxOnly`, `allowImportingTsExtensions`
 
-## Future Architecture
+## Implemented Architecture
 
 ### Worktree-based Parallelization
 
-（Epic 3で実装予定）
+✅ 実装完了 (Epic 3)
 
 - 1タスク = 1ブランチ = 1worktree
 - 並列度制御（デフォルト3）
+- simple-git によるGit基本操作
+- child_process によるworktree管理
+
+実装ファイル:
+- `src/adapters/vcs/git-effects.ts` - Git Effects インターフェース定義
+- `src/adapters/vcs/simple-git-effects.ts` - simple-git実装
+- `src/adapters/vcs/spawn-git-effects.ts` - worktree管理（child_process）
 
 ### Agent Execution
 
-（Epic 4で実装予定）
+✅ 実装完了 (Epic 4)
 
-- Claude Agent SDK統合
-- OpenAI Codex SDK統合
+- Claude Agent SDK統合 (`@anthropic-ai/claude-agent-sdk`)
+- OpenAI Codex SDK統合 (`@openai/codex-sdk`)
+- プロセス実行基盤とログ保存機能
+- 関数型アーキテクチャによるRunner実装
+
+実装ファイル:
+- `src/core/runner/runner-effects.ts` - Runner Effects インターフェース定義
+- `src/core/runner/runner-effects-impl.ts` - エージェント実行実装
+- `src/core/runner/run-task.ts` - タスク実行フロー
+- `src/core/runner/prompt-builder.ts` - プロンプト構築
 
 ### Orchestrator
 
-（Epic 5で実装予定）
+✅ 実装完了 (Epic 5)
 
 - Planner → Worker → Judge サイクル
-- タスクスケジューリング
-- 状態機械による制御
+- タスクスケジューリングと並列度制御
+- 関数型による状態管理と操作分離
+- Result型によるエラーハンドリング
+
+実装ファイル:
+- `src/core/orchestrator/orchestrate.ts` - オーケストレーション全体フロー
+- `src/core/orchestrator/scheduler-state.ts` - スケジューラー状態管理
+- `src/core/orchestrator/scheduler-operations.ts` - スケジューラー操作
+- `src/core/orchestrator/planner-operations.ts` - Planner操作
+- `src/core/orchestrator/worker-operations.ts` - Worker操作
+- `src/core/orchestrator/judge-operations.ts` - Judge操作
+
+### CLI Interface
+
+✅ 実装完了 (Epic 6)
+
+- `agent init` - プロジェクト初期化
+- `agent run` - タスク実行
+- `agent status` - 状態確認
+- `agent stop` - タスク中断
+
+実装ファイル:
+- `src/cli/index.ts` - CLIエントリーポイント
+- `src/cli/commands/init.ts` - initコマンド
+- `src/cli/commands/run.ts` - runコマンド
+- `src/cli/commands/status.ts` - statusコマンド
+- `src/cli/commands/stop.ts` - stopコマンド
+
+### Testing
+
+✅ 実装完了 (Epic 7)
+
+- ユニットテスト (node:test)
+- E2Eテスト (CLIコマンド統合)
+- サンプルプロジェクト (tests/fixtures/)
+
+テストファイル:
+- `tests/unit/file-store.test.ts` - TaskStore CRUD/CAS操作テスト
+- `tests/e2e/cli-basic.test.ts` - CLI基本コマンドE2Eテスト
