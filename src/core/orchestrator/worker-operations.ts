@@ -38,6 +38,28 @@ export interface WorkerResult {
   readonly error?: string;
 }
 
+const detectRateLimitReason = (text: string): string | null => {
+  if (!text) {
+    return null;
+  }
+
+  const patterns: Array<{ pattern: RegExp; reason: string }> = [
+    { pattern: /hit your limit/i, reason: 'hit your limit' },
+    { pattern: /rate limit/i, reason: 'rate limit' },
+    { pattern: /rate[- ]?limited/i, reason: 'rate limited' },
+    { pattern: /too many requests/i, reason: 'too many requests' },
+    { pattern: /\b429\b/, reason: 'http 429' },
+  ];
+
+  for (const { pattern, reason } of patterns) {
+    if (pattern.test(text)) {
+      return reason;
+    }
+  }
+
+  return null;
+};
+
 /**
  * エージェント種別
  */
@@ -179,6 +201,31 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 7. 成功時の処理
     const output = agentResult.val;
+    const rateLimitReason = detectRateLimitReason(output.finalResponse);
+    if (rateLimitReason) {
+      const errorMsg = `Rate limit detected (${rateLimitReason})`;
+      await deps.runnerEffects.appendLog(
+        theRunId,
+        `[${new Date().toISOString()}] ❌ Agent execution failed\n`,
+      );
+      await deps.runnerEffects.appendLog(theRunId, `Error: ${errorMsg}\n`);
+      await deps.runnerEffects.appendLog(theRunId, `Final Response:\n${output.finalResponse}\n`);
+
+      const failedRun = {
+        ...run,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: errorMsg,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createOk({
+        runId: theRunId,
+        success: false,
+        error: errorMsg,
+      });
+    }
+
     await deps.runnerEffects.appendLog(
       theRunId,
       `[${new Date().toISOString()}] ✅ Agent execution completed\n`,

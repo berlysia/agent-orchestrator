@@ -143,6 +143,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           console.log(`  📝 Execution log: runs/${result.runId}.log`);
           console.log(`  📊 Metadata: runs/${result.runId}.json`);
 
+          if (!result.success) {
+            console.log(`  ❌ Task execution failed: ${result.error ?? 'Unknown error'}`);
+            await schedulerOps.blockTask(tid);
+            failedTaskIds.push(rawTaskId);
+            continue;
+          }
+
           // 4. Judge: 完了判定
           console.log(`  ⚖️  Judging task...`);
           const judgementResult = await judgeOps.judgeTask(tid);
