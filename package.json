@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsgo --noEmit",
-    "compile": "tsgo",
+    "compile": "rm -rf dist && tsgo && chmod +x dist/cli/index.js",
     "test": "node --test tests/unit/**/*.test.ts",
     "test:e2e": "node --test tests/e2e/**/*.test.ts",
     "test:all": "node --test tests/**/*.test.ts",
