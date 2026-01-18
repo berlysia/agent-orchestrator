@@ -167,8 +167,13 @@ export class Orchestrator {
   }
 }
 
-// Re-export components
+// Re-export components (existing class-based implementations)
 export { Scheduler } from './scheduler.ts';
 export { Planner } from './planner.ts';
 export { Worker } from './worker.ts';
 export { Judge } from './judge.ts';
+
+// Re-export functional implementations (Phase 5)
+export { createWorkerOperations, generateCommitMessage } from './worker-operations.ts';
+export type { WorkerDeps, WorkerResult, AgentType } from './worker-operations.ts';
+export * from './scheduler-state.ts';
