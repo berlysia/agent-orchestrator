@@ -1,6 +1,7 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { Runner, AgentType } from '../runner/index.ts';
 import { createInitialTask } from '../../types/task.ts';
+import { taskId, repoPath, branchName } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -91,17 +92,23 @@ export class Planner {
     // タスクをTaskStoreに保存
     const taskIds: string[] = [];
     for (const breakdown of taskBreakdowns) {
-      const taskId = `task-${randomUUID()}`;
+      const rawTaskId = `task-${randomUUID()}`;
       const task = createInitialTask({
-        id: taskId,
-        repo: this.appRepoPath,
-        branch: breakdown.branch,
+        id: taskId(rawTaskId),
+        repo: repoPath(this.appRepoPath),
+        branch: branchName(breakdown.branch),
         scopePaths: breakdown.scopePaths,
         acceptance: breakdown.acceptance,
       });
 
-      await this.taskStore.createTask(task);
-      taskIds.push(taskId);
+      const result = await this.taskStore.createTask(task);
+      if (!result.ok) {
+        console.error(`Failed to create task ${rawTaskId}:`, result.err.message);
+        // エラーがあっても処理を継続（他のタスクは保存する）
+        continue;
+      }
+
+      taskIds.push(rawTaskId);
     }
 
     return {

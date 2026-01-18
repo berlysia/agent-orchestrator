@@ -1,6 +1,10 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
+import type { TaskId } from '../../types/branded.ts';
+import { taskId, workerId } from '../../types/branded.ts';
+import type { TaskStoreError } from '../../types/errors.ts';
+import type { Result } from 'option-t/plain_result';
 
 /**
  * Schedulerのオプション
@@ -35,8 +39,14 @@ export class Scheduler {
    * @returns READY状態のタスク配列
    */
   async getReadyTasks(): Promise<Task[]> {
-    const allTasks = await this.taskStore.listTasks();
-    return allTasks.filter((task) => task.state === TaskState.READY);
+    const allTasksResult = await this.taskStore.listTasks();
+
+    if (!allTasksResult.ok) {
+      console.error('Failed to list tasks:', allTasksResult.err.message);
+      return [];
+    }
+
+    return allTasksResult.val.filter((task) => task.state === TaskState.READY);
   }
 
   /**
@@ -48,34 +58,43 @@ export class Scheduler {
    * @param workerId WorkerのID（例: "worker-1"）
    * @returns 更新後のタスク。割り当てに失敗した場合はnull
    */
-  async claimTask(taskId: string, workerId: string): Promise<Task | null> {
-    try {
-      const task = await this.taskStore.readTask(taskId);
+  async claimTask(rawTaskId: string, rawWorkerId: string): Promise<Task | null> {
+    const tid = taskId(rawTaskId);
+    const wid = workerId(rawWorkerId);
 
-      // タスクがREADY状態でない場合は割り当て不可
-      if (task.state !== TaskState.READY) {
-        return null;
-      }
+    const taskResult = await this.taskStore.readTask(tid);
 
-      // CAS更新: owner設定 + state変更
-      const updatedTask = await this.taskStore.updateTaskCAS(
-        taskId,
-        task.version,
-        (currentTask) => ({
-          ...currentTask,
-          state: TaskState.RUNNING,
-          owner: workerId,
-          updatedAt: new Date().toISOString(),
-        }),
-      );
-
-      this.runningWorkers.add(workerId);
-      return updatedTask;
-    } catch (error) {
-      // CAS競合やその他のエラーの場合はnullを返す
-      console.error(`Failed to claim task ${taskId} for ${workerId}:`, error);
+    if (!taskResult.ok) {
+      console.error(`Failed to read task ${rawTaskId}:`, taskResult.err.message);
       return null;
     }
+
+    const task = taskResult.val;
+
+    // タスクがREADY状態でない場合は割り当て不可
+    if (task.state !== TaskState.READY) {
+      return null;
+    }
+
+    // CAS更新: owner設定 + state変更
+    const updatedTaskResult = await this.taskStore.updateTaskCAS(
+      tid,
+      task.version,
+      (currentTask) => ({
+        ...currentTask,
+        state: TaskState.RUNNING,
+        owner: wid,
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+
+    if (!updatedTaskResult.ok) {
+      console.error(`Failed to claim task ${rawTaskId} for ${rawWorkerId}:`, updatedTaskResult.err.message);
+      return null;
+    }
+
+    this.runningWorkers.add(rawWorkerId);
+    return updatedTaskResult.val;
   }
 
   /**
@@ -111,11 +130,17 @@ export class Scheduler {
    * @param taskId 完了したタスクのID
    * @returns 更新後のタスク
    */
-  async completeTask(taskId: string): Promise<Task> {
-    const task = await this.taskStore.readTask(taskId);
+  async completeTask(tid: TaskId): Promise<Result<Task, TaskStoreError>> {
+    const taskResult = await this.taskStore.readTask(tid);
 
-    const updatedTask = await this.taskStore.updateTaskCAS(
-      taskId,
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
+
+    const updatedTaskResult = await this.taskStore.updateTaskCAS(
+      tid,
       task.version,
       (currentTask) => ({
         ...currentTask,
@@ -130,7 +155,7 @@ export class Scheduler {
       this.completeWorker(task.owner);
     }
 
-    return updatedTask;
+    return updatedTaskResult;
   }
 
   /**
@@ -139,11 +164,17 @@ export class Scheduler {
    * @param taskId ブロックされたタスクのID
    * @returns 更新後のタスク
    */
-  async blockTask(taskId: string): Promise<Task> {
-    const task = await this.taskStore.readTask(taskId);
+  async blockTask(tid: TaskId): Promise<Result<Task, TaskStoreError>> {
+    const taskResult = await this.taskStore.readTask(tid);
 
-    const updatedTask = await this.taskStore.updateTaskCAS(
-      taskId,
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
+
+    const updatedTaskResult = await this.taskStore.updateTaskCAS(
+      tid,
       task.version,
       (currentTask) => ({
         ...currentTask,
@@ -158,6 +189,6 @@ export class Scheduler {
       this.completeWorker(task.owner);
     }
 
-    return updatedTask;
+    return updatedTaskResult;
   }
 }

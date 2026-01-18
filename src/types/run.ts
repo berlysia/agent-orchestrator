@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { runId, taskId, type RunId, type TaskId } from './branded.ts';
 
 /**
  * Worker実行結果の状態
@@ -22,10 +23,10 @@ export type RunStatus = (typeof RunStatus)[keyof typeof RunStatus];
  */
 export const RunSchema = z.object({
   /** 実行ID（ユニーク識別子） */
-  id: z.string(),
+  id: z.string().transform(runId),
 
   /** 対応するタスクID */
-  taskId: z.string(),
+  taskId: z.string().transform(taskId),
 
   /** 実行状態 */
   status: z.enum([RunStatus.SUCCESS, RunStatus.FAILURE, RunStatus.TIMEOUT]),
@@ -55,8 +56,8 @@ export type Run = z.infer<typeof RunSchema>;
  * 新規Run初期値生成ヘルパー
  */
 export function createInitialRun(params: {
-  id: string;
-  taskId: string;
+  id: RunId;
+  taskId: TaskId;
   agentType: 'claude' | 'codex';
   logPath: string;
 }): Run {

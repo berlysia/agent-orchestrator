@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { checkId, taskId, type CheckId, type TaskId } from './branded.ts';
 
 /**
  * CI/Lintチェック結果の状態
@@ -22,10 +23,10 @@ export type CheckStatus = (typeof CheckStatus)[keyof typeof CheckStatus];
  */
 export const CheckSchema = z.object({
   /** チェックID（ユニーク識別子） */
-  id: z.string(),
+  id: z.string().transform(checkId),
 
   /** 対応するタスクID */
-  taskId: z.string(),
+  taskId: z.string().transform(taskId),
 
   /** チェック状態 */
   status: z.enum([CheckStatus.PASS, CheckStatus.FAIL, CheckStatus.SKIP]),
@@ -51,7 +52,11 @@ export type Check = z.infer<typeof CheckSchema>;
 /**
  * 新規Check初期値生成ヘルパー
  */
-export function createInitialCheck(params: { id: string; taskId: string; command: string }): Check {
+export function createInitialCheck(params: {
+  id: CheckId;
+  taskId: TaskId;
+  command: string;
+}): Check {
   return {
     id: params.id,
     taskId: params.taskId,

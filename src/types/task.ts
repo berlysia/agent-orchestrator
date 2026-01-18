@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import { taskId, checkId, workerId, repoPath, branchName } from './branded.ts';
+import type { TaskId, RepoPath, BranchName } from './branded.ts';
+
+// CheckIdとWorkerIdはz.inferで自動推論されるため、ここで明示的にexportして利用可能にする
+export type { CheckId, WorkerId } from './branded.ts';
 
 /**
  * タスク状態の定数定義
@@ -26,7 +31,7 @@ export type TaskState = (typeof TaskState)[keyof typeof TaskState];
  */
 export const TaskSchema = z.object({
   /** タスクID（ユニーク識別子） */
-  id: z.string(),
+  id: z.string().transform(taskId),
 
   /** 現在の状態 */
   state: z.enum([
@@ -41,13 +46,16 @@ export const TaskSchema = z.object({
   version: z.number().int().nonnegative(),
 
   /** タスクを実行するエージェントの所有者（例: "planner", "worker-1"） */
-  owner: z.string().nullable(),
+  owner: z
+    .string()
+    .nullable()
+    .transform((val) => (val === null ? null : workerId(val))),
 
   /** タスクが作業するリポジトリパス */
-  repo: z.string(),
+  repo: z.string().transform(repoPath),
 
   /** タスク専用のブランチ名 */
-  branch: z.string(),
+  branch: z.string().transform(branchName),
 
   /** タスクのスコープ（対象ファイルパス配列） */
   scopePaths: z.array(z.string()),
@@ -56,7 +64,10 @@ export const TaskSchema = z.object({
   acceptance: z.string(),
 
   /** CI/Lintチェック結果への参照（checkId） */
-  check: z.string().nullable(),
+  check: z
+    .string()
+    .nullable()
+    .transform((val) => (val === null ? null : checkId(val))),
 
   /** タスク作成日時 */
   createdAt: z.string().datetime(),
@@ -74,9 +85,9 @@ export type Task = z.infer<typeof TaskSchema>;
  * 新規Taskの初期値生成ヘルパー
  */
 export function createInitialTask(params: {
-  id: string;
-  repo: string;
-  branch: string;
+  id: TaskId;
+  repo: RepoPath;
+  branch: BranchName;
   scopePaths: string[];
   acceptance: string;
 }): Task {

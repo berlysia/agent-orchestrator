@@ -2,6 +2,7 @@ import { unstable_v2_prompt } from '@anthropic-ai/claude-agent-sdk';
 import type { Task } from '../../types/task.ts';
 import type { LogWriter } from './log-writer.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
+import { runId as createRunId } from '../../types/branded.ts';
 
 /**
  * Claude Agent実行オプション
@@ -52,14 +53,14 @@ export class ClaudeRunner {
    */
   async runTask(task: Task, workingDirectory: string): Promise<ClaudeRunResult> {
     const startTime = Date.now();
-    const runId = `claude-${task.id}-${Date.now()}`;
+    const rawRunId = `claude-${task.id}-${Date.now()}`;
 
     // 初期Run情報を作成
     const run = createInitialRun({
-      id: runId,
+      id: createRunId(rawRunId),
       taskId: task.id,
       agentType: 'claude',
-      logPath: `runs/${runId}.log`,
+      logPath: `runs/${rawRunId}.log`,
     });
 
     const logWriter = this.options.logWriter;
@@ -71,10 +72,10 @@ export class ClaudeRunner {
       const prompt = this.buildPrompt(task);
 
       // ログ開始
-      await logWriter.appendLog(runId, `=== Claude Agent Execution Start ===\n`);
-      await logWriter.appendLog(runId, `Task ID: ${task.id}\n`);
-      await logWriter.appendLog(runId, `Working Directory: ${workingDirectory}\n`);
-      await logWriter.appendLog(runId, `Prompt: ${prompt}\n\n`);
+      await logWriter.appendLog(rawRunId, `=== Claude Agent Execution Start ===\n`);
+      await logWriter.appendLog(rawRunId, `Task ID: ${task.id}\n`);
+      await logWriter.appendLog(rawRunId, `Working Directory: ${workingDirectory}\n`);
+      await logWriter.appendLog(rawRunId, `Prompt: ${prompt}\n\n`);
 
       // Claude Agent実行（unstable_v2_prompt使用）
       const result = await unstable_v2_prompt(prompt, {
@@ -86,9 +87,9 @@ export class ClaudeRunner {
       });
 
       // 実行ログ記録
-      await logWriter.appendLog(runId, `\n=== Execution Result ===\n`);
-      await logWriter.appendLog(runId, JSON.stringify(result, null, 2));
-      await logWriter.appendLog(runId, `\n=== Claude Agent Execution Complete ===\n`);
+      await logWriter.appendLog(rawRunId, `\n=== Execution Result ===\n`);
+      await logWriter.appendLog(rawRunId, JSON.stringify(result, null, 2));
+      await logWriter.appendLog(rawRunId, `\n=== Claude Agent Execution Complete ===\n`);
 
       // Run情報を更新
       const duration = Date.now() - startTime;
@@ -97,7 +98,7 @@ export class ClaudeRunner {
       await logWriter.saveRunMetadata(run);
 
       return {
-        runId,
+        runId: rawRunId,
         success: true,
         duration,
       };
@@ -106,9 +107,9 @@ export class ClaudeRunner {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // エラーログ記録
-      await logWriter.appendLog(runId, `\n=== Error ===\n`);
-      await logWriter.appendLog(runId, errorMessage);
-      await logWriter.appendLog(runId, `\n=== Claude Agent Execution Failed ===\n`);
+      await logWriter.appendLog(rawRunId, `\n=== Error ===\n`);
+      await logWriter.appendLog(rawRunId, errorMessage);
+      await logWriter.appendLog(rawRunId, `\n=== Claude Agent Execution Failed ===\n`);
 
       // Run情報を更新
       run.status = RunStatus.FAILURE;
@@ -117,7 +118,7 @@ export class ClaudeRunner {
       await logWriter.saveRunMetadata(run);
 
       return {
-        runId,
+        runId: rawRunId,
         success: false,
         error: errorMessage,
         duration,

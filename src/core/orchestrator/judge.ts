@@ -1,6 +1,9 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
+import type { TaskId } from '../../types/branded.ts';
+import type { TaskStoreError } from '../../types/errors.ts';
+import type { Result } from 'option-t/plain_result';
 
 /**
  * Judgeのオプション
@@ -15,7 +18,7 @@ export interface JudgeOptions {
  */
 export interface JudgementResult {
   /** タスクID */
-  taskId: string;
+  taskId: TaskId;
   /** 判定結果（true=成功、false=失敗） */
   success: boolean;
   /** 継続の可否（true=次イテレーション実行、false=停止） */
@@ -42,8 +45,20 @@ export class Judge {
    * @param taskId 判定するタスクのID
    * @returns 判定結果
    */
-  async judgeTask(taskId: string): Promise<JudgementResult> {
-    const task = await this.taskStore.readTask(taskId);
+  async judgeTask(taskId: TaskId): Promise<JudgementResult> {
+    const taskResult = await this.taskStore.readTask(taskId);
+
+    // Result型のエラーハンドリング
+    if (!taskResult.ok) {
+      return {
+        taskId,
+        success: false,
+        shouldContinue: false,
+        reason: `Failed to read task: ${taskResult.err.message}`,
+      };
+    }
+
+    const task = taskResult.val;
 
     // TODO: 実際のCI/lint実行結果を確認
     // 現時点では簡易的な判定のみ
@@ -94,8 +109,14 @@ export class Judge {
    * @param taskId タスクID
    * @returns 更新後のタスク
    */
-  async markTaskAsCompleted(taskId: string): Promise<Task> {
-    const task = await this.taskStore.readTask(taskId);
+  async markTaskAsCompleted(taskId: TaskId): Promise<Result<Task, TaskStoreError>> {
+    const taskResult = await this.taskStore.readTask(taskId);
+
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
 
     return await this.taskStore.updateTaskCAS(taskId, task.version, (currentTask) => ({
       ...currentTask,
@@ -111,8 +132,14 @@ export class Judge {
    * @param taskId タスクID
    * @returns 更新後のタスク
    */
-  async markTaskAsBlocked(taskId: string): Promise<Task> {
-    const task = await this.taskStore.readTask(taskId);
+  async markTaskAsBlocked(taskId: TaskId): Promise<Result<Task, TaskStoreError>> {
+    const taskResult = await this.taskStore.readTask(taskId);
+
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
 
     return await this.taskStore.updateTaskCAS(taskId, task.version, (currentTask) => ({
       ...currentTask,

@@ -2,6 +2,7 @@ import { Codex } from '@openai/codex-sdk';
 import type { Task } from '../../types/task.ts';
 import type { LogWriter } from './log-writer.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
+import { runId as createRunId } from '../../types/branded.ts';
 
 /**
  * Codex実行オプション
@@ -55,14 +56,14 @@ export class CodexRunner {
    */
   async runTask(task: Task, workingDirectory: string): Promise<CodexRunResult> {
     const startTime = Date.now();
-    const runId = `codex-${task.id}-${Date.now()}`;
+    const rawRunId = `codex-${task.id}-${Date.now()}`;
 
     // 初期Run情報を作成
     const run = createInitialRun({
-      id: runId,
+      id: createRunId(rawRunId),
       taskId: task.id,
       agentType: 'codex',
-      logPath: `runs/${runId}.log`,
+      logPath: `runs/${rawRunId}.log`,
     });
 
     const logWriter = this.options.logWriter;
@@ -76,10 +77,10 @@ export class CodexRunner {
       const prompt = this.buildPrompt(task);
 
       // ログ開始
-      await logWriter.appendLog(runId, `=== Codex Agent Execution Start ===\n`);
-      await logWriter.appendLog(runId, `Task ID: ${task.id}\n`);
-      await logWriter.appendLog(runId, `Working Directory: ${workingDirectory}\n`);
-      await logWriter.appendLog(runId, `Prompt: ${prompt}\n\n`);
+      await logWriter.appendLog(rawRunId, `=== Codex Agent Execution Start ===\n`);
+      await logWriter.appendLog(rawRunId, `Task ID: ${task.id}\n`);
+      await logWriter.appendLog(rawRunId, `Working Directory: ${workingDirectory}\n`);
+      await logWriter.appendLog(rawRunId, `Prompt: ${prompt}\n\n`);
 
       // Codex Thread作成
       const thread = this.codex.startThread({
@@ -88,16 +89,16 @@ export class CodexRunner {
       });
       threadId = thread.id ?? undefined;
 
-      await logWriter.appendLog(runId, `Thread ID: ${threadId}\n\n`);
+      await logWriter.appendLog(rawRunId, `Thread ID: ${threadId}\n\n`);
 
       // Codex実行
       const turn = await thread.run(prompt);
 
       // 実行ログ記録
-      await logWriter.appendLog(runId, `\n=== Execution Result ===\n`);
-      await logWriter.appendLog(runId, `Final Response: ${turn.finalResponse}\n`);
-      await logWriter.appendLog(runId, `Items: ${JSON.stringify(turn.items, null, 2)}\n`);
-      await logWriter.appendLog(runId, `\n=== Codex Agent Execution Complete ===\n`);
+      await logWriter.appendLog(rawRunId, `\n=== Execution Result ===\n`);
+      await logWriter.appendLog(rawRunId, `Final Response: ${turn.finalResponse}\n`);
+      await logWriter.appendLog(rawRunId, `Items: ${JSON.stringify(turn.items, null, 2)}\n`);
+      await logWriter.appendLog(rawRunId, `\n=== Codex Agent Execution Complete ===\n`);
 
       // Run情報を更新
       const duration = Date.now() - startTime;
@@ -106,7 +107,7 @@ export class CodexRunner {
       await logWriter.saveRunMetadata(run);
 
       return {
-        runId,
+        runId: rawRunId,
         threadId,
         success: true,
         duration,
@@ -116,9 +117,9 @@ export class CodexRunner {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // エラーログ記録
-      await logWriter.appendLog(runId, `\n=== Error ===\n`);
-      await logWriter.appendLog(runId, errorMessage);
-      await logWriter.appendLog(runId, `\n=== Codex Agent Execution Failed ===\n`);
+      await logWriter.appendLog(rawRunId, `\n=== Error ===\n`);
+      await logWriter.appendLog(rawRunId, errorMessage);
+      await logWriter.appendLog(rawRunId, `\n=== Codex Agent Execution Failed ===\n`);
 
       // Run情報を更新
       run.status = RunStatus.FAILURE;
@@ -127,7 +128,7 @@ export class CodexRunner {
       await logWriter.saveRunMetadata(run);
 
       return {
-        runId,
+        runId: rawRunId,
         threadId,
         success: false,
         error: errorMessage,

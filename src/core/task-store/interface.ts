@@ -1,38 +1,42 @@
 import type { Task } from '../../types/task.ts';
 import type { Run } from '../../types/run.ts';
 import type { Check } from '../../types/check.ts';
+import type { TaskId } from '../../types/branded.ts';
+import type { Result } from 'option-t/plain_result';
+import type { TaskStoreError } from '../../types/errors.ts';
 
 /**
  * タスクストアのインターフェース
  *
- * 将来的なSQLite移行を考慮して、ストレージの実装を抽象化
+ * option-tのResult型を使用してエラーハンドリングを統一。
+ * 将来的なSQLite移行を考慮して、ストレージの実装を抽象化。
  */
 export interface TaskStore {
   // ===== Task CRUD =====
 
   /**
    * タスクを作成
-   * @throws タスクがすでに存在する、または書き込みエラー
+   * @returns 成功時はOk<void>、失敗時はErr<TaskStoreError>
    */
-  createTask(task: Task): Promise<void>;
+  createTask(task: Task): Promise<Result<void, TaskStoreError>>;
 
   /**
    * タスクを読み込む
-   * @throws タスクが存在しない、または読み込みエラー
+   * @returns 成功時はOk<Task>、失敗時はErr<TaskStoreError>
    */
-  readTask(taskId: string): Promise<Task>;
+  readTask(taskId: TaskId): Promise<Result<Task, TaskStoreError>>;
 
   /**
    * 全タスクの一覧を取得
-   * @throws ディレクトリ読み込みエラー
+   * @returns 成功時はOk<Task[]>、失敗時はErr<TaskStoreError>
    */
-  listTasks(): Promise<Task[]>;
+  listTasks(): Promise<Result<Task[], TaskStoreError>>;
 
   /**
    * タスクを削除
-   * @throws タスクが存在しない、または削除エラー
+   * @returns 成功時はOk<void>、失敗時はErr<TaskStoreError>
    */
-  deleteTask(taskId: string): Promise<void>;
+  deleteTask(taskId: TaskId): Promise<Result<void, TaskStoreError>>;
 
   /**
    * CAS（Compare-And-Swap）更新
@@ -41,26 +45,25 @@ export interface TaskStore {
    * @param taskId タスクID
    * @param expectedVersion 期待するバージョン番号
    * @param updateFn 更新関数（現在のタスクを受け取り、更新後のタスクを返す）
-   * @returns 更新後のタスク
-   * @throws バージョン不一致、ロック取得失敗、更新失敗
+   * @returns 成功時はOk<Task>、失敗時はErr<TaskStoreError>
    */
   updateTaskCAS(
-    taskId: string,
+    taskId: TaskId,
     expectedVersion: number,
     updateFn: (task: Task) => Task,
-  ): Promise<Task>;
+  ): Promise<Result<Task, TaskStoreError>>;
 
   // ===== Run/Check 書き込み =====
 
   /**
    * Runを書き込む
-   * @throws 書き込みエラー
+   * @returns 成功時はOk<void>、失敗時はErr<TaskStoreError>
    */
-  writeRun(run: Run): Promise<void>;
+  writeRun(run: Run): Promise<Result<void, TaskStoreError>>;
 
   /**
    * Checkを書き込む
-   * @throws 書き込みエラー
+   * @returns 成功時はOk<void>、失敗時はErr<TaskStoreError>
    */
-  writeCheck(check: Check): Promise<void>;
+  writeCheck(check: Check): Promise<Result<void, TaskStoreError>>;
 }

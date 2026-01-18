@@ -5,9 +5,23 @@ import type { Task } from '../../types/task.ts';
 import type { Run } from '../../types/run.ts';
 import type { Check } from '../../types/check.ts';
 import type { TaskStore } from './interface.ts';
+import type { TaskId } from '../../types/branded.ts';
+import { unwrapTaskId, taskId } from '../../types/branded.ts';
+import { createOk, createErr } from 'option-t/plain_result';
+import { tryCatchIntoResultAsync } from 'option-t/plain_result/try_catch_async';
+import type { Result } from 'option-t/plain_result';
+import type { TaskStoreError } from '../../types/errors.ts';
+import {
+  taskNotFound,
+  taskAlreadyExists,
+  concurrentModification,
+  ioError,
+} from '../../types/errors.ts';
 
 /**
- * ファイルストアのエラー型
+ * ファイルストアのエラー型（非推奨: 代わりにTaskStoreErrorを使用）
+ *
+ * Errorクラスを継承するため残しているが、新規コードでは使用しない。
  */
 export class FileStoreError extends Error {
   public cause?: unknown;
@@ -28,11 +42,11 @@ export type FileStoreConfig = {
 
 // ===== ヘルパー関数 =====
 
-const getTaskPath = (basePath: string, taskId: string): string =>
-  path.join(basePath, 'tasks', `${taskId}.json`);
+const getTaskPath = (basePath: string, taskId: TaskId): string =>
+  path.join(basePath, 'tasks', `${unwrapTaskId(taskId)}.json`);
 
-const getLockPath = (basePath: string, taskId: string): string =>
-  path.join(basePath, '.locks', taskId);
+const getLockPath = (basePath: string, taskId: TaskId): string =>
+  path.join(basePath, '.locks', unwrapTaskId(taskId));
 
 const getRunPath = (basePath: string, runId: string): string =>
   path.join(basePath, 'runs', `${runId}.json`);
@@ -40,38 +54,48 @@ const getRunPath = (basePath: string, runId: string): string =>
 const getCheckPath = (basePath: string, checkId: string): string =>
   path.join(basePath, 'checks', `${checkId}.json`);
 
+// ===== Result型ヘルパー =====
+
+/**
+ * 非同期関数をResult型でラップし、エラーをTaskStoreErrorに変換する
+ */
+const wrapAsync = async <T>(
+  operation: string,
+  fn: () => Promise<T>,
+  errorMapper?: (err: unknown) => TaskStoreError,
+): Promise<Result<T, TaskStoreError>> => {
+  const result = await tryCatchIntoResultAsync(fn);
+  if (!result.ok) {
+    return createErr(errorMapper ? errorMapper(result.err) : ioError(operation, result.err));
+  }
+  return result;
+};
+
 // ===== ロック操作 =====
 
 /**
  * ロックを取得（mkdirベース）
  */
-const acquireLock = async (basePath: string, taskId: string): Promise<void> => {
+const acquireLock = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
   const lockPath = getLockPath(basePath, taskId);
-  try {
+  return wrapAsync('acquireLock', async () => {
     // 親ディレクトリ（.locks/）を作成
     const locksDir = path.dirname(lockPath);
     await fs.mkdir(locksDir, { recursive: true });
 
     // ロックディレクトリを作成（atomicにするためrecursive: false）
     await fs.mkdir(lockPath, { recursive: false });
-  } catch (err) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'EEXIST') {
-      throw new FileStoreError(`Lock already held: ${taskId}`, err);
-    }
-    throw new FileStoreError(`Failed to acquire lock: ${taskId}`, err);
-  }
+  });
 };
 
 /**
  * ロックを解放
  */
-const releaseLock = async (basePath: string, taskId: string): Promise<void> => {
+const releaseLock = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
   const lockPath = getLockPath(basePath, taskId);
-  try {
+  return wrapAsync('releaseLock', async () => {
     await fs.rmdir(lockPath);
-  } catch (err) {
-    throw new FileStoreError(`Failed to release lock: ${taskId}`, err);
-  }
+  });
 };
 
 // ===== Task操作 =====
@@ -79,109 +103,116 @@ const releaseLock = async (basePath: string, taskId: string): Promise<void> => {
 /**
  * タスクを読み込む
  */
-const readTask = async (basePath: string, taskId: string): Promise<Task> => {
+const readTask = async (basePath: string, taskId: TaskId): Promise<Result<Task, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, taskId);
-  try {
-    const content = await fs.readFile(taskPath, 'utf-8');
-    const data = JSON.parse(content);
-    return TaskSchema.parse(data);
-  } catch (err) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
-      throw new FileStoreError(`Task not found: ${taskId}`, err);
+  return wrapAsync(
+    'readTask',
+    async () => {
+      const content = await fs.readFile(taskPath, 'utf-8');
+      const data = JSON.parse(content);
+      return TaskSchema.parse(data);
+    },
+    (err) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        return taskNotFound(taskId);
+      }
+      return ioError('readTask', err);
     }
-    throw new FileStoreError(`Failed to read task: ${taskId}`, err);
-  }
+  );
 };
 
 /**
  * タスクを書き込む
  */
-const writeTask = async (basePath: string, task: Task): Promise<void> => {
+const writeTask = async (basePath: string, task: Task): Promise<Result<void, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, task.id);
-  try {
+  return wrapAsync('writeTask', async () => {
     const dir = path.dirname(taskPath);
     await fs.mkdir(dir, { recursive: true });
     const content = JSON.stringify(task, null, 2);
     await fs.writeFile(taskPath, content, 'utf-8');
-  } catch (err) {
-    throw new FileStoreError(`Failed to write task: ${task.id}`, err);
-  }
+  });
 };
 
 /**
  * タスクを作成（新規タスクJSON作成）
  */
-const createTask = async (basePath: string, task: Task): Promise<void> => {
+const createTask = async (basePath: string, task: Task): Promise<Result<void, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, task.id);
-  try {
-    // タスクがすでに存在するかチェック
-    try {
-      await fs.access(taskPath);
-      throw new FileStoreError(`Task already exists: ${task.id}`);
-    } catch (accessErr) {
-      // ファイルが存在しない場合は正常（続行）
-      if (
-        !(
-          accessErr &&
-          typeof accessErr === 'object' &&
-          'code' in accessErr &&
-          accessErr.code === 'ENOENT'
-        )
-      ) {
-        throw accessErr;
-      }
-    }
 
-    await writeTask(basePath, task);
-  } catch (err) {
-    if (err instanceof FileStoreError) {
-      throw err;
+  // タスクがすでに存在するかチェック
+  const accessResult = await wrapAsync(
+    'createTask.access',
+    async () => {
+      await fs.access(taskPath);
+      return true;
+    },
+    (err) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        return null as any; // ファイルが存在しない = 正常（nullを返す）
+      }
+      return ioError('createTask.access', err);
     }
-    throw new FileStoreError(`Failed to create task: ${task.id}`, err);
+  );
+
+  // accessがエラーを返した場合（ENOENT以外のエラー）
+  if (!accessResult.ok) {
+    return accessResult;
   }
+
+  // ファイルが存在する場合
+  if (accessResult.val === true) {
+    return createErr(taskAlreadyExists(task.id));
+  }
+
+  // タスクを書き込む
+  return writeTask(basePath, task);
 };
 
 /**
  * 全タスクの一覧を取得
  */
-const listTasks = async (basePath: string): Promise<Task[]> => {
+const listTasks = async (basePath: string): Promise<Result<Task[], TaskStoreError>> => {
   const tasksDir = path.join(basePath, 'tasks');
-  try {
+  return wrapAsync('listTasks', async () => {
     await fs.mkdir(tasksDir, { recursive: true });
     const files = await fs.readdir(tasksDir);
     const taskFiles = files.filter((file) => file.endsWith('.json'));
 
     const tasks: Task[] = [];
     for (const file of taskFiles) {
-      const taskId = path.basename(file, '.json');
-      try {
-        const task = await readTask(basePath, taskId);
-        tasks.push(task);
-      } catch (err) {
+      const taskIdStr = path.basename(file, '.json');
+      const tid = taskId(taskIdStr);
+      const taskResult = await readTask(basePath, tid);
+      if (taskResult.ok) {
+        tasks.push(taskResult.val);
+      } else {
         // 個別のタスク読み込みエラーはスキップ
-        console.warn(`Failed to read task ${taskId}:`, err);
+        console.warn(`Failed to read task ${taskIdStr}:`, taskResult.err);
       }
     }
 
     return tasks;
-  } catch (err) {
-    throw new FileStoreError('Failed to list tasks', err);
-  }
+  });
 };
 
 /**
  * タスクを削除
  */
-const deleteTask = async (basePath: string, taskId: string): Promise<void> => {
+const deleteTask = async (basePath: string, taskId: TaskId): Promise<Result<void, TaskStoreError>> => {
   const taskPath = getTaskPath(basePath, taskId);
-  try {
-    await fs.unlink(taskPath);
-  } catch (err) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
-      throw new FileStoreError(`Task not found: ${taskId}`, err);
+  return wrapAsync(
+    'deleteTask',
+    async () => {
+      await fs.unlink(taskPath);
+    },
+    (err) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+        return taskNotFound(taskId);
+      }
+      return ioError('deleteTask', err);
     }
-    throw new FileStoreError(`Failed to delete task: ${taskId}`, err);
-  }
+  );
 };
 
 /**
@@ -189,43 +220,44 @@ const deleteTask = async (basePath: string, taskId: string): Promise<void> => {
  */
 const updateTaskCAS = async (
   basePath: string,
-  taskId: string,
+  tid: TaskId,
   expectedVersion: number,
   updateFn: (task: Task) => Task,
-): Promise<Task> => {
+): Promise<Result<Task, TaskStoreError>> => {
+  // 1. ロック取得
+  const lockResult = await acquireLock(basePath, tid);
+  if (!lockResult.ok) {
+    return lockResult;
+  }
+
   try {
-    // 1. ロック取得
-    await acquireLock(basePath, taskId);
-
-    try {
-      // 2. タスク読み込み
-      const currentTask = await readTask(basePath, taskId);
-
-      // 3. versionチェック
-      if (currentTask.version !== expectedVersion) {
-        throw new FileStoreError(
-          `Version mismatch: expected ${expectedVersion}, got ${currentTask.version} for task ${taskId}`,
-        );
-      }
-
-      // 4. 更新関数実行（version++）
-      const updatedTask = updateFn(currentTask);
-      updatedTask.version = currentTask.version + 1;
-      updatedTask.updatedAt = new Date().toISOString();
-
-      // 5. タスク書き込み
-      await writeTask(basePath, updatedTask);
-
-      return updatedTask;
-    } finally {
-      // 6. ロック解放（必ず実行）
-      await releaseLock(basePath, taskId);
+    // 2. タスク読み込み
+    const readResult = await readTask(basePath, tid);
+    if (!readResult.ok) {
+      return readResult;
     }
-  } catch (err) {
-    if (err instanceof FileStoreError) {
-      throw err;
+    const currentTask = readResult.val;
+
+    // 3. versionチェック
+    if (currentTask.version !== expectedVersion) {
+      return createErr(concurrentModification(tid, expectedVersion, currentTask.version));
     }
-    throw new FileStoreError(`Failed to update task with CAS: ${taskId}`, err);
+
+    // 4. 更新関数実行（version++）
+    const updatedTask = updateFn(currentTask);
+    updatedTask.version = currentTask.version + 1;
+    updatedTask.updatedAt = new Date().toISOString();
+
+    // 5. タスク書き込み
+    const writeResult = await writeTask(basePath, updatedTask);
+    if (!writeResult.ok) {
+      return writeResult;
+    }
+
+    return createOk(updatedTask);
+  } finally {
+    // 6. ロック解放（必ず実行）
+    await releaseLock(basePath, tid);
   }
 };
 
@@ -234,31 +266,27 @@ const updateTaskCAS = async (
 /**
  * Runを書き込む
  */
-const writeRun = async (basePath: string, run: Run): Promise<void> => {
-  const runPath = getRunPath(basePath, run.id);
-  try {
+const writeRun = async (basePath: string, run: Run): Promise<Result<void, TaskStoreError>> => {
+  const runPath = getRunPath(basePath, String(run.id));
+  return wrapAsync('writeRun', async () => {
     const dir = path.dirname(runPath);
     await fs.mkdir(dir, { recursive: true });
     const content = JSON.stringify(run, null, 2);
     await fs.writeFile(runPath, content, 'utf-8');
-  } catch (err) {
-    throw new FileStoreError(`Failed to write run: ${run.id}`, err);
-  }
+  });
 };
 
 /**
  * Checkを書き込む
  */
-const writeCheck = async (basePath: string, check: Check): Promise<void> => {
-  const checkPath = getCheckPath(basePath, check.id);
-  try {
+const writeCheck = async (basePath: string, check: Check): Promise<Result<void, TaskStoreError>> => {
+  const checkPath = getCheckPath(basePath, String(check.id));
+  return wrapAsync('writeCheck', async () => {
     const dir = path.dirname(checkPath);
     await fs.mkdir(dir, { recursive: true });
     const content = JSON.stringify(check, null, 2);
     await fs.writeFile(checkPath, content, 'utf-8');
-  } catch (err) {
-    throw new FileStoreError(`Failed to write check: ${check.id}`, err);
-  }
+  });
 };
 
 // ===== TaskStore生成 =====
