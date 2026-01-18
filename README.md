@@ -48,6 +48,16 @@ pnpm format
 
 ## Implementation Status
 
+### ✅ Phase 2 完了 (2026-01-19)
+
+**Phase 2**では、実行可視性の大幅な改善とエージェント統合を実装：
+
+- **実行ログの自動保存**: Worker実行時に`runs/`ディレクトリにログとメタデータを保存
+- **Plannerエージェント統合**: ダミー実装を置き換え、Claude/Codexで実際にタスク分解を実行
+- **CLI出力の改善**: 実行ログファイルのパスを表示、ユーザーが途中経過を確認可能
+
+詳細は [docs/plans/improvement-plan.md](docs/plans/improvement-plan.md) を参照。
+
 ### ✅ Phase 1 完了 (2026-01-19)
 
 すべての計画済みエピックが完了し、Tier 2 MVPレベルに到達しました：
@@ -70,12 +80,15 @@ pnpm format
   - Claude Agent SDK統合 (`@anthropic-ai/claude-agent-sdk`)
   - OpenAI Codex SDK統合 (`@openai/codex-sdk`)
   - 関数型Runnerアーキテクチャ
+  - **Phase 2追加**: Worker/Plannerでの実行ログ自動保存
 - **Epic 5: Orchestrator**
   - 並列度制御付きタスクスケジューラー
   - Planner/Worker/Judge状態機械
   - 完全なオーケストレーションサイクル (Planner→Worker→Judge)
   - 関数型による状態管理と操作分離
   - Result型エラーハンドリング
+  - **Phase 2追加**: Plannerエージェント統合（Claude/Codex）
+  - **Phase 2追加**: 実行ログファイルパスのCLI表示
 - **Epic 6: CLI Commands**
   - `agent init` - プロジェクト初期化
   - `agent run` - タスク実行
