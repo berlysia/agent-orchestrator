@@ -201,7 +201,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 7. 成功時の処理
     const output = agentResult.val;
-    const rateLimitReason = detectRateLimitReason(output.finalResponse);
+    const rateLimitReason = detectRateLimitReason(output.finalResponse ?? "");
     if (rateLimitReason) {
       const errorMsg = `Rate limit detected (${rateLimitReason})`;
       await deps.runnerEffects.appendLog(
