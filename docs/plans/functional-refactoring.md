@@ -19,10 +19,10 @@
 | Phase 2 | ✅ 完了    | 2026-01-18 | TaskStore Result型対応完了                |
 | Phase 3 | 🔄 進行中  | -          | VCSアダプター関数化（新実装完成、移行未完了） |
 | Phase 4 | ✅ 完了    | 2026-01-19 | Runner関数化（内部実装完全移行、互換性維持） |
-| Phase 5 | 🔄 進行中  | -          | Worker関数化完了、Orchestrator関数化が次   |
+| Phase 5 | ✅ 完了    | 2026-01-19 | Worker/Orchestrator関数化完了   |
 | Phase 6 | ✅ 完了    | 2026-01-18 | テストResult型対応（48/48テスト成功）     |
 
-**現在の完了度**: 約80%（Phase 5部分完了、Orchestrator関数化が次のステップ）
+**現在の完了度**: 約95%（Phase 5完了、残りは古いクラス削除とCLI切り替えのみ）
 
 **最新の進捗** (2026-01-19):
 - ✅ Step 1: index.ts更新（新実装export追加）
@@ -30,15 +30,17 @@
 - ✅ Step 2.5: エージェント実行機能実装（runClaudeAgent/runCodexAgent）
 - ✅ Step 2.6: Runner内部実装を新RunnerEffectsに完全移行
 - ✅ Step 4: Worker関数化（worker-operations.ts、scheduler-state.ts作成）
+- ✅ Step 5: Orchestrator関数化（scheduler/planner/judge/orchestrate実装）
 - 📝 コミット1: feat(phase4): implement functional RunnerEffects with LogWriter migration
 - 📝 コミット2: feat(phase4): migrate Runner class to use functional RunnerEffects internally
 - 📝 コミット3: feat(phase5): implement functional Worker operations and Scheduler state
+- 📝 コミット4: feat(phase5): implement functional Orchestrator operations
 
 **Phase 4完了**: Runnerクラスは互換性アダプターとして機能し、内部では完全に関数型実装を使用
 
-**Phase 5部分完了**: Worker関数化完了、Scheduler状態管理の純粋関数化完了
+**Phase 5完了**: Worker/Orchestrator関数化完了、Result型で統一されたエラーハンドリング実現
 
-**次のステップ**: Step 5（Orchestrator関数化）の実行
+**次のステップ**: Step 3（CLI切り替え）とStep 6（古いクラス削除）の実行
 
 ## 現状の問題点
 
@@ -651,10 +653,10 @@ export const createOrchestrator = (deps: OrchestrateDeps) => ({
 |------|---------|----------|-------------|------|
 | 1 | index.ts更新 | 低 | ビルド成功 | ✅ 完了 (2026-01-19) |
 | 2 | LogWriter関数化確認 | 中 | runner-effects-impl.ts作成 | ✅ 完了 (2026-01-19) |
-| 3 | CLI切り替え | 中 | CLIコマンド動作確認 | ⏸️ 保留中（Phase 5完了後） |
+| 3 | CLI切り替え | 中 | CLIコマンド動作確認 | ⏸️ 保留中（古いクラス削除後） |
 | 4 | Worker関数化 | 高 | **Phase 5部分完了** | ✅ 完了 (2026-01-19) |
-| 5 | Orchestrator関数化 | 高 | **Phase 5完了** | 🔄 次のステップ |
-| 6 | 古いクラス削除 | 中 | **Phase 3-4完了** | ⏸️ 保留中 |
+| 5 | Orchestrator関数化 | 高 | **Phase 5完了** | ✅ 完了 (2026-01-19) |
+| 6 | 古いクラス削除 | 中 | **Phase 3-4完了** | 🔄 次のステップ |
 | 7 | テスト全体実行 | - | **全Phase完了** | ⏸️ 保留中 |
 
 ### 中断・ロールバック戦略
@@ -676,6 +678,52 @@ export const createOrchestrator = (deps: OrchestrateDeps) => ({
 - ✅ 全関数がResult型を返却
 - ✅ CLIコマンドが正常動作
 - ✅ docs/architecture.mdとの整合性確認
+
+---
+
+### 2026-01-19: Phase 5完了（Step 5）
+
+**実施作業**:
+1. **Step 5: Orchestrator関数化** ✅
+   - `scheduler-operations.ts` を作成（関数型実装）
+     - `createSchedulerOperations` ファクトリ関数で Scheduler 操作を提供
+     - `getReadyTasks`、`claimTask`、`completeTask`、`blockTask` を実装
+     - Result型で統一されたエラーハンドリング
+     - scheduler-state.ts と連携してイミュータブルな状態管理
+   - `planner-operations.ts` を作成（関数型実装）
+     - `createPlannerOperations` ファクトリ関数
+     - `planTasks` 関数でタスク分解を実装
+     - ダミー実装を保持（エージェント統合は後回し）
+   - `judge-operations.ts` を作成（関数型実装）
+     - `createJudgeOperations` ファクトリ関数
+     - `judgeTask`、`markTaskAsCompleted`、`markTaskAsBlocked` を実装
+     - CI統合準備（TODO付き）
+   - `orchestrate.ts` を作成（メインオーケストレーション）
+     - `createOrchestrator` ファクトリ関数
+     - Planner→Worker→Judgeサイクルを関数合成で実装
+     - 全依存関係を明示的に注入（GitEffects、RunnerEffects、TaskStore）
+     - OrchestrateDeps に agentType を追加
+   - `index.ts` を更新
+     - 新しい関数型実装をexport追加
+     - 既存のクラスベース実装は互換性のため保持
+
+**成果物**:
+- ✅ `src/core/orchestrator/scheduler-operations.ts` - Scheduler関数型実装（158行）
+- ✅ `src/core/orchestrator/planner-operations.ts` - Planner関数型実装（117行）
+- ✅ `src/core/orchestrator/judge-operations.ts` - Judge関数型実装（129行）
+- ✅ `src/core/orchestrator/orchestrate.ts` - メインオーケストレーション（216行）
+- ✅ `src/core/orchestrator/index.ts` - 新実装export追加
+- ✅ コミット: `feat(phase5): implement functional Orchestrator operations`
+
+**検証結果**:
+- ✅ `pnpm build` 成功（型エラーなし）
+- ✅ 全48テスト成功（既存テストは影響なし）
+- ✅ Phase 5完了（Worker/Orchestrator関数化完成）
+
+**設計判断**:
+- OrchestrationResult は index.ts と orchestrate.ts の両方で定義（循環インポート回避）
+- 既存のクラスベース実装は互換性維持のため保持
+- 次のステップ: Step 6（古いクラス削除）
 
 ---
 
