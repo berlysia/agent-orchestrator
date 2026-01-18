@@ -56,6 +56,9 @@ const ChecksConfigSchema = z
  * `.agent/config.json` に保存される設定
  */
 export const ConfigSchema = z.object({
+  /** JSON Schema参照（省略可能） */
+  $schema: z.string().optional(),
+
   /** 開発対象リポジトリのパス（app-repo） */
   appRepoPath: z.string(),
 
