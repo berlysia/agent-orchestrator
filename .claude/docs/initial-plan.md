@@ -65,25 +65,35 @@
 #### ✅ **SDK経由を推奨（CLI経由より容易）**
 
 **Claude Agent SDK** ([公式リポジトリ](https://github.com/anthropics/claude-agent-sdk-typescript)):
-- パッケージ: `@anthropic-ai/claude-agent-sdk`
+- パッケージ: `@anthropic-ai/claude-agent-sdk`（旧: `@anthropic-ai/claude-code`）
 - ストリーミングメッセージ取得、MCP tool統合対応
 - TypeScript型安全、構造化出力対応
+- Node.js 18+ 必須、Zod ^3.24.1 必要
 - 使用例:
   ```typescript
-  import { query } from '@anthropic-ai/claude-agent-sdk';
-  const result = await query("プロンプト");
+  import { Agent } from '@anthropic-ai/claude-agent-sdk';
+  const agent = new Agent();
+  const result = await agent.run({
+    prompt: "プロンプト",
+    // tools, context等を指定
+  });
   ```
 
 **OpenAI Codex SDK** ([npm](https://www.npmjs.com/package/@openai/codex-sdk)):
 - パッケージ: `@openai/codex-sdk`
-- Thread永続化、runStreamed()でイベント取得
-- CI/CD統合向け設計、構造化JSON出力対応
+- 最新版: 0.87.0（2026-01-16リリース）
+- デフォルトモデル: gpt-5.2-codex（2026-01-14以降）
+- Thread永続化、ストリーミング実行、構造化JSON出力対応
+- メタデータのラウンドトリップ、複数ID待機（collaboration wait）対応
 - 使用例:
   ```typescript
   import { Codex } from '@openai/codex-sdk';
   const codex = new Codex();
-  const thread = codex.startThread();
-  const result = await thread.run("プロンプト");
+  const thread = await codex.threads.create();
+  const result = await thread.run({
+    prompt: "プロンプト",
+    // environment, workingDirectory等を指定
+  });
   ```
 
 #### **CLI経由は代替案として保持** ⚠️
@@ -95,7 +105,11 @@ CLI経由でもプログラム起動可能（検証済み）:
 **実装方針**: SDK優先、SDK未対応の場合のみCLI経由を実装
 
 **検証日時**: 2026-01-18
-**参考**: [Claude Agent SDK Docs](https://platform.claude.com/docs/en/agent-sdk/overview), [Codex SDK README](https://github.com/openai/codex/blob/main/sdk/typescript/README.md)
+**参考**:
+- [Claude Agent SDK on npm](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk)
+- [Claude Agent SDK Quickstart](https://platform.claude.com/docs/en/agent-sdk/quickstart)
+- [Codex SDK on npm](https://www.npmjs.com/package/@openai/codex-sdk)
+- [Codex SDK Docs](https://developers.openai.com/codex/sdk/)
 
 ---
 
@@ -159,9 +173,14 @@ Week 3: CLI統合
 
 2. **[E1-S1-T2]** tsconfig.json設定 (S)
    - strict: true、module: `NodeNext`、target: `ESNext`
-   - erasableSyntaxOnly: true, allowImportingTsExtensions: true, rewriteRelativeImportExtensions: true
-     - 開発実行時・テスト時は`.ts`拡張子のまま実行する
+   - moduleResolution: `NodeNext`
+   - esModuleInterop: true、skipLibCheck: true
+   - **実験的機能** (TypeScript 5.7+):
+     - erasableSyntaxOnly: true (型のみimport/exportを自動判定)
+     - allowImportingTsExtensions: true (.ts拡張子付きimport許可)
+     - rewriteRelativeImportExtensions: true (出力時に.js等に書き換え)
    - baseUrl/pathsの利用は禁止、遠いモジュールの依存が多数必要になるならパッケージ分割してmonorepo化を検討する
+   - **Note**: TypeScriptのネイティブ実装版`tsgo`（`@typescript/native-preview`）を使用
    - 受け入れ: `pnpm tsgo --noEmit`成功
 
 3. **[E1-S1-T3]** Linter/Formatter設定 (S)
@@ -218,8 +237,10 @@ Week 3: CLI統合
 **タスク**:
 0. **[E2-S1-T0]** CAS実装方式の選定 (S) ⚠️**事前タスク**
    - JSONファイルベースのCAS実装方式を検証
-   - 方式候補: (1) mkdirベースロック、(2) Git commit ID版管理
-   - 並列度3以下ならmkdir方式で十分と判断
+   - 方式候補:
+     - (1) Git commit方式（推奨）: versionフィールド+push競合検出、2リポジトリ方式と整合
+     - (2) mkdirベースロック: シンプルだがGit管理外、並列度3以下なら十分
+   - **推奨**: Git commit方式（agent-coord repoにコミット→push→競合時リトライ）
    - 受け入れ: 実装方式決定、プロトタイプ動作確認
 
 1. **[E2-S1-T1]** ファイルストア基盤 (M)
@@ -349,16 +370,18 @@ Week 3: CLI統合
 **タスク**:
 1. **[E4-S2-T1]** Claude Agent SDK実行 (M)
    - `src/core/runner/claude-runner.ts`作成
-   - `@anthropic-ai/claude-agent-sdk`インストール
+   - `@anthropic-ai/claude-agent-sdk`インストール（Zod ^3.24.1も必要）
    - Task情報からプロンプトを構築
-   - `query()`でエージェント実行、ストリーミング結果取得
+   - `Agent.run()`でエージェント実行、ストリーミング結果取得
+   - worktree内でのコンテキスト制御（tools、workingDirectory等）
    - 受け入れ: **SDK経由でエージェント実行成功、Task受け取り可能**
 
 2. **[E4-S2-T2]** Codex SDK実行 (M)
    - `src/core/runner/codex-runner.ts`作成
-   - `@openai/codex-sdk`インストール
+   - `@openai/codex-sdk`インストール（最新: 0.87.0）
    - Task情報からプロンプトを構築
-   - `startThread()` + `run()`でエージェント実行
+   - `threads.create()` + `run()`でエージェント実行
+   - Thread永続化とメタデータ管理
    - 受け入れ: **SDK経由でエージェント実行成功、Thread永続化確認**
 
 3. **[E4-S2-T3]** Runner統合インターフェース (S)
@@ -573,13 +596,13 @@ Week 3: CLI統合
 
 | リスク | 優先度 | 影響度 | 対策 | ステータス |
 |--------|--------|--------|------|-----------|
-| **CAS並行制御の理解不足** | P0 | 高 | Story 2.1 T0でmkdir方式 vs Git commit方式を検証 | 🟡 要対策 |
+| **CAS並行制御の理解不足** | P0 | 高 | Story 2.1 T0でGit commit方式（推奨）を検証 | 🟡 要対策 |
 | **Worktree操作の複雑度** | P0 | 高 | git worktreeコマンド手動実験 | 🟡 要対策 |
 | **Orchestrator状態機械の複雑度** | P0 | 高 | シンプルな状態遷移から開始、段階的拡張 | 🟡 要対策 |
-| **Claude Code/Codex CLI起動方法の未確認** | ~~P1~~ **P0** | ~~中~~ **高** | ~~各CLI手動実行で引数確認~~ **SDK利用に変更、検証完了** | ✅ **解決** |
+| **SDK利用方法の理解** | ~~P0~~ | ~~高~~ | ~~各CLI手動実行で引数確認~~ **SDK利用に変更、検証完了（2026-01-18）** | ✅ **解決** |
 | **Git操作のコンフリクト** | P0 | 高 | Epic 5.2 T4でrebase戦略定義、リトライロジック実装 | 🟡 要対策 |
 | **エラーハンドリングの網羅性不足** | P1 | 中 | 初期は基本的なエラーのみ対応、Epic 5.2 T4で分類表作成 | 🟡 要対策 |
-| **依存パッケージの互換性** | P1 | 中 | README.mdにClaude/Codex CLIの最小バージョン要件を明記 | 🟡 要対策 |
+| **依存パッケージの互換性** | P1 | 中 | README.mdにSDK最小バージョン要件を明記（Claude: Node 18+、Codex: 0.87.0） | 🟡 要対策 |
 | **ディスク容量** | P2 | 中 | worktree数の上限設定（デフォルト3、設定可能） | 🟢 許容 |
 | **テストの不足** | P2 | 低 | 手動テスト優先、自動テストは後回し | 🟢 許容 |
 
