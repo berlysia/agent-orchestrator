@@ -20,7 +20,11 @@
 - Story 2.1: JSONファイルストア基本実装（CAS実装含む）
 - Story 2.2: TaskStoreインターフェース抽象化
 
-**🚧 Epic 3: VCS Adapter** - 未着手
+**✅ Epic 3: VCS Adapter** - 完了
+
+- Story 3.1: Git基本操作ラッパー（simple-git採用）
+- Story 3.2: Worktree管理（child_process経由）
+
 **🚧 Epic 4: Runner** - 未着手
 **🚧 Epic 5: Orchestrator** - 未着手
 **🚧 Epic 6: CLI基本コマンド** - 未着手
