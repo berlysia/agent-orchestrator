@@ -1,7 +1,10 @@
 import type { Task } from '../../types/task.ts';
-import { ClaudeRunner, type ClaudeRunnerOptions, type ClaudeRunResult } from './claude-runner.ts';
-import { CodexRunner, type CodexRunnerOptions, type CodexRunResult } from './codex-runner.ts';
+import type { ClaudeRunResult } from './claude-runner.ts';
+import type { CodexRunResult } from './codex-runner.ts';
 import { LogWriter } from './log-writer.ts';
+import { createRunnerEffects } from './runner-effects-impl.ts';
+import { createRunTask } from './run-task.ts';
+import { isErr } from 'option-t/plain_result';
 
 /**
  * エージェント種別
@@ -26,34 +29,30 @@ export type RunResult = ClaudeRunResult | CodexRunResult;
 /**
  * Runner統合クラス
  *
- * ClaudeRunnerとCodexRunnerを統一的に扱うためのインターフェース。
+ * 内部実装は新しい関数型 RunnerEffects を使用するが、
+ * Orchestrator との互換性のため、クラスインターフェースを維持。
  */
 export class Runner {
   private logWriter: LogWriter;
-  private claudeRunner: ClaudeRunner;
-  private codexRunner: CodexRunner;
+  private taskRunner: ReturnType<typeof createRunTask>;
 
   constructor(options: RunnerOptions) {
+    // 後方互換性のため LogWriter インスタンスを保持
     this.logWriter = new LogWriter({ coordRepoPath: options.coordRepoPath });
 
-    const claudeOptions: ClaudeRunnerOptions = {
+    // 新しい関数型実装を使用
+    const effects = createRunnerEffects({
       coordRepoPath: options.coordRepoPath,
-      logWriter: this.logWriter,
       timeout: options.timeout,
-    };
+    });
 
-    const codexOptions: CodexRunnerOptions = {
-      coordRepoPath: options.coordRepoPath,
-      logWriter: this.logWriter,
-      timeout: options.timeout,
-    };
-
-    this.claudeRunner = new ClaudeRunner(claudeOptions);
-    this.codexRunner = new CodexRunner(codexOptions);
+    this.taskRunner = createRunTask({ effects });
   }
 
   /**
    * 指定されたエージェント種別でタスクを実行
+   *
+   * 新しい関数型実装を使用し、Result型を旧インターフェースに変換。
    *
    * @param agentType エージェント種別 ('claude' | 'codex')
    * @param task 実行するタスク
@@ -61,14 +60,35 @@ export class Runner {
    * @returns 実行結果
    */
   async runTask(agentType: AgentType, task: Task, workingDirectory: string): Promise<RunResult> {
+    let result;
+
     switch (agentType) {
       case 'claude':
-        return this.claudeRunner.runTask(task, workingDirectory);
+        result = await this.taskRunner.runClaudeTask(task, workingDirectory);
+        break;
       case 'codex':
-        return this.codexRunner.runTask(task, workingDirectory);
+        result = await this.taskRunner.runCodexTask(task, workingDirectory);
+        break;
       default:
         throw new Error(`Unknown agent type: ${agentType}`);
     }
+
+    // Result<T, E> を旧インターフェースに変換
+    if (isErr(result)) {
+      return {
+        runId: `error-${Date.now()}`,
+        success: false,
+        error: result.err.message,
+        duration: 0,
+      };
+    }
+
+    return {
+      runId: result.val.runId,
+      success: result.val.success,
+      duration: result.val.duration,
+      threadId: result.val.threadId,
+    };
   }
 
   /**

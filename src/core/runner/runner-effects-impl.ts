@@ -7,7 +7,6 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createErr } from 'option-t/plain_result';
 import { tryCatchIntoResultAsync } from 'option-t/plain_result/try_catch_async';
 import { mapErrForResult } from 'option-t/plain_result/map_err';
 import type { Result } from 'option-t/plain_result';
@@ -88,26 +87,71 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   };
 
   // ===== エージェント実行実装 =====
-  // NOTE: 現時点では ClaudeRunner/CodexRunner クラスの実装を呼び出す
-  // 将来的にはこれらも関数化して統合する予定
 
+  /**
+   * Claude エージェントを実行
+   *
+   * ClaudeRunner の実装を関数型に移植。
+   * unstable_v2_prompt を使用してエージェントを実行する。
+   */
   const runClaudeAgent = async (
-    _prompt: string,
+    prompt: string,
     _workingDirectory: string,
-    _model: string,
+    model: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
-    // TODO: ClaudeRunner の機能を関数化して実装
-    // 現時点では未実装
-    return createErr(agentExecutionError('claude', new Error('Not implemented yet')));
+    const result = await tryCatchIntoResultAsync(async () => {
+      // Claude Agent SDK をインポート
+      const { unstable_v2_prompt } = await import('@anthropic-ai/claude-agent-sdk');
+
+      // Claude Agent実行
+      // NOTE: SDKが直接workingDirectoryをサポートしていない場合は、
+      // プロセス起動前にprocess.chdir()を使用するか、
+      // env経由でCLIに渡す必要がある
+      const sdkResult = await unstable_v2_prompt(prompt, {
+        model: model || 'claude-sonnet-4-5-20250929',
+      });
+
+      // AgentOutput形式に変換
+      return {
+        finalResponse: JSON.stringify(sdkResult),
+      } satisfies AgentOutput;
+    });
+
+    return mapErrForResult(result, (e) => agentExecutionError('claude', e));
   };
 
+  /**
+   * Codex エージェントを実行
+   *
+   * CodexRunner の実装を関数型に移植。
+   * @openai/codex-sdk を使用してエージェントを実行する。
+   */
   const runCodexAgent = async (
-    _prompt: string,
-    _workingDirectory: string,
+    prompt: string,
+    workingDirectory: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
-    // TODO: CodexRunner の機能を関数化して実装
-    // 現時点では未実装
-    return createErr(agentExecutionError('codex', new Error('Not implemented yet')));
+    const result = await tryCatchIntoResultAsync(async () => {
+      // Codex SDK をインポート
+      const { Codex } = await import('@openai/codex-sdk');
+      const codex = new Codex();
+
+      // Codex Thread作成
+      const thread = codex.startThread({
+        workingDirectory,
+      });
+
+      // Codex実行
+      const turn = await thread.run(prompt);
+
+      // AgentOutput形式に変換
+      return {
+        finalResponse: turn.finalResponse,
+        items: turn.items,
+        threadId: thread.id ?? undefined,
+      } satisfies AgentOutput;
+    });
+
+    return mapErrForResult(result, (e) => agentExecutionError('codex', e));
   };
 
   // ===== インターフェース実装 =====

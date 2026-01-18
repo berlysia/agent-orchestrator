@@ -18,18 +18,23 @@
 | Phase 1 | ✅ 完了    | 2026-01-18 | Task/Run/Check型にBranded Types適用       |
 | Phase 2 | ✅ 完了    | 2026-01-18 | TaskStore Result型対応完了                |
 | Phase 3 | 🔄 進行中  | -          | VCSアダプター関数化（新実装完成、移行未完了） |
-| Phase 4 | 🔄 進行中  | 2026-01-19 | Runner関数化（Step 1-2完了: export整備、LogWriter関数化） |
+| Phase 4 | ✅ 完了    | 2026-01-19 | Runner関数化（内部実装完全移行、互換性維持） |
 | Phase 5 | 🔄 開始準備 | -          | Orchestrator関数化                        |
 | Phase 6 | ✅ 完了    | 2026-01-18 | テストResult型対応（48/48テスト成功）     |
 
-**現在の完了度**: 約60%（Step 1-2完了、Step 3以降が未完了）
+**現在の完了度**: 約70%（Phase 4完了、Phase 5が次のステップ）
 
 **最新の進捗** (2026-01-19):
 - ✅ Step 1: index.ts更新（新実装export追加）
 - ✅ Step 2: LogWriter関数化（runner-effects-impl.ts作成）
-- 📝 コミット: feat(phase4): implement functional RunnerEffects with LogWriter migration
+- ✅ Step 2.5: エージェント実行機能実装（runClaudeAgent/runCodexAgent）
+- ✅ Step 2.6: Runner内部実装を新RunnerEffectsに完全移行
+- 📝 コミット1: feat(phase4): implement functional RunnerEffects with LogWriter migration
+- 📝 コミット2: feat(phase4): migrate Runner class to use functional RunnerEffects internally
 
-**次のステップ**: Step 3（CLI切り替え）以降の実行（詳細は「Phase 3-5完成への実行計画」参照）
+**Phase 4完了**: Runnerクラスは互換性アダプターとして機能し、内部では完全に関数型実装を使用
+
+**次のステップ**: Phase 5（Worker/Orchestrator関数化）の実行
 
 ## 現状の問題点
 
@@ -672,7 +677,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => ({
 
 ## 作業ログ
 
-### 2026-01-19: Step 1-2完了
+### 2026-01-19: Phase 4完了（Step 1-2.6）
 
 **実施作業**:
 1. **Step 1: index.ts更新** ✅
@@ -684,17 +689,34 @@ export const createOrchestrator = (deps: OrchestrateDeps) => ({
    - `runner-effects.ts` に `loadRunMetadata` / `readLog` メソッドを追加
    - `runner-effects-impl.ts` を新規作成（LogWriterの全機能を関数化）
    - option-t の `tryCatchIntoResultAsync` + `mapErrForResult` でエラー処理統一
-   - エージェント実行メソッド（runClaudeAgent/runCodexAgent）は未実装（TODO）
+
+3. **Step 2.5: エージェント実行機能実装** ✅
+   - `runClaudeAgent`: Claude Agent SDK (`unstable_v2_prompt`) を使用
+   - `runCodexAgent`: Codex SDK (`@openai/codex-sdk`) を使用
+   - Result型を返し、エラー処理を統一
+
+4. **Step 2.6: Runner内部実装移行** ✅
+   - `Runner` クラスを互換性アダプターとして再実装
+   - 内部で `createRunnerEffects` + `createRunTask` を使用
+   - `Result<T, E>` を旧 `RunResult` インターフェースに変換
+   - Orchestrator との互換性を維持
 
 **成果物**:
 - ✅ `src/core/runner/runner-effects.ts` - インターフェース拡張
-- ✅ `src/core/runner/runner-effects-impl.ts` - 関数型実装（145行）
-- ✅ `src/core/runner/index.ts` - export更新
-- ✅ コミット: `feat(phase4): implement functional RunnerEffects with LogWriter migration`
+- ✅ `src/core/runner/runner-effects-impl.ts` - 関数型実装（158行）
+- ✅ `src/core/runner/index.ts` - Runner内部実装完全移行
+- ✅ コミット1: `feat(phase4): implement functional RunnerEffects with LogWriter migration`
+- ✅ コミット2: `feat(phase4): migrate Runner class to use functional RunnerEffects internally`
 
 **検証結果**:
 - ✅ `pnpm build` 成功（型エラーなし）
 - ✅ 全48テスト成功（既存テストは影響なし）
+- ✅ Phase 4完了（Runner関数化完成）
+
+**設計判断**:
+- CLI切り替え（Step 3）はPhase 5完了後に実施
+  - 理由: OrchestratorがRunnerクラスに依存しているため、Phase 5でOrchestratorを関数化してから、CLIを完全に新実装に切り替える
+- Runnerクラスは互換性アダプターとして一時的に維持
 
 **次のステップ**:
-- 🔄 Step 3: CLI (run.ts) を新 Runner 実装に切り替え（中リスク）
+- 🔄 Step 4: Worker関数化（Phase 5の一部）
