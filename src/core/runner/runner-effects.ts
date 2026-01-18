@@ -46,11 +46,13 @@ export interface RunnerEffects {
    * Codex エージェントを実行
    * @param prompt プロンプト文字列
    * @param workingDirectory 作業ディレクトリ
+   * @param model 使用するモデル（省略時はCodexのデフォルト）
    * @returns エージェント出力
    */
   runCodexAgent(
     prompt: string,
     workingDirectory: string,
+    model?: string,
   ): Promise<Result<AgentOutput, RunnerError>>;
 
   // ===== ログ記録 =====

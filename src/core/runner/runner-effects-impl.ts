@@ -147,6 +147,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   const runCodexAgent = async (
     prompt: string,
     workingDirectory: string,
+    model?: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       // Codex SDK をインポート
@@ -156,6 +157,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
       // Codex Thread作成
       const thread = codex.startThread({
         workingDirectory,
+        model,
       });
 
       // Codex実行

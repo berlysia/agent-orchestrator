@@ -21,9 +21,8 @@ export const getAgentType = (config: Config, role: AgentRole): 'claude' | 'codex
  *
  * @param config プロジェクト設定
  * @param role エージェントの役割
- * @returns モデル名（Claude使用時のみ）
+ * @returns モデル名
  */
 export const getModel = (config: Config, role: AgentRole): string | undefined => {
-  const agentConfig = config.agents[role];
-  return agentConfig.type === 'claude' ? agentConfig.model : undefined;
+  return config.agents[role].model;
 };

@@ -192,7 +192,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
             worktreePath as string,
             deps.model!,
           )
-        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string);
+        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
 
     // 6. 結果をログに記録
     if (isErr(agentResult)) {

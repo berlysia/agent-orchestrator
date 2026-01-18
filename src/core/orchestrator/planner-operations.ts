@@ -102,7 +102,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
             deps.appRepoPath,
             deps.model!,
           )
-        : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath);
+        : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model);
 
     let taskBreakdowns: TaskBreakdown[];
 

@@ -1,14 +1,42 @@
 import { z } from 'zod';
 
 /**
- * エージェント設定のスキーマ
+ * 既知のモデル名（補完のため）
+ *
+ * WHY: Union型で既知のモデルと任意の文字列を組み合わせることで、
+ * TypeScriptの `string & {}` トリック相当を実現。
+ * 既知のモデルには補完が効き、新しいモデルも受け付ける。
  */
-const AgentConfigSchema = z.object({
-  /** エージェントタイプ */
-  type: z.enum(['claude', 'codex']).default('claude'),
-  /** モデル名（Claude使用時のみ） */
-  model: z.string().optional(),
-});
+const KnownClaudeModels = ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'] as const;
+const KnownCodexModels = ['gpt-5.2-codex', 'gpt-5.1-codex-mini'] as const;
+
+/**
+ * エージェント設定のスキーマ
+ *
+ * WHY: discriminatedUnion を使用することで、type に応じて適切なモデル補完を提供
+ */
+const AgentConfigSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('claude'),
+    /**
+     * Claudeモデル名
+     *
+     * 既知のモデルには補完が効き、任意の文字列も受け付ける。
+     * JSON Schemaでは anyOf として出力され、エディタで補完が効く。
+     */
+    model: z.union([z.enum(KnownClaudeModels), z.string()]).optional(),
+  }),
+  z.object({
+    type: z.literal('codex'),
+    /**
+     * Codexモデル名
+     *
+     * 既知のモデルには補完が効き、任意の文字列も受け付ける。
+     * JSON Schemaでは anyOf として出力され、エディタで補完が効く。
+     */
+    model: z.union([z.enum(KnownCodexModels), z.string()]).optional(),
+  }),
+]);
 
 /**
  * チェック設定のスキーマ
