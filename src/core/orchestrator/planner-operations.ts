@@ -8,7 +8,6 @@ import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
-import { AGENT_CONFIG } from '../config/models.ts';
 
 /**
  * Planner依存関係
@@ -18,6 +17,7 @@ export interface PlannerDeps {
   readonly runnerEffects: RunnerEffects;
   readonly appRepoPath: string;
   readonly agentType: 'claude' | 'codex';
+  readonly model?: string;
 }
 
 /**
@@ -94,13 +94,13 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     await appendPlanningLog(`Prompt:\n${planningPrompt}\n\n`);
 
     // 2. エージェントを実行
-    // WHY: 役割ごとに最適なモデルを使用（Planner = Opus）
+    // WHY: 役割ごとに最適なモデルを使用（Config から取得）
     const runResult =
       deps.agentType === 'claude'
         ? await deps.runnerEffects.runClaudeAgent(
             planningPrompt,
             deps.appRepoPath,
-            AGENT_CONFIG.planner.model!,
+            deps.model!,
           )
         : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath);
 

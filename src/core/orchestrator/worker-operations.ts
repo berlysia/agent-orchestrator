@@ -16,7 +16,6 @@ import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
-import { AGENT_CONFIG } from '../config/models.ts';
 
 /**
  * Worker依存関係
@@ -27,6 +26,8 @@ export interface WorkerDeps {
   readonly taskStore: TaskStore;
   readonly appRepoPath: RepoPath;
   readonly agentCoordPath?: string;
+  readonly agentType: 'claude' | 'codex';
+  readonly model?: string;
 }
 
 /**
@@ -139,13 +140,11 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    *
    * @param task タスク
    * @param worktreePath worktreeのパス
-   * @param agentType 使用するエージェント種別
    * @returns 実行結果（runIdと成功/失敗）
    */
   const executeTask = async (
     task: Task,
     worktreePath: WorktreePath,
-    agentType: AgentType,
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
     // 1. runsディレクトリを確保
     const ensureResult = await deps.runnerEffects.ensureRunsDir();
@@ -162,7 +161,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const run = createInitialRun({
       id: theRunId,
       taskId: task.id,
-      agentType,
+      agentType: deps.agentType,
       logPath,
     });
 
@@ -180,18 +179,18 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       theRunId,
       `[${new Date().toISOString()}] Starting task: ${task.acceptance}\n`,
     );
-    await deps.runnerEffects.appendLog(theRunId, `Agent Type: ${agentType}\n`);
+    await deps.runnerEffects.appendLog(theRunId, `Agent Type: ${deps.agentType}\n`);
     await deps.runnerEffects.appendLog(theRunId, `Worktree: ${worktreePath}\n\n`);
 
     // 5. エージェントを実行
-    // WHY: 役割ごとに最適なモデルを使用（Worker = Sonnet）
+    // WHY: 役割ごとに最適なモデルを使用（Config から取得）
     const agentPrompt = `Execute task: ${task.acceptance}`;
     const agentResult =
-      agentType === 'claude'
+      deps.agentType === 'claude'
         ? await deps.runnerEffects.runClaudeAgent(
             agentPrompt,
             worktreePath as string,
-            AGENT_CONFIG.worker.model!,
+            deps.model!,
           )
         : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string);
 
@@ -337,12 +336,10 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * 4. リモートにpush
    *
    * @param task 実行するタスク
-   * @param agentType 使用するエージェント種別
    * @returns 実行結果
    */
   const executeTaskWithWorktree = async (
     task: Task,
-    agentType: AgentType,
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
     try {
       // 1. Worktreeを作成
@@ -354,7 +351,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       const worktreePath = worktreeResult.val;
 
       // 2. タスクを実行
-      const runResult = await executeTask(task, worktreePath, agentType);
+      const runResult = await executeTask(task, worktreePath);
       if (isErr(runResult)) {
         return createErr(runResult.err);
       }

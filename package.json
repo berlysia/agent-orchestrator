@@ -9,14 +9,15 @@
   },
   "scripts": {
     "build": "tsgo --noEmit",
-    "compile": "rm -rf dist && tsgo && chmod +x dist/cli/index.js",
+    "compile": "rm -rf dist && tsgo && chmod +x dist/cli/index.js && pnpm generate:schema",
     "test": "node --test tests/unit/**/*.test.ts",
     "test:e2e": "node --test tests/e2e/**/*.test.ts",
     "test:all": "node --test tests/**/*.test.ts",
     "dev": "node --watch src/cli/index.ts",
     "lint": "oxlint src/",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "generate:schema": "node scripts/generate-config-schema.ts"
   },
   "keywords": [
     "agent",
@@ -36,7 +37,8 @@
     "@types/node": "25.0.6",
     "@typescript/native-preview": "7.0.0-dev.20260111.1",
     "oxlint": "1.38.0",
-    "prettier": "3.7.4"
+    "prettier": "3.7.4",
+    "zod-to-json-schema": "3.25.1"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.4",
@@ -44,6 +46,6 @@
     "commander": "14.0.2",
     "option-t": "55.1.0",
     "simple-git": "3.30.0",
-    "zod": "4.3.5"
+    "zod": "4.0.4"
   }
 }

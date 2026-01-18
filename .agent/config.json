@@ -1,11 +1,24 @@
 {
+  "$schema": "../dist/config.schema.json",
   "appRepoPath": ".",
   "agentCoordPath": "../agent-orchestorator-coord",
   "maxWorkers": 3,
-  "defaultAgentType": "claude",
-  "plannerAgentType": "claude",
-  "workerAgentType": "claude",
-  "judgeAgentType": "claude",
-  "enableChecks": true,
-  "checkFailureMode": "block"
+  "agents": {
+    "planner": {
+      "type": "claude",
+      "model": "claude-opus-4-5"
+    },
+    "worker": {
+      "type": "claude",
+      "model": "claude-sonnet-4-5"
+    },
+    "judge": {
+      "type": "claude",
+      "model": "claude-haiku-4-5"
+    }
+  },
+  "checks": {
+    "enabled": true,
+    "failureMode": "block"
+  }
 }

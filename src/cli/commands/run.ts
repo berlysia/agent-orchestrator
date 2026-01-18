@@ -65,9 +65,7 @@ async function executeRun(params: { instruction: string; configPath?: string }):
     taskStore,
     runnerEffects,
     gitEffects,
-    agentType: config.defaultAgentType,
-    appRepoPath: config.appRepoPath,
-    agentCoordPath: config.agentCoordPath,
+    config,
     maxWorkers: config.maxWorkers,
   });
 

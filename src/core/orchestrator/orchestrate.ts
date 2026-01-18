@@ -1,12 +1,14 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
+import type { Config } from '../../types/config.ts';
 import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
-import { createWorkerOperations, type WorkerDeps, type AgentType } from './worker-operations.ts';
+import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
 import { initialSchedulerState, removeRunningWorker } from './scheduler-state.ts';
 import { taskId, workerId, repoPath } from '../../types/branded.ts';
+import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 
@@ -17,9 +19,7 @@ export interface OrchestrateDeps {
   readonly taskStore: TaskStore;
   readonly gitEffects: GitEffects;
   readonly runnerEffects: RunnerEffects;
-  readonly appRepoPath: string;
-  readonly agentCoordPath?: string;
-  readonly agentType: AgentType;
+  readonly config: Config;
   readonly maxWorkers?: number;
 }
 
@@ -62,15 +62,18 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   const plannerOps = createPlannerOperations({
     taskStore: deps.taskStore,
     runnerEffects: deps.runnerEffects,
-    appRepoPath: deps.appRepoPath,
-    agentType: deps.agentType,
+    appRepoPath: deps.config.appRepoPath,
+    agentType: getAgentType(deps.config, 'planner'),
+    model: getModel(deps.config, 'planner'),
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,
     runnerEffects: deps.runnerEffects,
     taskStore: deps.taskStore,
-    appRepoPath: repoPath(deps.appRepoPath),
-    agentCoordPath: deps.agentCoordPath,
+    appRepoPath: repoPath(deps.config.appRepoPath),
+    agentCoordPath: deps.config.agentCoordPath,
+    agentType: getAgentType(deps.config, 'worker'),
+    model: getModel(deps.config, 'worker'),
   };
   const workerOps = createWorkerOperations(workerDeps);
   const judgeOps = createJudgeOperations({ taskStore: deps.taskStore });
@@ -135,7 +138,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         try {
           // 3. Worker: タスク実行
           console.log(`  🚀 Executing task...`);
-          const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, deps.agentType);
+          const workerResult = await workerOps.executeTaskWithWorktree(claimedTask);
 
           if (isErr(workerResult)) {
             console.log(`  ❌ Task execution failed: ${workerResult.err.message}`);
