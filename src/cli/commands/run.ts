@@ -3,8 +3,10 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { ConfigSchema } from '../../types/config.ts';
 import { createFileStore } from '../../core/task-store/file-store.ts';
-import { Runner } from '../../core/runner/index.ts';
-import { Orchestrator } from '../../core/orchestrator/index.ts';
+import { createRunnerEffects } from '../../core/runner/runner-effects-impl.ts';
+import { createGitEffects } from '../../adapters/vcs/index.ts';
+import { createOrchestrator } from '../../core/orchestrator/orchestrate.ts';
+import { isErr } from 'option-t/plain_result';
 
 /**
  * `agent run` コマンドの実装
@@ -53,16 +55,20 @@ async function executeRun(params: { instruction: string; configPath?: string }):
     basePath: config.agentCoordPath,
   });
 
-  // Runnerを初期化
-  const runner = new Runner({
+  // RunnerEffectsを初期化
+  const runnerEffects = createRunnerEffects({
     coordRepoPath: config.agentCoordPath,
     timeout: 0, // タイムアウトなし
   });
 
-  // Orchestratorを初期化
-  const orchestrator = new Orchestrator({
+  // GitEffectsを初期化
+  const gitEffects = createGitEffects();
+
+  // Orchestratorを初期化（新しい関数型実装）
+  const orchestrator = createOrchestrator({
     taskStore,
-    runner,
+    runnerEffects,
+    gitEffects,
     agentType: config.defaultAgentType,
     appRepoPath: config.appRepoPath,
     maxWorkers: config.maxWorkers,
@@ -72,7 +78,15 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   console.log(`🚀 Starting orchestration...\n`);
   console.log(`📝 Instruction: "${instruction}"\n`);
 
-  const result = await orchestrator.executeInstruction(instruction);
+  const resultOrError = await orchestrator.executeInstruction(instruction);
+
+  // Result型をunwrap
+  if (isErr(resultOrError)) {
+    console.error(`\n❌ Orchestration error: ${resultOrError.err.message}`);
+    process.exit(1);
+  }
+
+  const result = resultOrError.val;
 
   // 結果を表示
   console.log(`\n${'='.repeat(60)}`);
