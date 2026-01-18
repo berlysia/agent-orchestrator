@@ -65,6 +65,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     appRepoPath: deps.config.appRepoPath,
     agentType: getAgentType(deps.config, 'planner'),
     model: getModel(deps.config, 'planner'),
+    judgeModel: getModel(deps.config, 'judge'),
+    maxQualityRetries: 3,
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,

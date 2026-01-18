@@ -19,6 +19,8 @@ export interface PlannerDeps {
   readonly appRepoPath: string;
   readonly agentType: 'claude' | 'codex';
   readonly model?: string;
+  readonly judgeModel?: string;
+  readonly maxQualityRetries?: number;
 }
 
 /**
@@ -30,6 +32,33 @@ export interface PlanningResult {
   /** 実行ログID */
   runId: string;
 }
+
+/**
+ * タスク品質評価結果
+ *
+ * WHY: Plannerが生成したタスクの品質を自動評価し、
+ *      品質が不十分な場合はフィードバック付きで再生成するため
+ */
+export interface TaskQualityJudgement {
+  /** 品質が許容可能か */
+  isAcceptable: boolean;
+  /** 品質問題のリスト */
+  issues: string[];
+  /** 改善提案のリスト */
+  suggestions: string[];
+  /** 総合スコア（0-100） */
+  overallScore?: number;
+}
+
+/**
+ * タスク品質評価結果のZodスキーマ
+ */
+export const TaskQualityJudgementSchema = z.object({
+  isAcceptable: z.boolean(),
+  issues: z.array(z.string()),
+  suggestions: z.array(z.string()),
+  overallScore: z.number().min(0).max(100).optional(),
+});
 
 /**
  * TaskBreakdownスキーマバージョン
@@ -95,6 +124,54 @@ export type TaskBreakdown = z.infer<typeof TaskBreakdownSchema>;
  */
 export const createPlannerOperations = (deps: PlannerDeps) => {
   /**
+   * タスク品質を評価
+   *
+   * 生成されたタスクの品質をJudgeエージェントに評価させる。
+   *
+   * WHY: 低品質なタスクの実行を防ぐため、Planner生成直後に品質チェック
+   *
+   * @param userInstruction 元のユーザー指示
+   * @param tasks 生成されたタスク配列
+   * @param previousFeedback 前回のフィードバック（オプション）
+   * @returns 品質評価結果
+   */
+  const judgeTaskQuality = async (
+    userInstruction: string,
+    tasks: TaskBreakdown[],
+    previousFeedback?: string,
+  ): Promise<TaskQualityJudgement> => {
+    // judgeModelが設定されていない場合は常に許容
+    if (!deps.judgeModel) {
+      return {
+        isAcceptable: true,
+        issues: [],
+        suggestions: [],
+      };
+    }
+
+    const qualityPrompt = buildTaskQualityPrompt(userInstruction, tasks, previousFeedback);
+
+    // Judge用エージェントを実行
+    // WHY: Plannerとは別のモデル（軽量なHaikuなど）を使用してコスト削減
+    const runResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel)
+        : await deps.runnerEffects.runCodexAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel);
+
+    if (isErr(runResult)) {
+      console.warn(`⚠️  Quality judge failed: ${runResult.err.message}, accepting by default`);
+      return {
+        isAcceptable: true,
+        issues: [],
+        suggestions: [],
+      };
+    }
+
+    const judgement = parseQualityJudgement(runResult.val.finalResponse || '');
+    return judgement;
+  };
+
+  /**
    * ユーザー指示からタスクを分解
    *
    * @param userInstruction ユーザーの指示（例: "TODOアプリを作る"）
@@ -104,9 +181,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
     const plannerRunId = `planner-${randomUUID()}`;
-
-    // 1. Plannerプロンプトを構築
-    const planningPrompt = buildPlanningPrompt(userInstruction);
+    const maxRetries = deps.maxQualityRetries ?? 3;
 
     const planningRun = createInitialRun({
       id: runId(plannerRunId),
@@ -134,73 +209,143 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     await appendPlanningLog(`=== Planning Start ===\n`);
     await appendPlanningLog(`Instruction: ${userInstruction}\n`);
-    await appendPlanningLog(`Prompt:\n${planningPrompt}\n\n`);
 
-    // 2. エージェントを実行
-    // WHY: 役割ごとに最適なモデルを使用（Config から取得）
-    const runResult =
-      deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(
-            planningPrompt,
-            deps.appRepoPath,
-            deps.model!,
-          )
-        : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model);
+    // 品質評価ループ
+    let taskBreakdowns: TaskBreakdown[] = [];
+    let accumulatedFeedback: string | undefined = undefined;
 
-    // 2. エージェント実行結果の確認
-    if (isErr(runResult)) {
-      await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
-      await appendPlanningLog(`${runResult.err.message}\n`);
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      await appendPlanningLog(`\n--- Attempt ${attempt}/${maxRetries} ---\n`);
 
-      const failedRun = {
-        ...planningRun,
-        status: RunStatus.FAILURE,
-        finishedAt: new Date().toISOString(),
-        errorMessage: `Planner agent execution failed: ${runResult.err.message}`,
-      };
-      await deps.runnerEffects.saveRunMetadata(failedRun);
+      // 1. Plannerプロンプトを構築
+      const planningPrompt = accumulatedFeedback
+        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback)
+        : buildPlanningPrompt(userInstruction);
 
-      return createErr(
-        ioError('planTasks.runAgent', `Planner agent execution failed: ${runResult.err.message}`),
+      await appendPlanningLog(`Prompt:\n${planningPrompt}\n\n`);
+
+      // 2. エージェントを実行
+      // WHY: 役割ごとに最適なモデルを使用（Config から取得）
+      const runResult =
+        deps.agentType === 'claude'
+          ? await deps.runnerEffects.runClaudeAgent(planningPrompt, deps.appRepoPath, deps.model!)
+          : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model);
+
+      // 2. エージェント実行結果の確認
+      if (isErr(runResult)) {
+        await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
+        await appendPlanningLog(`${runResult.err.message}\n`);
+
+        if (attempt === maxRetries) {
+          const failedRun = {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: `Planner agent execution failed after ${maxRetries} attempts: ${runResult.err.message}`,
+          };
+          await deps.runnerEffects.saveRunMetadata(failedRun);
+
+          return createErr(
+            ioError(
+              'planTasks.runAgent',
+              `Planner agent execution failed after ${maxRetries} attempts: ${runResult.err.message}`,
+            ),
+          );
+        }
+
+        // 再試行
+        continue;
+      }
+
+      // 3. エージェント出力をパース
+      const finalResponse = runResult.val.finalResponse || '';
+      await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
+      await appendPlanningLog(`${finalResponse}\n`);
+
+      const parseResult = parseAgentOutputWithErrors(finalResponse);
+
+      // パースエラーをログに記録
+      if (parseResult.errors.length > 0) {
+        await appendPlanningLog(`\n=== Validation Errors ===\n`);
+        parseResult.errors.forEach((err) => {
+          appendPlanningLog(`${err}\n`);
+        });
+      }
+
+      // 有効なタスクが1つもない場合
+      if (parseResult.tasks.length === 0) {
+        const errorMsg =
+          parseResult.errors.length > 0
+            ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
+            : 'No valid task breakdowns found in agent output';
+
+        await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+
+        if (attempt === maxRetries) {
+          const failedRun = {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: `${errorMsg} (after ${maxRetries} attempts)`,
+          };
+          await deps.runnerEffects.saveRunMetadata(failedRun);
+
+          return createErr(ioError('planTasks.parseOutput', `${errorMsg} (after ${maxRetries} attempts)`));
+        }
+
+        // 再試行（パースエラーをフィードバックとして使用）
+        accumulatedFeedback = errorMsg;
+        continue;
+      }
+
+      taskBreakdowns = parseResult.tasks;
+
+      // 4. 品質評価
+      await appendPlanningLog(`\n=== Quality Evaluation ===\n`);
+      const judgement = await judgeTaskQuality(userInstruction, taskBreakdowns, accumulatedFeedback);
+
+      await appendPlanningLog(
+        `Quality acceptable: ${judgement.isAcceptable ? 'YES' : 'NO'}\n`,
       );
+      if (judgement.overallScore !== undefined) {
+        await appendPlanningLog(`Overall score: ${judgement.overallScore}/100\n`);
+      }
+      if (judgement.issues.length > 0) {
+        await appendPlanningLog(`Issues:\n${judgement.issues.map((i, idx) => `  ${idx + 1}. ${i}`).join('\n')}\n`);
+      }
+      if (judgement.suggestions.length > 0) {
+        await appendPlanningLog(
+          `Suggestions:\n${judgement.suggestions.map((s, idx) => `  ${idx + 1}. ${s}`).join('\n')}\n`,
+        );
+      }
+
+      if (judgement.isAcceptable) {
+        // 品質OK → タスク保存へ進む
+        await appendPlanningLog(`\n✅ Quality check passed\n`);
+        break;
+      }
+
+      // 品質NG → フィードバックを蓄積して再試行
+      await appendPlanningLog(`\n❌ Quality check failed, retrying...\n`);
+
+      if (attempt === maxRetries) {
+        // 最大試行回数に達したが品質が許容されない
+        const errorMsg = `Task quality not acceptable after ${maxRetries} attempts`;
+        await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+
+        const failedRun = {
+          ...planningRun,
+          status: RunStatus.FAILURE,
+          finishedAt: new Date().toISOString(),
+          errorMessage: errorMsg,
+        };
+        await deps.runnerEffects.saveRunMetadata(failedRun);
+
+        return createErr(ioError('planTasks.qualityCheck', errorMsg));
+      }
+
+      accumulatedFeedback = formatFeedbackForRetry(judgement);
     }
-
-    // 3. エージェント出力をパース
-    const finalResponse = runResult.val.finalResponse || '';
-    await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
-    await appendPlanningLog(`${finalResponse}\n`);
-
-    const parseResult = parseAgentOutputWithErrors(finalResponse);
-
-    // パースエラーをログに記録
-    if (parseResult.errors.length > 0) {
-      await appendPlanningLog(`\n=== Validation Errors ===\n`);
-      parseResult.errors.forEach((err) => {
-        appendPlanningLog(`${err}\n`);
-      });
-    }
-
-    // 有効なタスクが1つもない場合はエラー
-    if (parseResult.tasks.length === 0) {
-      const errorMsg =
-        parseResult.errors.length > 0
-          ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
-          : 'No valid task breakdowns found in agent output';
-
-      await appendPlanningLog(`\n❌ ${errorMsg}\n`);
-
-      const failedRun = {
-        ...planningRun,
-        status: RunStatus.FAILURE,
-        finishedAt: new Date().toISOString(),
-        errorMessage: errorMsg,
-      };
-      await deps.runnerEffects.saveRunMetadata(failedRun);
-
-      return createErr(ioError('planTasks.parseOutput', errorMsg));
-    }
-
-    const taskBreakdowns = parseResult.tasks;
 
     // タスクをTaskStoreに保存
     const taskIds: string[] = [];
@@ -366,6 +511,183 @@ Example:
 ]
 
 Output only the JSON array, no additional text.`;
+};
+
+/**
+ * タスク品質評価プロンプトを構築
+ *
+ * 生成されたタスクの品質を評価するためのプロンプトを作成する。
+ *
+ * @param userInstruction 元のユーザー指示
+ * @param tasks 生成されたタスクの配列
+ * @param previousFeedback 前回の評価フィードバック（再試行時）
+ * @returns 品質評価プロンプト
+ */
+export const buildTaskQualityPrompt = (
+  userInstruction: string,
+  tasks: TaskBreakdown[],
+  previousFeedback?: string,
+): string => {
+  const tasksJson = JSON.stringify(tasks, null, 2);
+
+  return `You are a quality evaluator for task planning in a multi-agent development system.
+
+USER INSTRUCTION:
+${userInstruction}
+
+GENERATED TASKS:
+${tasksJson}
+
+${
+  previousFeedback
+    ? `PREVIOUS FEEDBACK:
+${previousFeedback}
+
+`
+    : ''
+}Your task is to evaluate whether these tasks meet quality standards for execution.
+
+Evaluation criteria:
+1. **Completeness**: Does each task have all required fields (description, branch, scopePaths, acceptance, type, estimatedDuration, context)?
+2. **Clarity**: Are descriptions clear and actionable?
+3. **Acceptance criteria**: Are acceptance criteria specific, testable, and verifiable?
+4. **Context sufficiency**: Does the context field contain ALL information needed to execute the task WITHOUT external references?
+   - Technical approach, dependencies, constraints specified?
+   - Existing patterns referenced with file paths?
+   - Data models, error handling, security, testing requirements included?
+5. **Granularity**: Are tasks appropriately sized (1-4 hours each)?
+6. **Independence**: Can each task be implemented independently?
+
+Output format (JSON):
+{
+  "isAcceptable": true/false,
+  "issues": ["List of quality problems found"],
+  "suggestions": ["List of improvement suggestions"],
+  "overallScore": 0-100
+}
+
+If isAcceptable is false, provide specific, actionable feedback in issues and suggestions.
+Output only the JSON object, no additional text.`;
+};
+
+/**
+ * フィードバック付きプランニングプロンプトを構築
+ *
+ * 品質評価のフィードバックを含むプロンプトで再生成を促す。
+ *
+ * @param userInstruction 元のユーザー指示
+ * @param feedback 品質評価フィードバック
+ * @returns フィードバック付きプロンプト
+ */
+export const buildPlanningPromptWithFeedback = (
+  userInstruction: string,
+  feedback: string,
+): string => {
+  const basePrompt = buildPlanningPrompt(userInstruction);
+
+  return `${basePrompt}
+
+IMPORTANT - QUALITY FEEDBACK FROM PREVIOUS ATTEMPT:
+${feedback}
+
+Please address all issues and suggestions above in your task breakdown.`;
+};
+
+/**
+ * 品質評価結果をパース
+ *
+ * エージェントが返すJSON形式の品質評価結果をパースする。
+ * マークダウンコードブロックに囲まれている場合も対応。
+ * パース失敗時はデフォルトで品質許容（isAcceptable: true）を返す。
+ *
+ * WHY: 品質評価エージェントの失敗により全体が止まらないよう、
+ *      デフォルトで許容することで可用性を優先
+ *
+ * @param output エージェントの出力
+ * @returns 品質評価結果
+ */
+export const parseQualityJudgement = (output: string): TaskQualityJudgement => {
+  // デフォルト値（品質評価失敗時は許容する）
+  const defaultJudgement: TaskQualityJudgement = {
+    isAcceptable: true,
+    issues: [],
+    suggestions: [],
+  };
+
+  try {
+    // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
+    const codeBlockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const objectMatch = output.match(/(\{[\s\S]*\})/);
+
+    const jsonMatch = codeBlockMatch || objectMatch;
+
+    if (!jsonMatch || !jsonMatch[1]) {
+      console.warn('⚠️  Quality judgement: No JSON found, accepting by default');
+      return defaultJudgement;
+    }
+
+    const jsonStr = jsonMatch[1];
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(jsonStr.trim());
+    } catch (parseError) {
+      console.warn(
+        `⚠️  Quality judgement: JSON parse failed, accepting by default: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+      );
+      return defaultJudgement;
+    }
+
+    // Zodスキーマでバリデーション
+    const validationResult = TaskQualityJudgementSchema.safeParse(parsed);
+
+    if (!validationResult.success) {
+      const zodErrors = validationResult.error.issues
+        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+        .join(', ');
+      console.warn(`⚠️  Quality judgement: Validation failed, accepting by default: ${zodErrors}`);
+      return defaultJudgement;
+    }
+
+    return validationResult.data;
+  } catch (error) {
+    console.warn(
+      `⚠️  Quality judgement: Unexpected error, accepting by default: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return defaultJudgement;
+  }
+};
+
+/**
+ * フィードバックを再試行用に整形
+ *
+ * 品質評価結果を読みやすいフィードバック文字列に変換する。
+ *
+ * @param judgement 品質評価結果
+ * @returns 整形されたフィードバック
+ */
+export const formatFeedbackForRetry = (judgement: TaskQualityJudgement): string => {
+  const lines: string[] = [];
+
+  if (judgement.overallScore !== undefined) {
+    lines.push(`Overall Quality Score: ${judgement.overallScore}/100`);
+  }
+
+  if (judgement.issues.length > 0) {
+    lines.push('\nIssues:');
+    judgement.issues.forEach((issue, idx) => {
+      lines.push(`${idx + 1}. ${issue}`);
+    });
+  }
+
+  if (judgement.suggestions.length > 0) {
+    lines.push('\nSuggestions:');
+    judgement.suggestions.forEach((suggestion, idx) => {
+      lines.push(`${idx + 1}. ${suggestion}`);
+    });
+  }
+
+  return lines.join('\n');
 };
 
 /**

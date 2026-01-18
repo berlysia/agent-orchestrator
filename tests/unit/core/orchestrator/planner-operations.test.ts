@@ -4,7 +4,13 @@ import {
   parseAgentOutput,
   parseAgentOutputWithErrors,
   buildPlanningPrompt,
+  buildTaskQualityPrompt,
+  buildPlanningPromptWithFeedback,
+  parseQualityJudgement,
+  formatFeedbackForRetry,
   TaskTypeEnum,
+  type TaskBreakdown,
+  type TaskQualityJudgement,
 } from '../../../../src/core/orchestrator/planner-operations.ts';
 
 describe('Planner Operations', () => {
@@ -285,6 +291,148 @@ This is the recommended approach.`;
 
         const result = parseAgentOutput(output);
         assert.strictEqual(result.length, 1, `Duration ${duration} should be valid`);
+      });
+    });
+  });
+
+  describe('Task Quality Evaluation', () => {
+    describe('buildTaskQualityPrompt', () => {
+      it('should include original instruction and tasks', () => {
+        const userInstruction = 'Build a TODO app';
+        const tasks: TaskBreakdown[] = [
+          {
+            description: 'Implement task list',
+            branch: 'feature/task-list',
+            scopePaths: ['src/tasks/'],
+            acceptance: 'Tasks can be listed',
+            type: 'implementation',
+            estimatedDuration: 2.0,
+            context: 'Use React hooks',
+          },
+        ];
+
+        const prompt = buildTaskQualityPrompt(userInstruction, tasks);
+
+        assert(prompt.includes(userInstruction));
+        assert(prompt.includes('Implement task list'));
+        assert(prompt.includes('quality evaluator'));
+      });
+
+      it('should include previous feedback when provided', () => {
+        const userInstruction = 'Build a TODO app';
+        const tasks: TaskBreakdown[] = [
+          {
+            description: 'Test task',
+            branch: 'feature/test',
+            scopePaths: ['src/'],
+            acceptance: 'Test',
+            type: 'implementation',
+            estimatedDuration: 1.0,
+            context: 'Test context',
+          },
+        ];
+        const feedback = 'Acceptance criteria are too vague';
+
+        const prompt = buildTaskQualityPrompt(userInstruction, tasks, feedback);
+
+        assert(prompt.includes(feedback));
+        assert(prompt.includes('PREVIOUS FEEDBACK'));
+      });
+    });
+
+    describe('parseQualityJudgement', () => {
+      it('should parse valid JSON response', () => {
+        const output = JSON.stringify({
+          isAcceptable: false,
+          issues: ['Acceptance criteria too vague'],
+          suggestions: ['Add specific test cases'],
+          overallScore: 60,
+        });
+
+        const result = parseQualityJudgement(output);
+
+        assert.strictEqual(result.isAcceptable, false);
+        assert.strictEqual(result.issues.length, 1);
+        assert.strictEqual(result.suggestions.length, 1);
+        assert.strictEqual(result.overallScore, 60);
+      });
+
+      it('should handle markdown code blocks', () => {
+        const output = `Here is the evaluation:
+
+\`\`\`json
+{
+  "isAcceptable": true,
+  "issues": [],
+  "suggestions": ["Consider adding edge cases"],
+  "overallScore": 85
+}
+\`\`\`
+
+This looks good.`;
+
+        const result = parseQualityJudgement(output);
+
+        assert.strictEqual(result.isAcceptable, true);
+        assert.strictEqual(result.overallScore, 85);
+      });
+
+      it('should return default (acceptable) on parse error', () => {
+        const output = 'This is not valid JSON';
+
+        const result = parseQualityJudgement(output);
+
+        assert.strictEqual(result.isAcceptable, true);
+        assert.strictEqual(result.issues.length, 0);
+        assert.strictEqual(result.suggestions.length, 0);
+      });
+    });
+
+    describe('formatFeedbackForRetry', () => {
+      it('should format judgement with all fields', () => {
+        const judgement: TaskQualityJudgement = {
+          isAcceptable: false,
+          issues: ['Issue 1', 'Issue 2'],
+          suggestions: ['Suggestion 1', 'Suggestion 2'],
+          overallScore: 65,
+        };
+
+        const feedback = formatFeedbackForRetry(judgement);
+
+        assert(feedback.includes('Overall Quality Score: 65/100'));
+        assert(feedback.includes('Issues:'));
+        assert(feedback.includes('1. Issue 1'));
+        assert(feedback.includes('2. Issue 2'));
+        assert(feedback.includes('Suggestions:'));
+        assert(feedback.includes('1. Suggestion 1'));
+        assert(feedback.includes('2. Suggestion 2'));
+      });
+
+      it('should format judgement without score', () => {
+        const judgement: TaskQualityJudgement = {
+          isAcceptable: false,
+          issues: ['Problem found'],
+          suggestions: [],
+        };
+
+        const feedback = formatFeedbackForRetry(judgement);
+
+        assert(!feedback.includes('Overall Quality Score'));
+        assert(feedback.includes('Issues:'));
+        assert(feedback.includes('1. Problem found'));
+      });
+    });
+
+    describe('buildPlanningPromptWithFeedback', () => {
+      it('should include feedback in prompt', () => {
+        const userInstruction = 'Build a TODO app';
+        const feedback = 'Acceptance criteria need more detail';
+
+        const prompt = buildPlanningPromptWithFeedback(userInstruction, feedback);
+
+        assert(prompt.includes(userInstruction));
+        assert(prompt.includes(feedback));
+        assert(prompt.includes('QUALITY FEEDBACK FROM PREVIOUS ATTEMPT'));
       });
     });
   });
