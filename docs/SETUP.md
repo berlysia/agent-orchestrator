@@ -51,10 +51,12 @@ git init
 ```bash
 cd /home/berlysia/workspace/agent-orchestorator
 node dist/cli/index.js init \
-  --app-repo /home/berlysia/workspace/agent-orchestorator \
-  --agent-coord /home/berlysia/workspace/agent-orchestorator-coord \
+  --app-repo . \
+  --agent-coord ../agent-orchestorator-coord \
   --force
 ```
+
+**Note**: パスは相対パスで指定できます。相対パスは`.agent/config.json`が配置されるディレクトリ（app-repoルート）を基準に解決されます。
 
 ### 4. エイリアスの設定（推奨）
 
@@ -94,9 +96,7 @@ Run 'agent run "<instruction>"' to create tasks.
 
 ```bash
 cd /home/berlysia/workspace/agent-orchestorator
-pnpm setup  # 初回のみ
-source ~/.zshrc  # 環境変数を反映
-pnpm install -g .
+npm install -g .
 ```
 
 これにより、どのディレクトリからでも `agent` コマンドが使用できるようになります。
@@ -135,7 +135,7 @@ cd /home/berlysia/workspace/agent-orchestorator
 pnpm compile
 
 # グローバルインストールしている場合は再インストール
-pnpm install -g .
+npm install -g .
 ```
 
 ## トラブルシューティング
@@ -167,7 +167,7 @@ pnpm compile
 グローバルインストールしている場合は再インストール：
 
 ```bash
-pnpm install -g .
+npm install -g .
 ```
 
 ## 参考資料

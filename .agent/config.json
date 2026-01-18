@@ -1,6 +1,6 @@
 {
-  "appRepoPath": "/home/berlysia/workspace/agent-orchestorator",
-  "agentCoordPath": "/home/berlysia/workspace/agent-orchestorator-coord",
+  "appRepoPath": ".",
+  "agentCoordPath": "../agent-orchestorator-coord",
   "maxWorkers": 3,
   "defaultAgentType": "claude",
   "plannerAgentType": "claude",

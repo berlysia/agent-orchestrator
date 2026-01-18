@@ -1,12 +1,10 @@
 import { Command } from 'commander';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { ConfigSchema } from '../../types/config.ts';
 import { createFileStore } from '../../core/task-store/file-store.ts';
 import { createRunnerEffects } from '../../core/runner/runner-effects-impl.ts';
 import { createGitEffects } from '../../adapters/vcs/index.ts';
 import { createOrchestrator } from '../../core/orchestrator/orchestrate.ts';
 import { isErr } from 'option-t/plain_result';
+import { loadConfig } from '../utils/load-config.ts';
 
 /**
  * `agent run` コマンドの実装
@@ -39,13 +37,10 @@ export function createRunCommand(): Command {
 async function executeRun(params: { instruction: string; configPath?: string }): Promise<void> {
   const { instruction, configPath } = params;
 
-  // 設定ファイルのパスを決定
-  const resolvedConfigPath = configPath ?? path.join(process.cwd(), '.agent', 'config.json');
-
   // 設定ファイルを読み込み
-  const config = await loadConfig(resolvedConfigPath);
+  const config = await loadConfig(configPath);
 
-  console.log(`📋 Configuration loaded from: ${resolvedConfigPath}`);
+  console.log(`📋 Configuration loaded`);
   console.log(`   App Repo: ${config.appRepoPath}`);
   console.log(`   Coord Repo: ${config.agentCoordPath}`);
   console.log(`   Max Workers: ${config.maxWorkers}\n`);
@@ -102,20 +97,3 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   }
 }
 
-/**
- * 設定ファイルを読み込む
- */
-async function loadConfig(configPath: string) {
-  try {
-    const configContent = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(configContent);
-    return ConfigSchema.parse(config);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(
-        `Configuration file not found: ${configPath}\nRun 'agent init' to create it.`,
-      );
-    }
-    throw error;
-  }
-}

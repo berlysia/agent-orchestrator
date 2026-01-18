@@ -1,7 +1,5 @@
 import { Command } from 'commander';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { ConfigSchema } from '../../types/config.ts';
+import { loadConfig } from '../utils/load-config.ts';
 import { createFileStore } from '../../core/task-store/file-store.ts';
 import { taskId } from '../../types/branded.ts';
 import { unwrapOk, isOk } from 'option-t/plain_result';
@@ -44,11 +42,8 @@ async function stopTask(params: {
 }): Promise<void> {
   const { taskId: taskIdArg, configPath, stopAll } = params;
 
-  // 設定ファイルのパスを決定
-  const resolvedConfigPath = configPath ?? path.join(process.cwd(), '.agent', 'config.json');
-
   // 設定ファイルを読み込み
-  const config = await loadConfig(resolvedConfigPath);
+  const config = await loadConfig(configPath);
 
   // TaskStoreを初期化
   const taskStore = createFileStore({
@@ -109,20 +104,3 @@ async function stopTask(params: {
   console.log(`\n${stopAll ? 'All running tasks' : 'Task'} stopped successfully.\n`);
 }
 
-/**
- * 設定ファイルを読み込む
- */
-async function loadConfig(configPath: string) {
-  try {
-    const configContent = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(configContent);
-    return ConfigSchema.parse(config);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(
-        `Configuration file not found: ${configPath}\nRun 'agent init' to create it.`,
-      );
-    }
-    throw error;
-  }
-}

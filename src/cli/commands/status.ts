@@ -1,9 +1,7 @@
 import { Command } from 'commander';
-import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
-import { ConfigSchema } from '../../types/config.ts';
 import { createFileStore } from '../../core/task-store/file-store.ts';
 import { unwrapOk } from 'option-t/plain_result';
+import { loadConfig } from '../utils/load-config.ts';
 
 /**
  * `agent status` コマンドの実装
@@ -34,11 +32,8 @@ export function createStatusCommand(): Command {
 async function showStatus(params: { configPath?: string }): Promise<void> {
   const { configPath } = params;
 
-  // 設定ファイルのパスを決定
-  const resolvedConfigPath = configPath ?? path.join(process.cwd(), '.agent', 'config.json');
-
   // 設定ファイルを読み込み
-  const config = await loadConfig(resolvedConfigPath);
+  const config = await loadConfig(configPath);
 
   // TaskStoreを初期化
   const taskStore = createFileStore({
@@ -97,23 +92,6 @@ async function showStatus(params: { configPath?: string }): Promise<void> {
   console.log();
 }
 
-/**
- * 設定ファイルを読み込む
- */
-async function loadConfig(configPath: string) {
-  try {
-    const configContent = await fs.readFile(configPath, 'utf-8');
-    const config = JSON.parse(configContent);
-    return ConfigSchema.parse(config);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(
-        `Configuration file not found: ${configPath}\nRun 'agent init' to create it.`,
-      );
-    }
-    throw error;
-  }
-}
 
 /**
  * タスク状態に対応するアイコンを取得
