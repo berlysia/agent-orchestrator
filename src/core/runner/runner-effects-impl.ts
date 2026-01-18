@@ -68,7 +68,10 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   const saveRunMetadata = async (run: Run): Promise<Result<void, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       const metadataPath = getRunMetadataPath(run.id);
-      const json = JSON.stringify(run, null, 2);
+      const normalizedLogPath = path.isAbsolute(run.logPath)
+        ? run.logPath
+        : path.resolve(options.coordRepoPath, run.logPath);
+      const json = JSON.stringify({ ...run, logPath: normalizedLogPath }, null, 2);
       await fs.writeFile(metadataPath, json, 'utf-8');
     });
     return mapErrForResult(result, toRunnerError('saveRunMetadata'));

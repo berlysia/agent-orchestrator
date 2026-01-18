@@ -5,6 +5,7 @@
  * タスクごとにworktreeを作成し、エージェントを実行して実装を行う。
  */
 
+import path from 'node:path';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
@@ -24,6 +25,7 @@ export interface WorkerDeps {
   readonly runnerEffects: RunnerEffects;
   readonly taskStore: TaskStore;
   readonly appRepoPath: RepoPath;
+  readonly agentCoordPath?: string;
 }
 
 /**
@@ -83,6 +85,20 @@ Co-Authored-By: AI Agent <noreply@agent-orchestrator>`;
  * Worker操作を生成するファクトリ関数
  */
 export const createWorkerOperations = (deps: WorkerDeps) => {
+  const toRelativePath = (targetPath: string): string => {
+    const absolutePath = path.resolve(targetPath);
+    const relativePath = path.relative(process.cwd(), absolutePath);
+    return relativePath === '' ? '.' : relativePath;
+  };
+
+  const getRunDisplayPath = (runIdValue: string, ext: 'log' | 'json'): string => {
+    if (!deps.agentCoordPath) {
+      return `runs/${runIdValue}.${ext}`;
+    }
+
+    return toRelativePath(path.join(deps.agentCoordPath, 'runs', `${runIdValue}.${ext}`));
+  };
+
   /**
    * タスク用のworktreeを作成
    *
@@ -154,6 +170,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     if (isErr(saveMetaResult)) {
       return createErr(saveMetaResult.err);
     }
+
+    console.log(`  📝 Execution log: ${getRunDisplayPath(theRunId, 'log')}`);
+    console.log(`  📊 Metadata: ${getRunDisplayPath(theRunId, 'json')}`);
 
     // 4. ログにタスク開始を記録
     await deps.runnerEffects.appendLog(
@@ -323,15 +342,15 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     task: Task,
     agentType: AgentType,
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
-    // 1. Worktreeを作成
-    const worktreeResult = await setupWorktree(task);
-    if (isErr(worktreeResult)) {
-      return createErr(worktreeResult.err);
-    }
-
-    const worktreePath = worktreeResult.val;
-
     try {
+      // 1. Worktreeを作成
+      const worktreeResult = await setupWorktree(task);
+      if (isErr(worktreeResult)) {
+        return createErr(worktreeResult.err);
+      }
+
+      const worktreePath = worktreeResult.val;
+
       // 2. タスクを実行
       const runResult = await executeTask(task, worktreePath, agentType);
       if (isErr(runResult)) {

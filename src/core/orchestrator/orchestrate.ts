@@ -1,4 +1,3 @@
-import path from 'node:path';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
@@ -58,20 +57,6 @@ export interface OrchestratorError {
  * @returns Orchestrator操作オブジェクト
  */
 export const createOrchestrator = (deps: OrchestrateDeps) => {
-  const toRelativePath = (targetPath: string): string => {
-    const absolutePath = path.resolve(targetPath);
-    const relativePath = path.relative(process.cwd(), absolutePath);
-    return relativePath === '' ? '.' : relativePath;
-  };
-
-  const getRunDisplayPath = (runId: string, ext: 'log' | 'json'): string => {
-    if (!deps.agentCoordPath) {
-      return `runs/${runId}.${ext}`;
-    }
-
-    return toRelativePath(path.join(deps.agentCoordPath, 'runs', `${runId}.${ext}`));
-  };
-
   // 各コンポーネントの操作を生成
   const schedulerOps = createSchedulerOperations({ taskStore: deps.taskStore });
   const plannerOps = createPlannerOperations({
@@ -85,6 +70,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     runnerEffects: deps.runnerEffects,
     taskStore: deps.taskStore,
     appRepoPath: repoPath(deps.appRepoPath),
+    agentCoordPath: deps.agentCoordPath,
   };
   const workerOps = createWorkerOperations(workerDeps);
   const judgeOps = createJudgeOperations({ taskStore: deps.taskStore });
@@ -141,7 +127,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         schedulerState = newState;
 
         const tid = taskId(rawTaskId);
-
         try {
           // 3. Worker: タスク実行
           console.log(`  🚀 Executing task...`);
@@ -155,9 +140,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
 
           const result = workerResult.val;
-          // ログファイルの場所を表示
-          console.log(`  📝 Execution log: ${getRunDisplayPath(result.runId, 'log')}`);
-          console.log(`  📊 Metadata: ${getRunDisplayPath(result.runId, 'json')}`);
 
           if (!result.success) {
             console.log(`  ❌ Task execution failed: ${result.error ?? 'Unknown error'}`);
