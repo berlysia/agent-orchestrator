@@ -101,24 +101,34 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
    */
   const runClaudeAgent = async (
     prompt: string,
-    _workingDirectory: string,
+    workingDirectory: string,
     model: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       // Claude Agent SDK をインポート
-      const { unstable_v2_prompt } = await import('@anthropic-ai/claude-agent-sdk');
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
       // Claude Agent実行
-      // NOTE: SDKが直接workingDirectoryをサポートしていない場合は、
-      // プロセス起動前にprocess.chdir()を使用するか、
-      // env経由でCLIに渡す必要がある
-      const sdkResult = await unstable_v2_prompt(prompt, {
-        model: model || 'claude-sonnet-4-5-20250929',
+      const responseStream = query({
+        prompt,
+        options: {
+          model: model || 'claude-sonnet-4-5-20250929',
+          cwd: workingDirectory,
+        },
       });
+
+      // ストリームからresultメッセージを収集
+      let finalResult = '';
+      for await (const message of responseStream) {
+        if (message.type === 'result' && message.subtype === 'success') {
+          finalResult = message.result;
+          break;
+        }
+      }
 
       // AgentOutput形式に変換
       return {
-        finalResponse: JSON.stringify(sdkResult),
+        finalResponse: finalResult,
       } satisfies AgentOutput;
     });
 
