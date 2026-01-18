@@ -108,6 +108,11 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       const { taskIds } = planningResult.val;
       console.log(`📋 Generated ${taskIds.length} tasks`);
+      if (taskIds.length > 0) {
+        for (const createdTaskId of taskIds) {
+          console.log(`  - ${createdTaskId}`);
+        }
+      }
 
       // 2-4. 各タスクを順次実行（Scheduler→Worker→Judge）
       for (const rawTaskId of taskIds) {

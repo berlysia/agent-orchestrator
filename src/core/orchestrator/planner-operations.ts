@@ -1,12 +1,13 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import { createInitialTask } from '../../types/task.ts';
-import { taskId, repoPath, branchName } from '../../types/branded.ts';
+import { taskId, repoPath, branchName, runId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
+import { createInitialRun, RunStatus } from '../../types/run.ts';
 
 /**
  * Planner依存関係
@@ -58,10 +59,38 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   const planTasks = async (
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
-    const plannerTaskId = `planner-${randomUUID()}`;
+    const plannerRunId = `planner-${randomUUID()}`;
 
     // 1. Plannerプロンプトを構築
     const planningPrompt = buildPlanningPrompt(userInstruction);
+
+    const planningRun = createInitialRun({
+      id: runId(plannerRunId),
+      taskId: taskId(plannerRunId),
+      agentType: deps.agentType,
+      logPath: `runs/${plannerRunId}.log`,
+    });
+
+    const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
+    if (isErr(ensureRunsResult)) {
+      return createErr(ioError('planTasks.ensureRunsDir', ensureRunsResult.err));
+    }
+
+    const saveRunResult = await deps.runnerEffects.saveRunMetadata(planningRun);
+    if (isErr(saveRunResult)) {
+      return createErr(ioError('planTasks.saveRunMetadata', saveRunResult.err));
+    }
+
+    const appendPlanningLog = async (content: string): Promise<void> => {
+      const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);
+      if (isErr(logResult)) {
+        console.warn(`⚠️  Failed to write planner log: ${logResult.err.message}`);
+      }
+    };
+
+    await appendPlanningLog(`=== Planning Start ===\n`);
+    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
+    await appendPlanningLog(`Prompt:\n${planningPrompt}\n\n`);
 
     // 2. エージェントを実行（デフォルトはClaude）
     const runResult =
@@ -76,6 +105,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     let taskBreakdowns: TaskBreakdown[];
 
     if (isErr(runResult)) {
+      await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
+      await appendPlanningLog(`${runResult.err.message}\n`);
       console.warn(
         `⚠️  Planner agent execution failed: ${runResult.err.message}. Falling back to dummy task breakdown.`,
       );
@@ -84,9 +115,12 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     } else {
       // 3. エージェント出力をパース
       const finalResponse = runResult.val.finalResponse || '';
+      await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
+      await appendPlanningLog(`${finalResponse}\n`);
       taskBreakdowns = parseAgentOutput(finalResponse);
 
       if (taskBreakdowns.length === 0) {
+        await appendPlanningLog(`\nNo valid task breakdowns. Using fallback.\n`);
         console.warn('⚠️  Agent returned no valid task breakdowns. Falling back to dummy.');
         taskBreakdowns = createDummyTaskBreakdown(userInstruction);
       }
@@ -115,6 +149,28 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       taskIds.push(rawTaskId);
     }
 
+    if (taskIds.length > 0) {
+      await appendPlanningLog(`\n=== Generated Tasks ===\n`);
+      for (const rawTaskId of taskIds) {
+        await appendPlanningLog(`- ${rawTaskId}\n`);
+      }
+    }
+
+    const completedRun =
+      taskIds.length > 0
+        ? {
+            ...planningRun,
+            status: RunStatus.SUCCESS,
+            finishedAt: new Date().toISOString(),
+          }
+        : {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: errors.length > 0 ? errors.join(', ') : 'No tasks created',
+          };
+    await deps.runnerEffects.saveRunMetadata(completedRun);
+
     // 一部でもタスク作成に成功していれば成功とみなす
     if (taskIds.length === 0) {
       return createErr(ioError('planTasks', `Failed to create any tasks: ${errors.join(', ')}`));
@@ -122,7 +178,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     return createOk({
       taskIds,
-      runId: plannerTaskId,
+      runId: plannerRunId,
     });
   };
 
