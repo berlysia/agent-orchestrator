@@ -60,7 +60,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   const schedulerOps = createSchedulerOperations({ taskStore: deps.taskStore });
   const plannerOps = createPlannerOperations({
     taskStore: deps.taskStore,
+    runnerEffects: deps.runnerEffects,
     appRepoPath: deps.appRepoPath,
+    agentType: deps.agentType,
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,
@@ -135,6 +137,11 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             failedTaskIds.push(rawTaskId);
             continue;
           }
+
+          const result = workerResult.val;
+          // ログファイルの場所を表示
+          console.log(`  📝 Execution log: runs/${result.runId}.log`);
+          console.log(`  📊 Metadata: runs/${result.runId}.json`);
 
           // 4. Judge: 完了判定
           console.log(`  ⚖️  Judging task...`);

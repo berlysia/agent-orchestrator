@@ -1,9 +1,10 @@
 import type { TaskStore } from '../task-store/interface.ts';
+import type { RunnerEffects } from '../runner/runner-effects.ts';
 import { createInitialTask } from '../../types/task.ts';
 import { taskId, repoPath, branchName } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 import type { Result } from 'option-t/plain_result';
-import { createOk, createErr } from 'option-t/plain_result';
+import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 
@@ -12,7 +13,9 @@ import { ioError } from '../../types/errors.ts';
  */
 export interface PlannerDeps {
   readonly taskStore: TaskStore;
+  readonly runnerEffects: RunnerEffects;
   readonly appRepoPath: string;
+  readonly agentType: 'claude' | 'codex';
 }
 
 /**
@@ -55,21 +58,39 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   const planTasks = async (
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
-    // TODO: 実際のエージェント実行を統合
-    // 現時点では簡易的にダミーのタスク分解を使用
-
     const plannerTaskId = `planner-${randomUUID()}`;
 
-    // TODO: エージェント実行
-    // const runResult = await runAgent({
-    //   agentType,
-    //   instruction: buildPlanningPrompt(userInstruction),
-    //   cwd: deps.appRepoPath,
-    // });
-    // const taskBreakdowns = parseAgentOutput(runResult.output);
+    // 1. Plannerプロンプトを構築
+    const planningPrompt = buildPlanningPrompt(userInstruction);
 
-    // 現時点ではダミーのタスク分解を使用
-    const taskBreakdowns = createDummyTaskBreakdown(userInstruction);
+    // 2. エージェントを実行（デフォルトはClaude）
+    const runResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(
+            planningPrompt,
+            deps.appRepoPath,
+            'claude-sonnet-4-5-20250929',
+          )
+        : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath);
+
+    let taskBreakdowns: TaskBreakdown[];
+
+    if (isErr(runResult)) {
+      console.warn(
+        `⚠️  Planner agent execution failed: ${runResult.err.message}. Falling back to dummy task breakdown.`,
+      );
+      // フォールバック: ダミーのタスク分解を使用
+      taskBreakdowns = createDummyTaskBreakdown(userInstruction);
+    } else {
+      // 3. エージェント出力をパース
+      const finalResponse = runResult.val.finalResponse || '';
+      taskBreakdowns = parseAgentOutput(finalResponse);
+
+      if (taskBreakdowns.length === 0) {
+        console.warn('⚠️  Agent returned no valid task breakdowns. Falling back to dummy.');
+        taskBreakdowns = createDummyTaskBreakdown(userInstruction);
+      }
+    }
 
     // タスクをTaskStoreに保存
     const taskIds: string[] = [];
@@ -137,6 +158,97 @@ function createDummyTaskBreakdown(userInstruction: string): TaskBreakdown[] {
   ];
 }
 
-// TODO: 将来の実装用 - エージェント統合時に追加
-// export const buildPlanningPrompt = (userInstruction: string): string => { ... };
-// export const parseAgentOutput = (output: string): TaskBreakdown[] => { ... };
+/**
+ * Plannerプロンプトを構築
+ *
+ * ユーザー指示からタスク分解を行うためのプロンプトを生成する。
+ *
+ * @param userInstruction ユーザーの指示
+ * @returns Plannerプロンプト
+ */
+export const buildPlanningPrompt = (userInstruction: string): string => {
+  return `You are a task planner for a multi-agent development system.
+
+USER INSTRUCTION:
+${userInstruction}
+
+Your task is to break down this instruction into concrete, implementable tasks.
+
+For each task, provide:
+1. description: Clear description of what needs to be done
+2. branch: Git branch name (e.g., "feature/add-login")
+3. scopePaths: Array of file/directory paths that will be modified (e.g., ["src/auth/", "tests/auth/"])
+4. acceptance: Acceptance criteria for completion
+
+Output format (JSON array):
+[
+  {
+    "description": "Task description",
+    "branch": "feature/branch-name",
+    "scopePaths": ["path1/", "path2/"],
+    "acceptance": "Acceptance criteria"
+  }
+]
+
+Rules:
+- Create 1-5 tasks (prefer smaller, focused tasks)
+- Each task should be independently implementable
+- Branch names must be valid Git branch names (lowercase, hyphens for spaces)
+- Scope paths should be specific but allow flexibility
+- Acceptance criteria should be testable
+
+Output only the JSON array, no additional text.`;
+};
+
+/**
+ * エージェント出力をパース
+ *
+ * エージェントが返すJSON形式のタスク分解結果をパースする。
+ * マークダウンコードブロックに囲まれている場合も対応。
+ *
+ * @param output エージェントの出力
+ * @returns タスク分解情報の配列
+ */
+export const parseAgentOutput = (output: string): TaskBreakdown[] => {
+  try {
+    // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
+    // 優先順位: コードブロック > オブジェクト全体 > 配列全体
+    const codeBlockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const objectMatch = output.match(/^(\{[\s\S]*\})$/);
+    const arrayMatch = output.match(/^(\[[\s\S]*\])$/);
+
+    const jsonMatch = codeBlockMatch || objectMatch || arrayMatch;
+
+    if (!jsonMatch || !jsonMatch[1]) {
+      console.error('No JSON content found in output');
+      return [];
+    }
+
+    const jsonStr = jsonMatch[1];
+    const parsed = JSON.parse(jsonStr.trim());
+
+    if (!Array.isArray(parsed)) {
+      console.warn('Agent output is not an array, wrapping in array');
+      return [parsed];
+    }
+
+    // バリデーション
+    return parsed.filter((item) => {
+      const isValid =
+        typeof item.description === 'string' &&
+        typeof item.branch === 'string' &&
+        Array.isArray(item.scopePaths) &&
+        typeof item.acceptance === 'string';
+
+      if (!isValid) {
+        console.warn('Invalid task breakdown item:', item);
+      }
+
+      return isValid;
+    });
+  } catch (error) {
+    console.error('Failed to parse agent output:', error);
+    console.error('Output was:', output);
+    return [];
+  }
+};

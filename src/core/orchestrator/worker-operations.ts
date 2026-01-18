@@ -9,11 +9,12 @@ import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
 import type { TaskId, WorktreePath, RepoPath } from '../../types/branded.ts';
-import { branchName } from '../../types/branded.ts';
+import { branchName, runId } from '../../types/branded.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
+import { createInitialRun, RunStatus } from '../../types/run.ts';
 
 /**
  * Worker依存関係
@@ -94,6 +95,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * タスクを実行（エージェント実行のみ）
    *
    * エージェントを起動してタスクを実行します。
+   * 実行ログとメタデータをrunsディレクトリに保存します。
    * Git操作（commit、push）は別の関数で行います。
    *
    * @param task タスク
@@ -106,7 +108,40 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     worktreePath: WorktreePath,
     agentType: AgentType,
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
-    // エージェントを実行
+    // 1. runsディレクトリを確保
+    const ensureResult = await deps.runnerEffects.ensureRunsDir();
+    if (isErr(ensureResult)) {
+      return createErr(ensureResult.err);
+    }
+
+    // 2. RunID生成（タスクIDベース）
+    const timestamp = Date.now();
+    const theRunId = runId(`run-${task.id}-${timestamp}`);
+    const logPath = `runs/${theRunId}.log`;
+
+    // 3. 実行メタデータを初期化
+    const run = createInitialRun({
+      id: theRunId,
+      taskId: task.id,
+      agentType,
+      logPath,
+    });
+
+    // メタデータ保存
+    const saveMetaResult = await deps.runnerEffects.saveRunMetadata(run);
+    if (isErr(saveMetaResult)) {
+      return createErr(saveMetaResult.err);
+    }
+
+    // 4. ログにタスク開始を記録
+    await deps.runnerEffects.appendLog(
+      theRunId,
+      `[${new Date().toISOString()}] Starting task: ${task.acceptance}\n`,
+    );
+    await deps.runnerEffects.appendLog(theRunId, `Agent Type: ${agentType}\n`);
+    await deps.runnerEffects.appendLog(theRunId, `Worktree: ${worktreePath}\n\n`);
+
+    // 5. エージェントを実行
     const agentPrompt = `Execute task: ${task.acceptance}`;
     const agentResult =
       agentType === 'claude'
@@ -117,16 +152,49 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
           )
         : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string);
 
+    // 6. 結果をログに記録
     if (isErr(agentResult)) {
+      const errorMsg = agentResult.err.message;
+      await deps.runnerEffects.appendLog(
+        theRunId,
+        `[${new Date().toISOString()}] ❌ Agent execution failed\n`,
+      );
+      await deps.runnerEffects.appendLog(theRunId, `Error: ${errorMsg}\n`);
+
+      // メタデータ更新（失敗）
+      const failedRun = {
+        ...run,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: errorMsg,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
       return createOk({
-        runId: `error-${task.id}`,
+        runId: theRunId,
         success: false,
-        error: agentResult.err.message,
+        error: errorMsg,
       });
     }
 
+    // 7. 成功時の処理
+    const output = agentResult.val;
+    await deps.runnerEffects.appendLog(
+      theRunId,
+      `[${new Date().toISOString()}] ✅ Agent execution completed\n`,
+    );
+    await deps.runnerEffects.appendLog(theRunId, `Final Response:\n${output.finalResponse}\n`);
+
+    // メタデータ更新（成功）
+    const completedRun = {
+      ...run,
+      status: RunStatus.SUCCESS,
+      finishedAt: new Date().toISOString(),
+    };
+    await deps.runnerEffects.saveRunMetadata(completedRun);
+
     return createOk({
-      runId: task.id, // TODO: 実際のRunIDを使用
+      runId: theRunId,
       success: true,
     });
   };
