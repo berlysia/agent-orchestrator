@@ -7,6 +7,8 @@ import { createInitialTask, TaskState } from '../../../../src/types/task.ts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { assertOk } from '../../../mocks/effects.ts';
+import { taskId, repoPath, branchName } from '../../../../src/types/branded.ts';
 
 describe('Scheduler', () => {
   let scheduler: Scheduler;
@@ -23,18 +25,19 @@ describe('Scheduler', () => {
   it('should get ready tasks', async () => {
     // READY状態のタスクを作成
     const task1 = createInitialTask({
-      id: 'task-1',
-      repo: '/path/to/repo',
-      branch: 'feature-1',
+      id: taskId('task-1'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-1'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
 
-    await taskStore.createTask(task1);
+    const createResult = await taskStore.createTask(task1);
+    assertOk(createResult);
 
     const readyTasks = await scheduler.getReadyTasks();
     assert.strictEqual(readyTasks.length, 1);
-    assert.strictEqual(readyTasks[0].id, 'task-1');
+    assert.strictEqual(readyTasks[0].id, task1.id);
     assert.strictEqual(readyTasks[0].state, TaskState.READY);
 
     // クリーンアップ
@@ -44,14 +47,15 @@ describe('Scheduler', () => {
   it('should claim task and update state', async () => {
     // READY状態のタスクを作成
     const task = createInitialTask({
-      id: 'task-2',
-      repo: '/path/to/repo',
-      branch: 'feature-2',
+      id: taskId('task-2'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-2'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
 
-    await taskStore.createTask(task);
+    const createResult = await taskStore.createTask(task);
+    assertOk(createResult);
 
     // タスクを割り当て
     const claimedTask = await scheduler.claimTask('task-2', 'worker-1');
@@ -69,16 +73,17 @@ describe('Scheduler', () => {
   it('should not claim non-ready task', async () => {
     // RUNNING状態のタスクを作成
     const task = createInitialTask({
-      id: 'task-3',
-      repo: '/path/to/repo',
-      branch: 'feature-3',
+      id: taskId('task-3'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-3'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
     task.state = TaskState.RUNNING;
     task.owner = 'worker-0';
 
-    await taskStore.createTask(task);
+    const createResult = await taskStore.createTask(task);
+    assertOk(createResult);
 
     // タスクを割り当て試行（失敗するはず）
     const claimedTask = await scheduler.claimTask('task-3', 'worker-1');
@@ -92,20 +97,23 @@ describe('Scheduler', () => {
   it('should complete task and free worker slot', async () => {
     // READY状態のタスクを作成して割り当て
     const task = createInitialTask({
-      id: 'task-4',
-      repo: '/path/to/repo',
-      branch: 'feature-4',
+      id: taskId('task-4'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-4'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
 
-    await taskStore.createTask(task);
+    const createResult = await taskStore.createTask(task);
+    assertOk(createResult);
     await scheduler.claimTask('task-4', 'worker-1');
 
     assert.strictEqual(scheduler.getRunningWorkerCount(), 1);
 
     // タスクを完了
-    const completedTask = await scheduler.completeTask('task-4');
+    const completeResult = await scheduler.completeTask(taskId('task-4'));
+    assertOk(completeResult);
+    const completedTask = completeResult.val;
 
     assert.strictEqual(completedTask.state, TaskState.DONE);
     assert.strictEqual(completedTask.owner, null);
@@ -119,20 +127,23 @@ describe('Scheduler', () => {
   it('should block task and free worker slot', async () => {
     // READY状態のタスクを作成して割り当て
     const task = createInitialTask({
-      id: 'task-5',
-      repo: '/path/to/repo',
-      branch: 'feature-5',
+      id: taskId('task-5'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-5'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
 
-    await taskStore.createTask(task);
+    const createResult = await taskStore.createTask(task);
+    assertOk(createResult);
     await scheduler.claimTask('task-5', 'worker-1');
 
     assert.strictEqual(scheduler.getRunningWorkerCount(), 1);
 
     // タスクをブロック
-    const blockedTask = await scheduler.blockTask('task-5');
+    const blockResult = await scheduler.blockTask(taskId('task-5'));
+    assertOk(blockResult);
+    const blockedTask = blockResult.val;
 
     assert.strictEqual(blockedTask.state, TaskState.BLOCKED);
     assert.strictEqual(blockedTask.owner, null);
@@ -145,22 +156,24 @@ describe('Scheduler', () => {
   it('should respect max worker limit', async () => {
     // 2つのREADY状態のタスクを作成（maxWorkers=2）
     const task1 = createInitialTask({
-      id: 'task-6',
-      repo: '/path/to/repo',
-      branch: 'feature-6',
+      id: taskId('task-6'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-6'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
     const task2 = createInitialTask({
-      id: 'task-7',
-      repo: '/path/to/repo',
-      branch: 'feature-7',
+      id: taskId('task-7'),
+      repo: repoPath('/path/to/repo'),
+      branch: branchName('feature-7'),
       scopePaths: ['src/'],
       acceptance: 'Test acceptance',
     });
 
-    await taskStore.createTask(task1);
-    await taskStore.createTask(task2);
+    const createResult1 = await taskStore.createTask(task1);
+    assertOk(createResult1);
+    const createResult2 = await taskStore.createTask(task2);
+    assertOk(createResult2);
 
     // 2つのタスクを割り当て
     await scheduler.claimTask('task-6', 'worker-1');
@@ -170,7 +183,8 @@ describe('Scheduler', () => {
     assert.strictEqual(scheduler.getAvailableWorkerSlots(), 0); // スロット満杯
 
     // 1つ完了
-    await scheduler.completeTask('task-6');
+    const completeResult = await scheduler.completeTask(taskId('task-6'));
+    assertOk(completeResult);
 
     assert.strictEqual(scheduler.getRunningWorkerCount(), 1);
     assert.strictEqual(scheduler.getAvailableWorkerSlots(), 1); // 1スロット空き

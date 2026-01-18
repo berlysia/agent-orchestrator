@@ -150,31 +150,23 @@ const createTask = async (basePath: string, task: Task): Promise<Result<void, Ta
   const taskPath = getTaskPath(basePath, task.id);
 
   // タスクがすでに存在するかチェック
-  const accessResult = await wrapAsync(
-    'createTask.access',
-    async () => {
-      await fs.access(taskPath);
-      return true;
-    },
-    (err) => {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
-        return null as any; // ファイルが存在しない = 正常（nullを返す）
-      }
-      return ioError('createTask.access', err);
-    },
-  );
+  const accessResult = await tryCatchIntoResultAsync(async () => {
+    await fs.access(taskPath);
+    return true; // ファイルが存在する
+  });
 
-  // accessがエラーを返した場合（ENOENT以外のエラー）
-  if (!accessResult.ok) {
-    return accessResult;
-  }
-
-  // ファイルが存在する場合
-  if (accessResult.val === true) {
+  // アクセスが成功した場合（ファイルが存在する）
+  if (accessResult.ok) {
     return createErr(taskAlreadyExists(task.id));
   }
 
-  // タスクを書き込む
+  // ENOENTエラー以外（予期しないエラー）の場合
+  const err = accessResult.err;
+  if (err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT') {
+    return createErr(ioError('createTask.access', err));
+  }
+
+  // ファイルが存在しない（ENOENT）場合は、新規作成
   return writeTask(basePath, task);
 };
 
