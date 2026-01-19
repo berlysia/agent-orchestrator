@@ -283,6 +283,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           judgeOps,
           schedulerState,
           blockedTaskIds,
+          deps.taskStore,
         );
 
         // スケジューラ状態を更新
@@ -618,6 +619,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           judgeOps,
           schedulerState,
           blockedTaskIds,
+          deps.taskStore,
         );
 
         schedulerState = levelResult.updatedSchedulerState;

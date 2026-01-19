@@ -143,6 +143,7 @@ export const createSpawnGitEffects = (): Pick<
     name: string,
     branch: BranchName,
     createBranch = false,
+    startPoint?: BranchName,
   ): Promise<Result<WorktreePath, GitError>> => {
     const wtPath = join(repo, '.git', 'worktree', name);
     const args = ['worktree', 'add'];
@@ -155,6 +156,9 @@ export const createSpawnGitEffects = (): Pick<
 
     if (!createBranch) {
       args.push(branch);
+    } else if (startPoint) {
+      // WHY: createBranch=trueかつstartPoint指定時、そのブランチから分岐
+      args.push(startPoint);
     }
 
     const result = await executeGitCommand(repo, args);

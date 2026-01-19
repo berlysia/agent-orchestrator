@@ -110,6 +110,7 @@ export interface GitEffects {
    * @param name Worktree 名（.git/worktree/<name> に配置）
    * @param branch チェックアウトするブランチ
    * @param createBranch 新しいブランチを作成するか
+   * @param startPoint ブランチの起点（createBranch=trueの場合のみ有効、省略時は現在のブランチ）
    * @returns 作成された Worktree のパス
    */
   createWorktree(
@@ -117,6 +118,7 @@ export interface GitEffects {
     name: string,
     branch: BranchName,
     createBranch?: boolean,
+    startPoint?: BranchName,
   ): Promise<Result<WorktreePath, GitError>>;
 
   /**
