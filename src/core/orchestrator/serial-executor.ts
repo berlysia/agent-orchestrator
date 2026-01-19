@@ -86,17 +86,7 @@ export async function executeSerialChain(
       shouldRetry = false; // デフォルトでリトライしない
 
       try {
-        // タスクを取得
-        const taskResult = await taskStore.readTask(tid);
-        if (!taskResult.ok) {
-          console.log(`  ⚠️  [${rawTaskId}] Failed to load task: ${taskResult.err.message}`);
-          failed.push(tid);
-          break; // チェーン実行を中断
-        }
-
-        const task = taskResult.val;
-
-        // スケジューラにタスクを要求
+        // スケジューラにタスクを要求（内部でタスク読み込み + CAS更新）
         const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
 
         if (isErr(claimResult)) {
@@ -105,13 +95,13 @@ export async function executeSerialChain(
           break;
         }
 
-        const { newState } = claimResult.val;
+        const { newState, task: claimedTask } = claimResult.val;
         schedulerState = newState;
 
         // 最初のタスク: 新しいworktreeを作成
         if (i === 0 && retryCount === 0) {
           console.log(`  🚀 [${rawTaskId}] Creating worktree and executing first task...`);
-          const setupResult = await workerOps.setupWorktree(task);
+          const setupResult = await workerOps.setupWorktree(claimedTask);
           if (isErr(setupResult)) {
             console.log(`  ❌ [${rawTaskId}] Failed to create worktree: ${setupResult.err.message}`);
             await schedulerOps.blockTask(tid);
@@ -121,7 +111,7 @@ export async function executeSerialChain(
           worktreePath = setupResult.val;
 
           // タスク実行
-          const runResult = await workerOps.executeTask(task, worktreePath);
+          const runResult = await workerOps.executeTask(claimedTask, worktreePath);
           if (isErr(runResult) || !runResult.val.success) {
             const errorMsg = isErr(runResult)
               ? runResult.err.message
@@ -137,7 +127,7 @@ export async function executeSerialChain(
           // 後続タスク or リトライ: 既存のworktreeを再利用
           console.log(`  🚀 [${rawTaskId}] Executing task in existing worktree...`);
           const runResult = await workerOps.executeTaskInExistingWorktree(
-            task,
+            claimedTask,
             worktreePath!,
             previousFeedback,
           );
@@ -156,7 +146,7 @@ export async function executeSerialChain(
 
         // 変更をコミット
         if (worktreePath) {
-          const commitResult = await workerOps.commitChanges(task, worktreePath);
+          const commitResult = await workerOps.commitChanges(claimedTask, worktreePath);
           if (isErr(commitResult)) {
             console.log(`  ❌ [${rawTaskId}] Failed to commit changes: ${commitResult.err.message}`);
             await schedulerOps.blockTask(tid);
@@ -168,7 +158,7 @@ export async function executeSerialChain(
         // latestRunIdを更新（Judge判定でログを読むため）
         const updateResult = await taskStore.updateTaskCAS(
           tid,
-          task.version,
+          claimedTask.version,
           (t) => ({ ...t, latestRunId: previousFeedback ?? '' }),
         );
         if (!updateResult.ok) {
