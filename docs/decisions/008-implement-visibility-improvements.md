@@ -15,6 +15,7 @@ Agent Orchestratorの実行時に以下の問題が発見された：
 これらの問題により、ユーザー体験が著しく低下し、デバッグも困難な状態となっている。
 
 詳細な分析は以下を参照：
+
 - [docs/plans/current-issues.md](../plans/current-issues.md)
 - [docs/plans/improvement-plan.md](../plans/improvement-plan.md)
 
@@ -25,11 +26,13 @@ Agent Orchestratorの実行時に以下の問題が発見された：
 ### Phase 1: Worker実行ログの保存（優先度: 高）
 
 **実装内容**:
+
 - `worker-operations.ts`の`executeTask`関数を修正
 - RunnerEffectsを使用してログとメタデータを保存
 - runsディレクトリに`.log`と`.json`ファイルを出力
 
 **理由**:
+
 - 即座にUXが改善される
 - 既存のRunnerEffectsを活用するだけで実装可能
 - デバッグが容易になる
@@ -37,11 +40,13 @@ Agent Orchestratorの実行時に以下の問題が発見された：
 ### Phase 2: Plannerのエージェント統合（優先度: 中）
 
 **実装内容**:
+
 - `planner-operations.ts`のダミー実装を置き換え
 - Claude/Codexエージェントで実際にタスク分解を実行
 - プロンプト構築とJSONパーサーを実装
 
 **理由**:
+
 - システムの本来の価値を発揮
 - 複雑な指示への対応が可能になる
 - タスク分解の品質が向上
@@ -49,21 +54,25 @@ Agent Orchestratorの実行時に以下の問題が発見された：
 ### Phase 3: CLI出力の改善（優先度: 中）
 
 **実装内容**:
+
 - 実行時にログファイルパスを表示
 - `agent status`コマンドの拡張
 - `agent logs`コマンドの追加（オプション）
 
 **理由**:
+
 - Phase 1で保存したログをユーザーが確認しやすくなる
 - より良いユーザー体験を提供
 
 ### Phase 4: Judge判定の強化（別Epic）
 
 **実装内容**:
+
 - CI統合とテスト結果に基づく判定
 - より厳密な受け入れ基準の検証
 
 **理由**:
+
 - 品質保証の向上
 - ただしCI統合が必要なため、別Epicとして扱う
 

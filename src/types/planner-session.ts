@@ -35,13 +35,16 @@ export const PlannerSessionSchema = z.object({
    * WHY: オーケストレーション終了時に自動生成される判定情報を保存し、
    *      continue コマンドで未完了の判定から再実行できるようにする
    */
-  finalJudgement: z.object({
-    isComplete: z.boolean(),
-    missingAspects: z.array(z.string()),
-    additionalTaskSuggestions: z.array(z.string()),
-    completionScore: z.number().min(0).max(100).optional(),
-    evaluatedAt: z.string(),
-  }).nullable().optional(),
+  finalJudgement: z
+    .object({
+      isComplete: z.boolean(),
+      missingAspects: z.array(z.string()),
+      additionalTaskSuggestions: z.array(z.string()),
+      completionScore: z.number().min(0).max(100).optional(),
+      evaluatedAt: z.string(),
+    })
+    .nullable()
+    .optional(),
   /**
    * continue コマンドでの反復実行回数
    * WHY: 無限ループを防ぐため、反復回数を追跡する
@@ -54,10 +57,7 @@ export type PlannerSession = z.infer<typeof PlannerSessionSchema>;
 /**
  * 新しいセッションを作成するためのヘルパー関数
  */
-export const createPlannerSession = (
-  sessionId: string,
-  instruction: string,
-): PlannerSession => {
+export const createPlannerSession = (sessionId: string, instruction: string): PlannerSession => {
   const now = new Date().toISOString();
   return {
     sessionId,

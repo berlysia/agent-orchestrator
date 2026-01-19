@@ -15,9 +15,7 @@ function getVersionString(): string {
   try {
     // package.jsonのバージョンを取得
     const packageJsonPath = path.join(process.cwd(), 'package.json');
-    const packageJson = JSON.parse(
-      execSync(`cat ${packageJsonPath}`, { encoding: 'utf-8' }),
-    );
+    const packageJson = JSON.parse(execSync(`cat ${packageJsonPath}`, { encoding: 'utf-8' }));
     const pkgVersion = packageJson.version;
 
     // 現在のコミットに対応するGitタグを取得
@@ -65,29 +63,15 @@ export function getVersion(): string {
 }
 `;
 
-  const outputPath = path.join(
-    process.cwd(),
-    'src',
-    'cli',
-    'utils',
-    'get-version.ts',
-  );
+  const outputPath = path.join(process.cwd(), 'src', 'cli', 'utils', 'get-version.ts');
 
   // 元のファイルをバックアップ（ビルド後に復元するため）
-  const backupPath = path.join(
-    process.cwd(),
-    'src',
-    'cli',
-    'utils',
-    'get-version.ts.original',
-  );
+  const backupPath = path.join(process.cwd(), 'src', 'cli', 'utils', 'get-version.ts.original');
   await fs.copyFile(outputPath, backupPath);
 
   try {
     await fs.writeFile(outputPath, versionFileContent, 'utf-8');
-    console.log(
-      `✅ Version inlined in get-version.ts (version: ${version})`,
-    );
+    console.log(`✅ Version inlined in get-version.ts (version: ${version})`);
   } catch (error) {
     // エラーが発生したらバックアップから復元
     await fs.copyFile(backupPath, outputPath);

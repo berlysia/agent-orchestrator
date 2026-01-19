@@ -298,9 +298,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
 
     // 最大リトライ回数を超えた場合はエラー
     if (newIteration >= maxIterations) {
-      return createErr(
-        validationError(`Task ${tid} exceeded max iterations (${maxIterations})`),
-      );
+      return createErr(validationError(`Task ${tid} exceeded max iterations (${maxIterations})`));
     }
 
     return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({

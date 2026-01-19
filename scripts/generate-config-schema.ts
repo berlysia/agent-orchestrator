@@ -30,11 +30,7 @@ async function main() {
 
   const schemaPath = path.join(distPath, 'config.schema.json');
 
-  await fs.writeFile(
-    schemaPath,
-    JSON.stringify(schemaWithMetadata, null, 2) + '\n',
-    'utf-8',
-  );
+  await fs.writeFile(schemaPath, JSON.stringify(schemaWithMetadata, null, 2) + '\n', 'utf-8');
 
   console.log(`✅ JSON schema generated: ${schemaPath}`);
 }

@@ -13,8 +13,7 @@ import { toDisplayPath } from './display-path.ts';
  */
 export async function loadConfig(configPath?: string): Promise<Config> {
   // 設定ファイルのパスを決定
-  const resolvedConfigPath =
-    configPath ?? path.join(process.cwd(), '.agent', 'config.json');
+  const resolvedConfigPath = configPath ?? path.join(process.cwd(), '.agent', 'config.json');
 
   try {
     const configContent = await fs.readFile(resolvedConfigPath, 'utf-8');

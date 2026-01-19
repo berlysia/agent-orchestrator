@@ -10,20 +10,8 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 async function main() {
-  const originalPath = path.join(
-    process.cwd(),
-    'src',
-    'cli',
-    'utils',
-    'get-version.ts.original',
-  );
-  const targetPath = path.join(
-    process.cwd(),
-    'src',
-    'cli',
-    'utils',
-    'get-version.ts',
-  );
+  const originalPath = path.join(process.cwd(), 'src', 'cli', 'utils', 'get-version.ts.original');
+  const targetPath = path.join(process.cwd(), 'src', 'cli', 'utils', 'get-version.ts');
 
   try {
     // バックアップファイルが存在する場合のみ復元

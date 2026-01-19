@@ -34,9 +34,9 @@
   - `installationId`
   - `privateKey`（PEM、ファイルパス指定）
 - フロー:
-  1) AppのJWTを生成
-  2) Installation Tokenを発行
-  3) API呼び出しに使用
+  1. AppのJWTを生成
+  2. Installation Tokenを発行
+  3. API呼び出しに使用
 
 ## 主要ユースケース
 

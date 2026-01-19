@@ -42,7 +42,6 @@ export interface WorkerResult {
   readonly error?: string;
 }
 
-
 /**
  * エージェント種別
  */
@@ -549,9 +548,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       // 1. 既存worktreeの存在を確認（listWorktreesを使用）
       const worktreesResult = await deps.gitEffects.listWorktrees(deps.appRepoPath);
       if (isErr(worktreesResult)) {
-        console.log(
-          `  ⚠️  Failed to list worktrees, falling back to normal execution`,
-        );
+        console.log(`  ⚠️  Failed to list worktrees, falling back to normal execution`);
         return await executeTaskWithWorktree(task);
       }
 

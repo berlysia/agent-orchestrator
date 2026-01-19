@@ -101,7 +101,9 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         `# Started At: ${run.startedAt}`,
         '#',
         '',
-      ].filter(line => line !== null).join('\n');
+      ]
+        .filter((line) => line !== null)
+        .join('\n');
 
       await fs.writeFile(logPath, header, 'utf-8');
     });
@@ -199,7 +201,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
       typeof h?.get === 'function'
         ? h.get('retry-after')
         : typeof h === 'object' && h
-          ? h['retry-after'] ?? h['Retry-After']
+          ? (h['retry-after'] ?? h['Retry-After'])
           : undefined;
 
     if (v == null) return undefined;

@@ -148,6 +148,7 @@ agent run "指示文"
 ```
 
 例：
+
 ```bash
 agent run "src/types/task.ts に新しいフィールド `priority` を追加する"
 ```
@@ -181,11 +182,13 @@ npm install -g .
 ### `agent` コマンドが見つからない
 
 1. エイリアスが設定されているか確認：
+
    ```bash
    alias | grep agent
    ```
 
 2. `dist/cli/index.js` が存在するか確認：
+
    ```bash
    ls -la dist/cli/index.js
    ```

@@ -327,7 +327,12 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       const maxTaskDuration = deps.maxTaskDuration ?? 4;
       const maxTasks = deps.maxTasks ?? 5;
       const planningPrompt = accumulatedFeedback
-        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback, maxTaskDuration, maxTasks)
+        ? buildPlanningPromptWithFeedback(
+            userInstruction,
+            accumulatedFeedback,
+            maxTaskDuration,
+            maxTasks,
+          )
         : buildPlanningPrompt(userInstruction, maxTaskDuration, maxTasks);
 
       // ログには省略版を書く（重複を避けるため）
@@ -395,7 +400,9 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         await appendPlanningLog(`\n❌ ${errorMsg}\n`);
 
         // JSON構文エラーかどうかを判定
-        const isJsonParseError = parseResult.errors.some((err) => err.includes('JSON parse failed'));
+        const isJsonParseError = parseResult.errors.some((err) =>
+          err.includes('JSON parse failed'),
+        );
 
         if (isJsonParseError) {
           consecutiveJsonErrors++;
@@ -545,11 +552,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
       // 前回の出力とフィードバックを含める（状態を引き継ぐ）
       const previousOutput = JSON.stringify(taskBreakdowns, null, 2);
-      accumulatedFeedback = formatFeedbackForRetry(
-        judgement,
-        previousOutput,
-        previousFullResponse,
-      );
+      accumulatedFeedback = formatFeedbackForRetry(judgement, previousOutput, previousFullResponse);
     }
 
     // タスクをTaskStoreに保存
@@ -570,7 +573,9 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId, sessionShort))),
+        dependencies: breakdown.dependencies.map((depId) =>
+          taskId(makeUniqueTaskId(depId, sessionShort)),
+        ),
         plannerRunId: plannerRunId,
         plannerLogPath: plannerLogPath,
         plannerMetadataPath: plannerMetadataPath,
@@ -907,7 +912,9 @@ Output only the JSON array, no additional text.`;
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId, sessionShort))),
+        dependencies: breakdown.dependencies.map((depId) =>
+          taskId(makeUniqueTaskId(depId, sessionShort)),
+        ),
         plannerRunId: additionalRunId,
         plannerLogPath: additionalPlannerLogPath,
         plannerMetadataPath: additionalPlannerMetadataPath,

@@ -7,35 +7,36 @@
 
 ## 実装ステータス
 
-| Phase | 優先度 | ステータス | 完了日 | コミット |
-|-------|--------|-----------|--------|----------|
-| Phase 1: Worker実行ログの保存 | 高 | ✅ 完了 | 2026-01-19 | 73e74cc |
-| Phase 2: Plannerのエージェント統合 | 中 | ⚠️ バグあり | 2026-01-19 | 73e74cc |
-| **Phase 2.4: runClaudeAgentバグ修正** | 🔴 緊急 | 🚧 修正中 | - | - |
-| Phase 3: CLI出力の改善 | 中 | ✅ 完了 | 2026-01-19 | 73e74cc |
-| Phase 4: Judge判定の強化 | 低 | 🔜 別Epic | - | - |
+| Phase                                 | 優先度  | ステータス  | 完了日     | コミット |
+| ------------------------------------- | ------- | ----------- | ---------- | -------- |
+| Phase 1: Worker実行ログの保存         | 高      | ✅ 完了     | 2026-01-19 | 73e74cc  |
+| Phase 2: Plannerのエージェント統合    | 中      | ⚠️ バグあり | 2026-01-19 | 73e74cc  |
+| **Phase 2.4: runClaudeAgentバグ修正** | 🔴 緊急 | 🚧 修正中   | -          | -        |
+| Phase 3: CLI出力の改善                | 中      | ✅ 完了     | 2026-01-19 | 73e74cc  |
+| Phase 4: Judge判定の強化              | 低      | 🔜 別Epic   | -          | -        |
 
 **実装順序**: Phase 1 → Phase 3 → Phase 2 → **Phase 2.4（緊急バグ修正）**
 
 ### Phase 5以降（新規観点）
 
-| Phase | 優先度 | ステータス | 推定工数 | 完了日 | コミット |
-|-------|--------|-----------|----------|--------|----------|
-| Phase 5.9: モデルの使い分け | 低 | ✅ 完了 | 2-3時間 | 2026-01-19 | 95114c4 |
-| Phase 5.1: プランナーの品質向上 | 高 | ✅ 完了 | 4-6時間 | 2026-01-19 | ab6fcea, 2a4f003 |
-| Phase 5.2: ジャッジによるタスク品質評価 | 高 | ✅ 完了 | 6-8時間 | 2026-01-19 | 546f55d |
-| Phase 5.3: 並列実行サポート | 高 | ✅ 完了 | 10-12時間 | 2026-01-19 | 5a9870d |
-| Phase 5.4: 直列タスクの変更統合 | 中 | ✅ 完了 | 6-8時間 | 2026-01-19 | 6c19086 |
-| Phase 5.5: 統合処理とコンフリクト解決 | 中 | ✅ 完了 | 11-12時間 | 2026-01-19 | cadb1d5 |
-| Phase 5.6: ジャッジ判定の高度化 | 中 | ✅ 完了 | 4-6時間 | 2026-01-19 | d2a01c6 |
-| Phase 5.7: 全体完了判定 | 中 | ✅ 完了 | 4-6時間 | 2026-01-19 | a0185ec |
-| Phase 5.8: プランナーの継続性 | 低 | ✅ 完了 | 4-6時間 | 2026-01-19 | 99655f9 |
+| Phase                                   | 優先度 | ステータス | 推定工数  | 完了日     | コミット         |
+| --------------------------------------- | ------ | ---------- | --------- | ---------- | ---------------- |
+| Phase 5.9: モデルの使い分け             | 低     | ✅ 完了    | 2-3時間   | 2026-01-19 | 95114c4          |
+| Phase 5.1: プランナーの品質向上         | 高     | ✅ 完了    | 4-6時間   | 2026-01-19 | ab6fcea, 2a4f003 |
+| Phase 5.2: ジャッジによるタスク品質評価 | 高     | ✅ 完了    | 6-8時間   | 2026-01-19 | 546f55d          |
+| Phase 5.3: 並列実行サポート             | 高     | ✅ 完了    | 10-12時間 | 2026-01-19 | 5a9870d          |
+| Phase 5.4: 直列タスクの変更統合         | 中     | ✅ 完了    | 6-8時間   | 2026-01-19 | 6c19086          |
+| Phase 5.5: 統合処理とコンフリクト解決   | 中     | ✅ 完了    | 11-12時間 | 2026-01-19 | cadb1d5          |
+| Phase 5.6: ジャッジ判定の高度化         | 中     | ✅ 完了    | 4-6時間   | 2026-01-19 | d2a01c6          |
+| Phase 5.7: 全体完了判定                 | 中     | ✅ 完了    | 4-6時間   | 2026-01-19 | a0185ec          |
+| Phase 5.8: プランナーの継続性           | 低     | ✅ 完了    | 4-6時間   | 2026-01-19 | 99655f9          |
 
 **推奨実装順序**: Phase 5.9 → Phase 5.1 → Phase 5.2 → Phase 5.3 → Phase 5.4 → Phase 5.5 → Phase 5.6 → Phase 5.7 → Phase 5.8
 
 **Phase 5.1完了**: プランナーが生成するタスクの品質を大幅に向上
 
 **成果**:
+
 - ✅ Worker実行ログが`runs/`ディレクトリに自動保存される
 - ⚠️ Plannerが実際にClaude/Codexエージェントを使用してタスク分解を実行（ただし`runClaudeAgent`にバグ）
 - ✅ CLI実行時にログファイルパスが表示される
@@ -57,6 +58,7 @@
 **テスト**: 23/23テストが成功（Phase 5.1のZodバリデーション、estimatedDuration範囲検証、TaskType enum検証を含む）
 
 **🔴 発見された問題**:
+
 - Phase 2実装後のテスト実行で`runClaudeAgent`のバグを発見
 - エージェントは正しく動作しているが、SDKの戻り値を誤って処理している
 - 詳細は [current-issues.md#問題4](./current-issues.md#4-runclaudeagentの実装バグ--緊急) を参照
@@ -70,6 +72,7 @@ Agent Orchestratorの実行可視性を向上させ、本来の価値を発揮�
 ### Phase 1: Worker実行ログの保存 【優先度: 高】
 
 #### 目的
+
 - ユーザーが途中経過を確認できるようにする
 - デバッグ・トラブルシューティングを可能にする
 - 実行履歴を追跡可能にする
@@ -81,6 +84,7 @@ Agent Orchestratorの実行可視性を向上させ、本来の価値を発揮�
 ##### 1.1 executeTask関数の修正
 
 **現在**:
+
 ```typescript
 const executeTask = async (
   task: Task,
@@ -106,6 +110,7 @@ const executeTask = async (
 ```
 
 **変更後**:
+
 ```typescript
 const executeTask = async (
   task: Task,
@@ -139,16 +144,10 @@ const executeTask = async (
   // 4. ログにタスク開始を記録
   await deps.runnerEffects.appendLog(
     runId,
-    `[${new Date().toISOString()}] Starting task: ${task.acceptance}\n`
+    `[${new Date().toISOString()}] Starting task: ${task.acceptance}\n`,
   );
-  await deps.runnerEffects.appendLog(
-    runId,
-    `Agent Type: ${agentType}\n`
-  );
-  await deps.runnerEffects.appendLog(
-    runId,
-    `Worktree: ${worktreePath}\n\n`
-  );
+  await deps.runnerEffects.appendLog(runId, `Agent Type: ${agentType}\n`);
+  await deps.runnerEffects.appendLog(runId, `Worktree: ${worktreePath}\n\n`);
 
   // 5. エージェントを実行
   const agentPrompt = `Execute task: ${task.acceptance}`;
@@ -166,7 +165,7 @@ const executeTask = async (
     const errorMsg = agentResult.err.message;
     await deps.runnerEffects.appendLog(
       runId,
-      `[${new Date().toISOString()}] ❌ Agent execution failed\n`
+      `[${new Date().toISOString()}] ❌ Agent execution failed\n`,
     );
     await deps.runnerEffects.appendLog(runId, `Error: ${errorMsg}\n`);
 
@@ -190,12 +189,9 @@ const executeTask = async (
   const output = agentResult.val;
   await deps.runnerEffects.appendLog(
     runId,
-    `[${new Date().toISOString()}] ✅ Agent execution completed\n`
+    `[${new Date().toISOString()}] ✅ Agent execution completed\n`,
   );
-  await deps.runnerEffects.appendLog(
-    runId,
-    `Final Response:\n${output.finalResponse}\n`
-  );
+  await deps.runnerEffects.appendLog(runId, `Final Response:\n${output.finalResponse}\n`);
 
   // メタデータ更新
   const completedMeta: Run = {
@@ -251,6 +247,7 @@ export interface Run {
 - ✅ 既存のテストがすべてパスする
 
 #### 推定工数
+
 2-3時間
 
 ---
@@ -258,6 +255,7 @@ export interface Run {
 ### Phase 2: Plannerのエージェント統合 【優先度: 中】
 
 #### 目的
+
 - ダミー実装を置き換える
 - ユーザー指示から適切にタスク分解を行う
 - 複雑な指示に対応可能にする
@@ -269,6 +267,7 @@ export interface Run {
 ##### 2.1 planTasks関数の修正
 
 **現在**:
+
 ```typescript
 const planTasks = async (
   userInstruction: string,
@@ -280,6 +279,7 @@ const planTasks = async (
 ```
 
 **変更後**:
+
 ```typescript
 const planTasks = async (
   userInstruction: string,
@@ -297,18 +297,14 @@ const planTasks = async (
   );
 
   if (isErr(runResult)) {
-    return createErr(
-      ioError('planTasks', `Failed to run planner agent: ${runResult.err.message}`)
-    );
+    return createErr(ioError('planTasks', `Failed to run planner agent: ${runResult.err.message}`));
   }
 
   // 3. エージェント出力をパース
   const taskBreakdowns = parseAgentOutput(runResult.val.finalResponse);
 
   if (taskBreakdowns.length === 0) {
-    return createErr(
-      ioError('planTasks', 'Agent returned no task breakdowns')
-    );
+    return createErr(ioError('planTasks', 'Agent returned no task breakdowns'));
   }
 
   // 4. タスクをTaskStoreに保存（既存のロジック）
@@ -356,12 +352,12 @@ Output only the JSON array, no additional text.`;
 
 ##### 2.3 出力パーサーの実装
 
-```typescript
+````typescript
 export const parseAgentOutput = (output: string): TaskBreakdown[] => {
   try {
     // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
-    const jsonMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) ||
-                      output.match(/(\[[\s\S]*\])/);
+    const jsonMatch =
+      output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || output.match(/(\[[\s\S]*\])/);
 
     const jsonStr = jsonMatch ? jsonMatch[1] : output;
     const parsed = JSON.parse(jsonStr.trim());
@@ -386,7 +382,7 @@ export const parseAgentOutput = (output: string): TaskBreakdown[] => {
     return [];
   }
 };
-```
+````
 
 #### 実装手順
 
@@ -406,6 +402,7 @@ export const parseAgentOutput = (output: string): TaskBreakdown[] => {
 - ✅ パーサーのユニットテストがパスする
 
 #### 推定工数
+
 4-6時間
 
 ---
@@ -413,17 +410,20 @@ export const parseAgentOutput = (output: string): TaskBreakdown[] => {
 ### Phase 2.4: runClaudeAgentバグ修正 【優先度: 🔴 緊急】
 
 #### 発見の経緯
+
 Phase 2実装後のテスト実行時に、以下のエラーが発生：
 
-```
+````
 Failed to parse agent output: SyntaxError: Unexpected token '\', "\n[\n  {\n"... is not valid JSON
 Output was: {"type":"result","subtype":"success",...,"result":"```json\n[...]```"}
-```
+````
 
 #### 根本原因
+
 `src/core/runner/runner-effects-impl.ts:121`で、Claude Agent SDKの戻り値全体を`JSON.stringify`してしまっている。
 
 **現在の誤った実装**:
+
 ```typescript
 // src/core/runner/runner-effects-impl.ts:102-126
 const runClaudeAgent = async (
@@ -449,7 +449,8 @@ const runClaudeAgent = async (
 ```
 
 **SDKの実際の戻り値構造**:
-```typescript
+
+````typescript
 {
   type: "result",
   subtype: "success",
@@ -459,13 +460,14 @@ const runClaudeAgent = async (
   num_turns: 6,
   result: "```json\n[...]```"  // ← これが実際のエージェントの応答
 }
-```
+````
 
 #### 修正内容
 
 **ファイル**: `src/core/runner/runner-effects-impl.ts`
 
 **修正前**:
+
 ```typescript
 return {
   finalResponse: JSON.stringify(sdkResult),
@@ -473,6 +475,7 @@ return {
 ```
 
 **修正後**:
+
 ```typescript
 return {
   finalResponse: sdkResult.result, // resultプロパティを直接使用
@@ -503,6 +506,7 @@ return {
 **影響**: Planner（タスク分解）の動作が正常化
 
 #### 推定工数
+
 30分（実装5分、ビルド・テスト・検証25分）
 
 ---
@@ -510,6 +514,7 @@ return {
 ### Phase 3: CLI出力の改善 【優先度: 中】
 
 #### 目的
+
 - ユーザーにリアルタイムで進捗を表示
 - 実行結果の確認方法を提供
 - より良いユーザー体験を実現
@@ -558,6 +563,7 @@ console.log(`  📊 Metadata: runs/${runId}.json`);
 - ✅ `agent logs` でログ内容を確認できる
 
 #### 推定工数
+
 2-3時間
 
 ---
@@ -567,6 +573,7 @@ console.log(`  📊 Metadata: runs/${runId}.json`);
 **注**: CI統合が必要なため、別Epicとして扱う
 
 #### 目的
+
 - タスクの実際の完了状態を確認
 - CI/テスト結果に基づいた判定
 - 品質保証の向上
@@ -579,6 +586,7 @@ console.log(`  📊 Metadata: runs/${runId}.json`);
 4. 受け入れ基準の検証
 
 #### 推定工数
+
 6-8時間（CI統合含む）
 
 ---
@@ -623,6 +631,7 @@ console.log(`  📊 Metadata: runs/${runId}.json`);
 もし時間が限られている場合は、**Phase 1のみ**を実装することを推奨します。
 
 **Phase 1の価値**:
+
 - ユーザーが途中経過を確認できる
 - デバッグが可能になる
 - 実装コストが低い（2-3時間）
@@ -635,6 +644,7 @@ console.log(`  📊 Metadata: runs/${runId}.json`);
 ### Phase 1のテスト
 
 #### ユニットテスト
+
 ```typescript
 // tests/unit/core/orchestrator/worker-operations.test.ts
 describe('executeTask with logging', () => {
@@ -653,6 +663,7 @@ describe('executeTask with logging', () => {
 ```
 
 #### E2Eテスト
+
 ```bash
 # tests/e2e/run-with-logs.test.ts
 # agent runを実行して、ログが保存されることを確認
@@ -661,6 +672,7 @@ describe('executeTask with logging', () => {
 ### Phase 2のテスト
 
 #### ユニットテスト
+
 ```typescript
 // tests/unit/core/orchestrator/planner-operations.test.ts
 describe('parseAgentOutput', () => {
@@ -687,6 +699,7 @@ describe('parseAgentOutput', () => {
 **リスク**: ログファイルが大きくなりすぎる
 
 **対策**:
+
 - ログローテーション機能の追加（将来）
 - 古いログの自動削除（将来）
 - 現時点では手動クリーンアップで対処
@@ -696,6 +709,7 @@ describe('parseAgentOutput', () => {
 **リスク**: エージェントが不正なJSONを返す
 
 **対策**:
+
 - パーサーのエラーハンドリングを強化 ✅ 実装済み
 - フォールバックとして `createDummyTaskBreakdown` を保持 ✅ 実装済み
 - プロンプトの改善（JSONフォーマットの厳密化）
@@ -703,17 +717,20 @@ describe('parseAgentOutput', () => {
 **リスク**: エージェント実行コストが増加
 
 **対策**:
+
 - タスク数の上限を設定（最大5タスク）
 - キャッシュ機構の検討（将来）
 
 **🔴 実際に発生したリスク**: SDKの戻り値構造の誤解
 
 **発生内容**:
+
 - `unstable_v2_prompt`の戻り値を正しく理解していなかった
 - `JSON.stringify(sdkResult)`を使用してしまった
 - 実際には`sdkResult.result`を使用すべきだった
 
 **教訓**:
+
 - 外部SDKの戻り値構造は、必ず公式ドキュメントを確認する
 - 実装前に小さなテストスクリプトで動作確認を行う
 - 単体テストでSDKのモックを適切に設定する
@@ -723,10 +740,12 @@ describe('parseAgentOutput', () => {
 **リスク**: 修正が他の部分に影響する
 
 **対策**:
+
 - 修正は1行のみであり、影響範囲が限定的
 - 既存のテストスイートで回帰を確認
 
 **⚠️ 注意**: Codexエージェントも未検証
+
 - `runCodexAgent`は`turn.finalResponse`を直接使用しているが、実際には実行されていない
 - Codex SDKの実際の戻り値構造が想定通りかは未確認
 - Codexを使用する場合は、同様のバグがないか事前確認が必要
@@ -769,6 +788,7 @@ describe('parseAgentOutput', () => {
 ## 次のアクション
 
 ### 完了済み
+
 1. ✅ このドキュメントをレビュー
 2. ✅ Phase 1の実装開始を決定
 3. ✅ 実装ブランチを作成（例: `feature/worker-logging`）
@@ -777,6 +797,7 @@ describe('parseAgentOutput', () => {
 6. ✅ Phase 2, Phase 3の実装完了
 
 ### 🔴 緊急タスク（Phase 2.4）
+
 1. **即座実行**: `runClaudeAgent`のバグ修正
    - `src/core/runner/runner-effects-impl.ts:121`を修正
    - `JSON.stringify(sdkResult)` → `sdkResult.result`
@@ -785,6 +806,7 @@ describe('parseAgentOutput', () => {
 4. バグ修正をコミット
 
 ### 今後の計画
+
 1. Phase 2.4完了後、システム全体の動作確認
 2. Phase 4（Judge判定の強化）を別Epicとして計画
 3. 本番運用に向けた準備
@@ -805,6 +827,7 @@ Phase 1-3の実装後、実際の運用を通じて新たな問題点と改善�
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - タスクの内容が不明確（例: 文書作成指示に対して実装タスクが混入）
 - タスクの粒度がバラバラ（一部は大きすぎ、一部は小さすぎ）
 - 元の指示の意図が正しく反映されない
@@ -816,6 +839,7 @@ Phase 1-3の実装後、実際の運用を通じて新たな問題点と改善�
 **5.1.1 TaskBreakdown型のZodスキーマ定義（必須化）**
 
 スキーマバージョン2として定義:
+
 - `type`: タスクタイプ（implementation/documentation/investigation/integration）
 - `estimatedDuration`: 見積時間（0.5-8時間、1-4時間推奨）
 - `context`: タスク実行に必要な完全なコンテキスト情報
@@ -835,12 +859,14 @@ export const TaskBreakdownSchema = z.object({
 **5.1.2 Task型の拡張**
 
 永続化時に新フィールドを保持:
+
 - `taskType`: タスクタイプ
 - `context`: コンテキスト情報
 
 **5.1.3 プロンプトの大幅改善**
 
 `buildPlanningPrompt`を拡張:
+
 - タスクタイプの詳細説明
 - 粒度ガイドライン（1-4時間目安、最大8時間）
 - **COMPLETE acceptance基準**: WHAT（何を）とHOW（検証方法）を明示、エッジケース・エラーシナリオを含む
@@ -850,6 +876,7 @@ export const TaskBreakdownSchema = z.object({
 **5.1.4 Zodバリデーションによる厳格化**
 
 `parseAgentOutput`を改善:
+
 - Zodスキーマによる厳格なバリデーション
 - 詳細なエラーメッセージ（`parseAgentOutputWithErrors`）
 - 新フィールド欠落時は明確に拒否
@@ -861,12 +888,14 @@ export const TaskBreakdownSchema = z.object({
 - バリデーションエラーをログに詳細記録
 
 #### 実装ファイル
+
 - `src/core/orchestrator/planner-operations.ts`: TaskBreakdownSchema、プロンプト、パーサー
 - `src/types/task.ts`: Task型拡張、createInitialTask更新
 - `tests/unit/core/orchestrator/planner-operations.test.ts`: テスト拡充
 - `tests/unit/file-store.test.ts`: 新フィールド対応
 
 #### 推定工数
+
 4-6時間（実績: 約5時間）
 
 #### 将来的な拡張性
@@ -874,10 +903,12 @@ export const TaskBreakdownSchema = z.object({
 現在は`context`と`acceptance`に全情報を含めることでタスクが自己完結的に実行可能。
 
 **Phase 5.4（直列タスクサポート）実装後**は、以下のフローもサポート可能:
+
 1. **仕様書作成タスク**: 詳細な要件/設計文書を作成
 2. **実装タスク**: その文書を`context`で参照して実装
 
 例:
+
 ```json
 {
   "description": "Implement authentication based on spec",
@@ -894,6 +925,7 @@ export const TaskBreakdownSchema = z.object({
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - プランナーが生成したタスクの品質を誰も評価していない
 - 不明確なタスクがそのまま実行されてしまう
 
@@ -902,6 +934,7 @@ export const TaskBreakdownSchema = z.object({
 **5.2.1 タスク生成直後の品質評価**
 
 新しい関数 `judgeTaskQuality` の追加:
+
 ```typescript
 interface TaskQualityJudgement {
   isAcceptable: boolean;
@@ -911,7 +944,7 @@ interface TaskQualityJudgement {
 
 const judgeTaskQuality = async (
   taskBreakdowns: TaskBreakdown[],
-  originalInstruction: string
+  originalInstruction: string,
 ): Promise<TaskQualityJudgement> => {
   // エージェントに品質評価を依頼
   const judgementPrompt = buildTaskQualityPrompt(taskBreakdowns, originalInstruction);
@@ -928,6 +961,7 @@ const judgeTaskQuality = async (
 **5.2.2 品質不足時の再生成フロー**
 
 `planTasks`を拡張:
+
 ```typescript
 const planTasks = async (userInstruction: string) => {
   let attempts = 0;
@@ -954,20 +988,24 @@ const planTasks = async (userInstruction: string) => {
 **5.2.3 実装統合**
 
 `createPlannerOperations`内に`judgeTaskQuality`関数を追加し、`planTasks`で品質評価ループを実装:
+
 - 最大3回までの再生成試行
 - フィードバックを蓄積して次回のプロンプトに反映
 - 品質評価エージェント失敗時はデフォルトで許容（可用性優先）
 
 #### 実装ファイル
+
 - `src/core/orchestrator/planner-operations.ts`: 品質評価ロジック、プロンプト、パーサー
 - `src/core/orchestrator/orchestrate.ts`: PlannerDepsにjudgeModel追加
 - `tests/unit/core/orchestrator/planner-operations.test.ts`: 品質評価テスト追加（8テスト）
 
 #### テスト結果
+
 - ユニットテスト: 31/31 パス ✅
 - ビルド: 成功 ✅
 
 #### 推定工数
+
 6-8時間（実績: 約4時間）
 
 ---
@@ -977,6 +1015,7 @@ const planTasks = async (userInstruction: string) => {
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - `maxWorkers`パラメータが存在するが、実際には直列実行されている（orchestrate.ts:122-193のforループ）
 - タスク間の依存関係が考慮されていない
 
@@ -985,6 +1024,7 @@ const planTasks = async (userInstruction: string) => {
 **5.3.1 型定義の拡張**
 
 Task型とTaskBreakdownに`dependencies`フィールドを追加:
+
 ```typescript
 // src/types/task.ts
 export const TaskSchema = z.object({
@@ -994,7 +1034,7 @@ export const TaskSchema = z.object({
 
 // src/core/orchestrator/planner-operations.ts
 export const TaskBreakdownSchema = z.object({
-  id: z.string(),  // Planner段階でID割り当て
+  id: z.string(), // Planner段階でID割り当て
   // ...
   dependencies: z.array(z.string()).default([]),
 });
@@ -1003,6 +1043,7 @@ export const TaskBreakdownSchema = z.object({
 **5.3.2 依存関係グラフモジュールの実装**
 
 新規ファイル `src/core/orchestrator/dependency-graph.ts`:
+
 - `buildDependencyGraph`: タスク間の依存関係グラフを構築
 - `detectCycles`: Tarjan's SCCアルゴリズムで循環依存を検出
 - `computeExecutionLevels`: Kahn's Algorithmでトポロジカルソート、実行レベルを計算
@@ -1010,12 +1051,14 @@ export const TaskBreakdownSchema = z.object({
 **5.3.3 並列実行器の実装**
 
 新規ファイル `src/core/orchestrator/parallel-executor.ts`:
+
 - `executeLevelParallel`: 同レベルのタスクを`Promise.allSettled`で並列実行
 - `computeBlockedTasks`: 失敗タスクの依存先を自動的にブロック
 
 **5.3.4 Orchestrator統合**
 
 `src/core/orchestrator/orchestrate.ts`の`executeInstruction`を書き換え:
+
 ```typescript
 // 1. すべてのタスクを取得して依存関係グラフを構築
 const tasks: Task[] = [];
@@ -1053,6 +1096,7 @@ for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
 **5.3.5 プランナープロンプトの拡張**
 
 `buildPlanningPrompt`にIDと依存関係の説明を追加:
+
 ```
 IMPORTANT: You must assign a unique ID to each task. Use the format "task-1", "task-2", etc.
 When one task depends on another, reference it by ID in the dependencies array.
@@ -1066,6 +1110,7 @@ For each task, provide:
 ```
 
 #### 実装ファイル
+
 - `src/types/task.ts`: Task型に`dependencies`フィールド追加
 - `src/core/orchestrator/planner-operations.ts`: TaskBreakdownに`id`と`dependencies`追加
 - `src/core/orchestrator/dependency-graph.ts`: 依存関係グラフ構築・循環依存検出・レベル計算（新規）
@@ -1075,15 +1120,18 @@ For each task, provide:
 - `tests/unit/core/orchestrator/planner-operations.test.ts`: 既存テスト更新
 
 #### エラーハンドリング戦略
+
 - 循環依存検出時: 該当タスクをBLOCKED、他は続行
 - 依存タスク失敗時: 後続タスクをBLOCKED、同レベル他タスクは続行
 - 並列実行中の1タスク失敗: 同レベル他タスクは続行
 
 #### テスト結果
+
 - ユニットテスト: 41/41 パス ✅
 - ビルド: 成功 ✅
 
 #### 実行フロー
+
 ```
 Level 0: [A, B]     ← 依存なし、並列実行
 Level 1: [C]        ← A,Bに依存
@@ -1091,6 +1139,7 @@ Level 2: [D, E, F]  ← Cに依存、並列実行
 ```
 
 #### 推定工数
+
 8-12時間（実績: 約10時間）
 
 ---
@@ -1100,6 +1149,7 @@ Level 2: [D, E, F]  ← Cに依存、並列実行
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - 直列タスクの場合、前のタスクの変更結果を次のタスクが受け取れない
 - 各worktreeに結果が散らばったまま
 
@@ -1108,6 +1158,7 @@ Level 2: [D, E, F]  ← Cに依存、並列実行
 **5.4.1 直列タスクの検出**
 
 依存関係グラフから直列チェーンを検出:
+
 ```typescript
 const detectSerialChains = (taskGraph: DependencyGraph): TaskId[][] => {
   // A -> B -> C のような直線的な依存関係を検出
@@ -1118,6 +1169,7 @@ const detectSerialChains = (taskGraph: DependencyGraph): TaskId[][] => {
 **5.4.2 同一worktreeでの実行**
 
 直列チェーンは同じworktreeを再利用:
+
 ```typescript
 const executeSerialChain = async (chain: TaskId[]) => {
   let worktreePath = null;
@@ -1143,11 +1195,12 @@ const executeSerialChain = async (chain: TaskId[]) => {
 **5.4.3 フィードバックの伝達**
 
 前のタスクの実行結果を次のタスクに渡す:
+
 ```typescript
 const executeTaskInWorktree = async (
   taskId: TaskId,
   worktreePath: WorktreePath,
-  previousTaskFeedback?: string
+  previousTaskFeedback?: string,
 ) => {
   const prompt = previousTaskFeedback
     ? `Execute task: ${task.acceptance}\n\nPrevious task feedback:\n${previousTaskFeedback}`
@@ -1164,6 +1217,7 @@ const executeTaskInWorktree = async (
 ```
 
 #### 実装ファイル
+
 - `src/core/orchestrator/dependency-graph.ts`: `detectSerialChains`関数を追加
 - `src/core/orchestrator/worker-operations.ts`: `executeTaskInExistingWorktree`関数を追加
 - `src/core/orchestrator/serial-executor.ts`: 直列チェーン実行ロジック（新規）
@@ -1173,27 +1227,32 @@ const executeTaskInWorktree = async (
 #### 実装の詳細
 
 **直列チェーン検出アルゴリズム**:
+
 - 入次数（依存先の数）と出次数（依存元の数）を計算
 - 各タスクが厳密に1つの依存先と1つの依存元を持つチェーンを検出
 - チェーンの長さが2以上のもののみ返す（単独タスクは並列実行の方が効率的）
 
 **実行戦略**:
+
 - 直列チェーンと並列タスクを分離
 - 直列チェーンは順番に実行（同一worktreeを共有）
 - 並列タスクは従来通りレベルベースで並列実行
 - 各直列チェーン完了後にworktreeをクリーンアップ
 
 **フィードバック伝達**:
+
 - 前のタスクのRunIDを次のタスクに渡す
 - プロンプトに前のタスクのフィードバックを含める
 - ログに明示的に記録（`Worktree: <path> (reused)`）
 
 #### テスト結果
+
 - ユニットテスト: 47/47 パス ✅
 - 新規テスト: detectSerialChains 6テスト追加
 - ビルド: 成功 ✅
 
 #### 推定工数
+
 6-8時間（実績: 約6時間）
 
 ---
@@ -1203,6 +1262,7 @@ const executeTaskInWorktree = async (
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - 並列実行されたタスクの結果がそれぞれのworktreeに散らばっている
 - 統合時にコンフリクトが発生する可能性
 - 並列実行後、各タスクの変更は個別ブランチにpushされるが、統合されない
@@ -1212,6 +1272,7 @@ const executeTaskInWorktree = async (
 **5.5.1 型定義の追加**
 
 新規ファイル `src/types/integration.ts`:
+
 - `GitConflictInfo`: コンフリクト情報
 - `ConflictContent`: コンフリクトの詳細内容
 - `MergeResult`: マージ結果（成功/コンフリクト/失敗）
@@ -1224,6 +1285,7 @@ const executeTaskInWorktree = async (
 **5.5.2 GitEffectsインターフェース拡張**
 
 `src/adapters/vcs/git-effects.ts`にマージ関連メソッドを追加:
+
 - `merge`: ブランチをマージ（コンフリクト検出含む）
 - `abortMerge`: 進行中のマージを中止
 - `getConflictedFiles`: コンフリクトファイルのリスト取得
@@ -1233,6 +1295,7 @@ const executeTaskInWorktree = async (
 **5.5.3 simple-git-effectsの実装**
 
 `src/adapters/vcs/simple-git-effects.ts`にマージ操作を実装:
+
 - `merge`: simple-gitの`merge()`を使用、`GitResponseError`でコンフリクト検出
 - `getConflictedFiles`: `status().conflicted`配列を取得
 - `getConflictContent`: `git show :1:/:2:/:3:`でbase/ours/theirsを取得
@@ -1243,6 +1306,7 @@ const executeTaskInWorktree = async (
 新規ファイル `src/core/orchestrator/integration-operations.ts`:
 
 主要関数:
+
 - `integrateTasks`: 複数タスクブランチを統合ブランチ（`integration/merge-{timestamp}`）にマージ
 - `createConflictResolutionTask`: コンフリクト発生時に解決タスクを自動生成
 - `buildConflictResolutionPrompt`: コンフリクト解決用の詳細プロンプトを構築
@@ -1250,6 +1314,7 @@ const executeTaskInWorktree = async (
 - `finalizeIntegration`: 統合ブランチの取り込み方法を決定
 
 統合フロー:
+
 1. 統合ブランチを作成（`integration/merge-{timestamp}`）
 2. 各タスクのブランチを順番にマージ
 3. コンフリクト発生時はアボートして解決タスクを生成
@@ -1261,20 +1326,23 @@ const executeTaskInWorktree = async (
 **5.5.5 設定の追加**
 
 `src/types/config.ts`に統合設定を追加:
+
 ```typescript
 integration: {
-  method: 'pr' | 'command' | 'auto'  // デフォルト: 'auto'
+  method: 'pr' | 'command' | 'auto'; // デフォルト: 'auto'
 }
 ```
 
 **5.5.6 orchestrate.tsへの統合**
 
 `src/core/orchestrator/orchestrate.ts`の`executeInstruction`に統合フェーズを追加:
+
 - 完了タスクが複数ある場合のみ統合を実行
 - 統合結果に基づいてユーザーに適切な情報を表示
 - コンフリクト発生時は解決タスクIDを表示
 
 #### 実装ファイル
+
 - `src/types/integration.ts`: 統合関連の型定義（新規）
 - `src/types/errors.ts`: GitMergeConflictError追加
 - `src/types/config.ts`: 統合設定追加
@@ -1286,14 +1354,17 @@ integration: {
 - `tests/unit/adapters/vcs/simple-git-effects-merge.test.ts`: マージ機能テストプレースホルダー（新規）
 
 #### テスト結果
+
 - ユニットテスト: 59/59 パス ✅
 - ビルド: 成功 ✅
 - Lint: 成功 ✅
 
 #### 推定工数
+
 11-12時間（実績: 約11時間）
 
 #### 備考
+
 - PR作成機能（GitHub CLI統合）は将来の実装予定
 - 現時点では統合ブランチのマージコマンドを出力する形で運用
 
@@ -1304,6 +1375,7 @@ integration: {
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - 現在の判定が単純すぎる（RUNNING = 成功）
 - タスク内容に対する十分性を評価していない
 
@@ -1312,6 +1384,7 @@ integration: {
 **5.6.1 エージェントベースの判定**
 
 `judgeTask`をエージェント呼び出しに置き換え:
+
 ```typescript
 const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStoreError>> => {
   const taskResult = await deps.taskStore.readTask(tid);
@@ -1337,26 +1410,31 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **5.6.2 判定プロンプトの実装**
 
 タスクのacceptance criteriaと実行ログを使用して、エージェントが詳細な判定を行うプロンプトを実装。
+
 - TASK INFORMATION: ブランチ、タイプ、コンテキスト
 - TASK ACCEPTANCE CRITERIA: 受け入れ基準
 - EXECUTION LOG: 実行ログ内容
 
 #### 実装ファイル
+
 - `src/core/orchestrator/judge-operations.ts`: エージェントベース判定ロジック
 - `src/core/orchestrator/orchestrate.ts`: JudgeDeps拡張
 - `src/types/config.ts`: AgentType型追加
 - `tests/unit/core/orchestrator/judge-operations.test.ts`: テスト追加（9テスト）
 
 #### フォールバック戦略
+
 - ログ読み込み失敗時: 簡易判定にフォールバック
 - エージェント実行失敗時: 簡易判定にフォールバック
 - レスポンスパース失敗時: 簡易判定にフォールバック
 
 #### テスト結果
+
 - ユニットテスト: 68/68 パス ✅
 - ビルド: 成功 ✅
 
 #### 推定工数
+
 4-6時間（実績: 約4時間）
 
 ---
@@ -1366,6 +1444,7 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - 全タスク完了後に、本当に元の指示が達成されたかを確認していない
 
 #### 改善内容（実装済み）
@@ -1373,6 +1452,7 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **5.7.1 型定義の追加**
 
 `FinalCompletionJudgement`型をZodスキーマで定義:
+
 - `isComplete`: 元の指示が完全に達成されたか
 - `missingAspects`: 達成できていない側面のリスト
 - `additionalTaskSuggestions`: 追加で必要なタスクの提案
@@ -1381,6 +1461,7 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **5.7.2 最終判定フェーズの追加**
 
 `src/core/orchestrator/orchestrate.ts`の`executeInstruction`に最終判定フェーズを追加:
+
 1. 完了タスクと失敗タスクの詳細を取得
 2. `judgeFinalCompletion`を呼び出して最終判定を実行
 3. 判定結果をログに表示（完了スコア、不足している側面、追加タスク提案）
@@ -1388,6 +1469,7 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **5.7.3 最終判定ロジックの実装**
 
 `src/core/orchestrator/planner-operations.ts`に以下を追加:
+
 - `buildFinalCompletionPrompt`: 最終判定用のプロンプト生成
 - `parseFinalCompletionJudgement`: エージェント応答のパース（Zodバリデーション）
 - `judgeFinalCompletion`: 最終判定を実行する関数
@@ -1399,20 +1481,24 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 - パース失敗時: デフォルトで完了とみなす（無限ループ防止）
 
 #### 実装ファイル
+
 - `src/core/orchestrator/planner-operations.ts`: 最終判定ロジック、型定義、プロンプト、パーサー
 - `src/core/orchestrator/orchestrate.ts`: 最終判定フェーズ統合
 - `tests/unit/core/orchestrator/planner-operations.test.ts`: 最終判定テスト追加（9テスト）
 
 #### テスト結果
+
 - ユニットテスト: 77/77 パス ✅
 - ビルド: 成功 ✅
 
 #### 推定工数
+
 4-6時間（実績: 約4時間）
 
 #### 将来的な拡張性
 
 現在の実装では、最終判定結果を表示するのみ。将来的には以下の拡張が可能:
+
 1. 不完全な場合、追加タスクを自動生成してユーザーに提示
 2. ユーザーが承認した場合、追加タスクを実行
 3. 再帰的な完了判定（追加タスク完了後も判定を実行）
@@ -1426,6 +1512,7 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - プランナーが前回のやり取りを継続できない
 - 追加タスク生成時に前回のコンテキストが失われる
 
@@ -1444,7 +1531,7 @@ interface PlannerSession {
 const savePlannerSession = async (session: PlannerSession): Promise<void> => {
   await fs.writeFile(
     `${coordRepoPath}/planner-sessions/${session.sessionId}.json`,
-    JSON.stringify(session, null, 2)
+    JSON.stringify(session, null, 2),
   );
 };
 ```
@@ -1483,6 +1570,7 @@ Generate additional tasks to address these missing aspects.
 ```
 
 #### 実装ファイル
+
 - `src/types/planner-session.ts`: PlannerSession型とConversationMessage型定義（新規）
 - `src/core/orchestrator/planner-session-effects.ts`: PlannerSessionEffectsインターフェース（新規）
 - `src/core/orchestrator/planner-session-effects-impl.ts`: PlannerSessionEffects実装（新規）
@@ -1492,6 +1580,7 @@ Generate additional tasks to address these missing aspects.
 #### 実装内容の詳細
 
 **PlannerSession型の定義**:
+
 - sessionId: セッションの一意識別子
 - instruction: 元のユーザー指示
 - conversationHistory: 会話履歴（role, content, timestamp）
@@ -1499,12 +1588,14 @@ Generate additional tasks to address these missing aspects.
 - createdAt/updatedAt: タイムスタンプ
 
 **PlannerSessionEffects**:
+
 - ensureSessionsDir(): planner-sessionsディレクトリの作成
 - saveSession(): セッション保存（updatedAt自動更新）
 - loadSession(): セッション読み込み（Zodバリデーション付き）
 - sessionExists(): セッション存在確認
 
 **planAdditionalTasks関数**:
+
 - セッションIDと不足している側面を受け取る
 - セッションを読み込んで会話履歴を含むプロンプトを構築
 - エージェントで追加タスクを生成
@@ -1512,14 +1603,17 @@ Generate additional tasks to address these missing aspects.
 - 生成されたタスクをTaskStoreに保存
 
 **planTasks関数の拡張**:
+
 - sessionEffectsが提供されている場合のみセッション保存
 - 会話履歴に元の指示とエージェント応答を記録
 
 #### テスト結果
+
 - ユニットテスト: 87/87 パス ✅
 - ビルド: 成功 ✅
 
 #### 推定工数
+
 4-6時間（実績: 約5時間）
 
 #### 将来的な活用
@@ -1537,6 +1631,7 @@ Generate additional tasks to address these missing aspects.
 **完了日**: 2026-01-19
 
 #### 問題点
+
 - すべての役割で同じモデルを使用している
 - コスト効率が悪い
 
@@ -1546,9 +1641,9 @@ Generate additional tasks to address these missing aspects.
 
 ```typescript
 const MODEL_CONFIG = {
-  planner: 'claude-opus-4-5-20251101',    // 高度な計画能力が必要
-  worker: 'claude-sonnet-4-5-20250929',   // バランス型
-  judge: 'claude-haiku-4-5-20250929',     // 軽量で高速
+  planner: 'claude-opus-4-5-20251101', // 高度な計画能力が必要
+  worker: 'claude-sonnet-4-5-20250929', // バランス型
+  judge: 'claude-haiku-4-5-20250929', // 軽量で高速
   qualityCheck: 'claude-haiku-4-5-20250929', // 軽量で高速
   conflictResolution: 'claude-sonnet-4-5-20250929', // 中程度の複雑さ
 } as const;
@@ -1561,41 +1656,45 @@ const MODEL_CONFIG = {
 const runResult = await deps.runnerEffects.runClaudeAgent(
   planningPrompt,
   deps.appRepoPath,
-  MODEL_CONFIG.planner,  // Opus使用
+  MODEL_CONFIG.planner, // Opus使用
 );
 
 // Judge
 const result = await runnerEffects.runClaudeAgent(
   judgementPrompt,
   appRepoPath,
-  MODEL_CONFIG.judge,  // Haiku使用
+  MODEL_CONFIG.judge, // Haiku使用
 );
 
 // Worker
 const agentResult = await deps.runnerEffects.runClaudeAgent(
   agentPrompt,
   worktreePath,
-  MODEL_CONFIG.worker,  // Sonnet使用
+  MODEL_CONFIG.worker, // Sonnet使用
 );
 ```
 
 #### 推定工数
+
 2-3時間
 
 #### 実装結果
 
 **実装ファイル**:
+
 - `src/core/config/models.ts` - 役割別エージェント設定（新規作成）
 - `src/core/orchestrator/planner-operations.ts` - Planner でのモデル適用
 - `src/core/orchestrator/worker-operations.ts` - Worker でのモデル適用
 
 **実装内容**:
+
 1. `AGENT_CONFIG` 定数を定義（エージェントタイプとモデルのペア）
 2. Planner で `AGENT_CONFIG.planner.model` (Opus) を使用
 3. Worker で `AGENT_CONFIG.worker.model` (Sonnet) を使用
 4. Judge は Phase 5.6 で対応予定（現在はエージェント呼び出しなし）
 
 **効果**:
+
 - Planner に高性能な Opus を使用することで、タスク分解の品質向上
 - Worker に Sonnet を使用することで、実装とコストのバランスを維持
 - Judge に Haiku を使用することで、判定処理の高速化とコスト削減（Phase 5.6 実装時）

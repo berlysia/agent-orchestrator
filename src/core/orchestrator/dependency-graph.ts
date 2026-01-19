@@ -36,10 +36,7 @@ export interface ExecutionLevels {
  * @param globalTaskIds グローバルなタスクIDセット（部分グラフ構築時に使用）
  * @returns 依存関係グラフ
  */
-export function buildDependencyGraph(
-  tasks: Task[],
-  globalTaskIds?: Set<TaskId>,
-): DependencyGraph {
+export function buildDependencyGraph(tasks: Task[], globalTaskIds?: Set<TaskId>): DependencyGraph {
   const adjacencyList = new Map<TaskId, TaskId[]>();
   const reverseAdjacencyList = new Map<TaskId, TaskId[]>();
   const allTaskIds = new Set<TaskId>();

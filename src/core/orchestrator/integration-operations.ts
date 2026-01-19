@@ -265,9 +265,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     lines.push('');
     lines.push('## Resolution Instructions');
     lines.push('');
-    lines.push(
-      '1. Review each conflict carefully and understand the intent of both changes',
-    );
+    lines.push('1. Review each conflict carefully and understand the intent of both changes');
     lines.push('2. Resolve conflicts by merging the changes appropriately');
     lines.push('3. Ensure all tests pass after resolution');
     lines.push('4. Stage and commit the resolved files');

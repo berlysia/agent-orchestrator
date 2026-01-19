@@ -6,10 +6,7 @@ import type { Result } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import type { PlannerSessionEffects, PlannerSessionSummary } from './planner-session-effects.ts';
-import {
-  PlannerSessionSchema,
-  type PlannerSession,
-} from '../../types/planner-session.ts';
+import { PlannerSessionSchema, type PlannerSession } from '../../types/planner-session.ts';
 
 /**
  * PlannerSessionEffects の実装

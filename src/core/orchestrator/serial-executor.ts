@@ -104,7 +104,9 @@ export async function executeSerialChain(
           console.log(`  🚀 [${rawTaskId}] Creating worktree and executing first task...`);
           const setupResult = await workerOps.setupWorktree(claimedTask);
           if (isErr(setupResult)) {
-            console.log(`  ❌ [${rawTaskId}] Failed to create worktree: ${setupResult.err.message}`);
+            console.log(
+              `  ❌ [${rawTaskId}] Failed to create worktree: ${setupResult.err.message}`,
+            );
             await schedulerOps.blockTask(tid);
             failed.push(tid);
             break;
@@ -116,7 +118,7 @@ export async function executeSerialChain(
           if (isErr(runResult) || !runResult.val.success) {
             const errorMsg = isErr(runResult)
               ? runResult.err.message
-              : runResult.val.error ?? 'Unknown error';
+              : (runResult.val.error ?? 'Unknown error');
             console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
             await schedulerOps.blockTask(tid);
             failed.push(tid);
@@ -135,7 +137,7 @@ export async function executeSerialChain(
           if (isErr(runResult) || !runResult.val.success) {
             const errorMsg = isErr(runResult)
               ? runResult.err.message
-              : runResult.val.error ?? 'Unknown error';
+              : (runResult.val.error ?? 'Unknown error');
             console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
             await schedulerOps.blockTask(tid);
             failed.push(tid);
@@ -149,7 +151,9 @@ export async function executeSerialChain(
         if (worktreePath) {
           const commitResult = await workerOps.commitChanges(claimedTask, worktreePath);
           if (isErr(commitResult)) {
-            console.log(`  ❌ [${rawTaskId}] Failed to commit changes: ${commitResult.err.message}`);
+            console.log(
+              `  ❌ [${rawTaskId}] Failed to commit changes: ${commitResult.err.message}`,
+            );
             await schedulerOps.blockTask(tid);
             failed.push(tid);
             break;
@@ -157,13 +161,14 @@ export async function executeSerialChain(
         }
 
         // latestRunIdを更新（Judge判定でログを読むため）
-        const updateResult = await taskStore.updateTaskCAS(
-          tid,
-          claimedTask.version,
-          (t) => ({ ...t, latestRunId: previousFeedback ?? '' }),
-        );
+        const updateResult = await taskStore.updateTaskCAS(tid, claimedTask.version, (t) => ({
+          ...t,
+          latestRunId: previousFeedback ?? '',
+        }));
         if (!updateResult.ok) {
-          console.error(`  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`);
+          console.error(
+            `  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`,
+          );
           await schedulerOps.blockTask(tid);
           failed.push(tid);
           break;

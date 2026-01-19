@@ -13,7 +13,9 @@ describe('Integration Operations', () => {
       // モックの依存関係
       const mockTaskStore = {
         createTask: mock.fn(async (task: Task) => createOk(undefined)),
-        readTask: mock.fn(async (id) => createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' })),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
       };
 
       const mockGitEffects = {
@@ -31,7 +33,15 @@ describe('Integration Operations', () => {
         }),
         abortMerge: mock.fn(async () => createOk(undefined)),
         getConflictedFiles: mock.fn(async () => createOk([])),
-        getConflictContent: mock.fn(async () => createErr({ type: 'GitCommandFailedError', command: 'show', stderr: '', exitCode: 1, message: '' })),
+        getConflictContent: mock.fn(async () =>
+          createErr({
+            type: 'GitCommandFailedError',
+            command: 'show',
+            stderr: '',
+            exitCode: 1,
+            message: '',
+          }),
+        ),
         getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
         hasRemote: mock.fn(async () => createOk(false)),
       };
@@ -84,7 +94,9 @@ describe('Integration Operations', () => {
       // モックの依存関係
       const mockTaskStore = {
         createTask: mock.fn(async (task: Task) => createOk(undefined)),
-        readTask: mock.fn(async (id) => createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' })),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
       };
 
       const mockGitEffects = {
@@ -95,9 +107,7 @@ describe('Integration Operations', () => {
             success: false,
             mergedFiles: [],
             hasConflicts: true,
-            conflicts: [
-              { reason: 'merge conflict', filePath: 'src/shared.ts', type: 'content' },
-            ],
+            conflicts: [{ reason: 'merge conflict', filePath: 'src/shared.ts', type: 'content' }],
             status: 'conflicts',
           };
           return createOk(mergeResult);

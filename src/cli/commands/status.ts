@@ -92,7 +92,6 @@ async function showStatus(params: { configPath?: string }): Promise<void> {
   console.log();
 }
 
-
 /**
  * タスク状態に対応するアイコンを取得
  */

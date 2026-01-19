@@ -37,16 +37,19 @@ const taskBreakdowns = createDummyTaskBreakdown(userInstruction);
 ```
 
 **問題点**:
+
 - 実際のエージェント（Claude/Codex）を実行していない
 - 常に1つのダミータスクしか生成されない
 - ユーザーの指示が適切にタスク分解されない
 
 **影響範囲**:
+
 - タスク分解の品質が低い
 - 複雑な指示に対応できない
 - エージェント統合の価値が発揮されない
 
 **コード箇所**:
+
 ```typescript
 // src/core/orchestrator/planner-operations.ts:127-138
 function createDummyTaskBreakdown(userInstruction: string): TaskBreakdown[] {
@@ -70,21 +73,25 @@ function createDummyTaskBreakdown(userInstruction: string): TaskBreakdown[] {
 `executeTask` 関数でエージェントを実行していますが、以下の処理が欠落：
 
 **欠落している処理**:
+
 1. `runnerEffects.ensureRunsDir()` - runsディレクトリの作成
 2. `runnerEffects.saveRunMetadata()` - 実行メタデータの保存
 3. `runnerEffects.appendLog()` - 実行ログの記録
 
 **問題点**:
+
 - 実行結果が `runs/` ディレクトリに保存されない
 - ユーザーが途中経過を確認できない
 - デバッグ時に実行内容を追跡できない
 
 **影響範囲**:
+
 - ユーザー体験の低下（何が起きているか分からない）
 - トラブルシューティングが困難
 - 実行履歴の追跡不可能
 
 **現在の実装**:
+
 ```typescript
 // src/core/orchestrator/worker-operations.ts:104-132
 const executeTask = async (
@@ -125,11 +132,13 @@ const executeTask = async (
 **ファイル**: `src/core/orchestrator/judge-operations.ts:46-81`
 
 **問題点**:
+
 - RUNNING状態のタスクを無条件で成功とみなす（74-80行目）
 - CI実行結果の確認がない（TODOコメント）
 - 実際の完了条件をチェックしていない
 
 **コード箇所**:
+
 ```typescript
 // src/core/orchestrator/judge-operations.ts:74-80
 // 簡易判定: RUNNING状態のタスクは成功とみなす
@@ -142,6 +151,7 @@ return createOk({
 ```
 
 **影響範囲**:
+
 - タスク失敗を検出できない
 - 品質保証が不十分
 - 誤った完了判定による問題の見逃し
@@ -152,11 +162,13 @@ return createOk({
 **ファイル**: `src/core/runner/runner-effects-impl.ts:102-126`
 
 **問題点**:
+
 - `unstable_v2_prompt`の戻り値全体を`JSON.stringify`してしまっている（121行目）
 - エージェントの実際の応答テキストは`sdkResult.result`プロパティに含まれている
 - しかし、現在の実装は`JSON.stringify(sdkResult)`を返すため、メタデータごとJSON化される
 
 **現在の実装**:
+
 ```typescript
 // src/core/runner/runner-effects-impl.ts:102-126
 const runClaudeAgent = async (
@@ -182,7 +194,8 @@ const runClaudeAgent = async (
 ```
 
 **SDKの実際の戻り値構造**:
-```typescript
+
+````typescript
 {
   type: "result",
   subtype: "success",
@@ -192,9 +205,10 @@ const runClaudeAgent = async (
   num_turns: 6,
   result: "```json\n[\n  {\n    \"description\": \"...\",\n    ...\n  }\n]```"  // ← これが実際のエージェントの応答
 }
-```
+````
 
 **正しい実装**:
+
 ```typescript
 // ✅ 修正後
 return {
@@ -203,6 +217,7 @@ return {
 ```
 
 **影響範囲**:
+
 - Planner（タスク分解）が完全に動作しない
 - `parseAgentOutput`がパースエラーで失敗
 - フォールバックでダミータスクが使用されてしまう
@@ -213,6 +228,7 @@ return {
 **推定工数**: 30分（実装は1行の修正、テスト含めて）
 
 **⚠️ 補足**: Codexエージェントについて
+
 - `runCodexAgent`は`turn.finalResponse`を直接使用している
 - しかし、実際にはCodexエージェントは実行されておらず、検証されていない
 - Codex SDKの実際の戻り値構造が想定通りかは未確認
@@ -222,7 +238,7 @@ return {
 
 ### 実行時のログ（Phase 2実装後）
 
-```bash
+````bash
 agent run "GitHub統合の諸機能を計画して文書化して。"
 📋 Configuration loaded
    App Repo: /home/berlysia/workspace/agent-orchestorator
@@ -239,9 +255,10 @@ Failed to parse agent output: SyntaxError: Unexpected token '\', "\n[\n  {\n"...
     at parseAgentOutput (file:///home/berlysia/workspace/agent-orchestorator/dist/core/orchestrator/planner-operations.js:157:29)
     ...
 Output was: {"type":"result","subtype":"success","is_error":false,"duration_ms":87833,"duration_api_ms":110675,"num_turns":6,"result":"```json\n[\n  {\n    \"description\": \"GitHubアダプター基盤の実装\",\n    \"branch\": \"feature/github-adapter-foundation\",\n    \"scopePaths\": [\"src/adapters/github/\", \"src/types/\"],\n    \"acceptance\": \"GitHubEffectsインターフェースが定義され、GitHubErrorタイプがエラー階層に統合されている。GitHubConfigスキーマ（token、owner、repo）がZodで定義され、設定ファイルから読み込める。\"\n  },\n  {\n    \"description\": \"GitHub PR作成機能の実装\",\n... (truncated)
-```
+````
 
 **分析**:
+
 - エージェントは正しくタスク分解を実行している（`result`フィールドにJSON配列が含まれている）
 - しかし、`runClaudeAgent`が`JSON.stringify(sdkResult)`を実行したため、全体がJSON化されている
 - `parseAgentOutput`は`finalResponse`から直接JSON配列を期待するが、実際にはラッパーオブジェクトの文字列を受け取る
@@ -269,6 +286,7 @@ Using dummy task breakdown (agent integration not yet implemented)
 ### ファイルシステムの状態
 
 **タスクは保存されている**:
+
 ```json
 // agent-orchestorator-coord/tasks/task-6becb7c2-1ebc-4842-84fb-e22ca9dc363e.json
 {
@@ -287,6 +305,7 @@ Using dummy task breakdown (agent integration not yet implemented)
 ```
 
 **実行ログは空**:
+
 ```bash
 $ ls -la agent-orchestorator-coord/runs/
 total 8
@@ -316,6 +335,7 @@ drwxr-xr-x 7 berlysia berlysia 4096 Jan 19 04:23 ..
 ### 🔴 緊急: runClaudeAgentのバグ修正（問題4）
 
 **理由**:
+
 - Phase 2の成果物が完全に機能していない
 - 1行の修正で解決可能
 - Plannerのエージェント統合が実質的に無効化されている
@@ -325,6 +345,7 @@ drwxr-xr-x 7 berlysia berlysia 4096 Jan 19 04:23 ..
 ### ~~高: Worker実行ログの保存~~ ✅ Phase 1で解決
 
 **理由**:
+
 - ユーザーが途中経過を確認できないため、UXが非常に悪い
 - デバッグが困難
 - 既に実装されているRunnerEffectsを利用するだけで解決可能
@@ -334,6 +355,7 @@ drwxr-xr-x 7 berlysia berlysia 4096 Jan 19 04:23 ..
 ### ~~中: Plannerのエージェント統合~~ ✅ Phase 2で解決（ただしバグあり）
 
 **理由**:
+
 - タスク分解の品質向上
 - 複雑な指示への対応
 - システムの本来の価値を発揮するために必要
@@ -343,6 +365,7 @@ drwxr-xr-x 7 berlysia berlysia 4096 Jan 19 04:23 ..
 ### 低: Judge判定の強化
 
 **理由**:
+
 - CI統合が必要（別Epic）
 - 現状でも基本的な動作は可能
 - Worker実行が安定してから実装すべき

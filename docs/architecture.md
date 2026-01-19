@@ -18,6 +18,7 @@ Agent Orchestratorは、Planner/Worker/Judge アーキテクチャに基づく�
 - **CANCELLED**: ユーザーによる中断
 
 **状態遷移**:
+
 ```
 READY → RUNNING → (Judge判定) → DONE
                               → BLOCKED

@@ -11,17 +11,17 @@
 
 ### スコープと方針
 
-| 項目 | 決定内容 | 理由 |
-|------|---------|------|
-| **実装フェーズ** | フェーズ1のみ（PR作成） | 最小構成で早期動作確認 |
-| **認証方式** | PAT（Personal Access Token）のみ | 個人開発・検証環境向け、実装がシンプル |
-| **API種類** | REST API | Octokitライブラリが充実、エラーハンドリング明確 |
-| **既存PR検出** | 実装しない | 新規PR作成のみ、既存PR時はエラー |
-| **ライブラリ** | Octokit | GitHub公式、型安全性、自動レート制限処理 |
-| **レート制限** | エラーとして返す | フェーズ1では単純に失敗、リトライは将来対応 |
-| **設定ファイル** | `.agent/config.json`に統合 | 既存設定と一元管理 |
-| **実装順序** | 型定義 → アダプタ → 統合 | インターフェース先行で明確化 |
-| **エラー種別** | 4種（認証失敗、レート制限、未存在、入力不正） | フェーズ1で必要最小限 |
+| 項目             | 決定内容                                      | 理由                                            |
+| ---------------- | --------------------------------------------- | ----------------------------------------------- |
+| **実装フェーズ** | フェーズ1のみ（PR作成）                       | 最小構成で早期動作確認                          |
+| **認証方式**     | PAT（Personal Access Token）のみ              | 個人開発・検証環境向け、実装がシンプル          |
+| **API種類**      | REST API                                      | Octokitライブラリが充実、エラーハンドリング明確 |
+| **既存PR検出**   | 実装しない                                    | 新規PR作成のみ、既存PR時はエラー                |
+| **ライブラリ**   | Octokit                                       | GitHub公式、型安全性、自動レート制限処理        |
+| **レート制限**   | エラーとして返す                              | フェーズ1では単純に失敗、リトライは将来対応     |
+| **設定ファイル** | `.agent/config.json`に統合                    | 既存設定と一元管理                              |
+| **実装順序**     | 型定義 → アダプタ → 統合                      | インターフェース先行で明確化                    |
+| **エラー種別**   | 4種（認証失敗、レート制限、未存在、入力不正） | フェーズ1で必要最小限                           |
 
 ---
 
@@ -151,9 +151,7 @@ export interface GitHubEffects {
   /**
    * Pull Requestを作成する
    */
-  createPullRequest(
-    input: CreatePullRequestInput
-  ): Promise<Result<PullRequest, GitHubError>>;
+  createPullRequest(input: CreatePullRequestInput): Promise<Result<PullRequest, GitHubError>>;
 }
 ```
 
@@ -254,9 +252,7 @@ import type { GitHubError } from '../../types/errors.ts';
 /**
  * Octokitクライアントを生成する
  */
-export function createGitHubClient(
-  config: GitHubConfig
-): Result<Octokit, GitHubError> {
+export function createGitHubClient(config: GitHubConfig): Result<Octokit, GitHubError> {
   // 環境変数からトークンを取得
   const token = process.env[config.auth.tokenEnvName];
 
@@ -281,10 +277,7 @@ export function createGitHubClient(
 
 ```typescript
 import type { Octokit } from '@octokit/rest';
-import type {
-  CreatePullRequestInput,
-  PullRequest,
-} from '../../types/github.ts';
+import type { CreatePullRequestInput, PullRequest } from '../../types/github.ts';
 import { createErr, createOk, type Result } from 'option-t/result';
 import type { GitHubError } from '../../types/errors.ts';
 import { classifyGitHubError } from './error.ts';
@@ -294,7 +287,7 @@ import { classifyGitHubError } from './error.ts';
  */
 export async function createPullRequest(
   octokit: Octokit,
-  input: CreatePullRequestInput
+  input: CreatePullRequestInput,
 ): Promise<Result<PullRequest, GitHubError>> {
   try {
     const response = await octokit.rest.pulls.create({
@@ -337,17 +330,10 @@ import type { GitHubError } from '../../types/errors.ts';
  */
 export function classifyGitHubError(error: unknown): GitHubError {
   // Octokit RequestErrorの型ガード
-  if (
-    error &&
-    typeof error === 'object' &&
-    'status' in error &&
-    typeof error.status === 'number'
-  ) {
+  if (error && typeof error === 'object' && 'status' in error && typeof error.status === 'number') {
     const statusCode = error.status;
     const message =
-      'message' in error && typeof error.message === 'string'
-        ? error.message
-        : 'Unknown error';
+      'message' in error && typeof error.message === 'string' ? error.message : 'Unknown error';
 
     // 認証失敗
     if (statusCode === 401 || statusCode === 403) {
@@ -567,13 +553,13 @@ sequenceDiagram
 
 ### エラー種別と対応
 
-| エラー種別 | 発生タイミング | HTTPステータス | 対応方針 |
-|-----------|--------------|--------------|---------|
-| `GitHubAuthFailed` | トークン未設定、認証失敗 | 401, 403 | ログ出力、`prUrl=null` |
-| `GitHubRateLimited` | レート制限到達 | 429 | ログ出力、`prUrl=null`（リトライは将来対応） |
-| `GitHubNotFound` | リポジトリ・ブランチ未存在 | 404 | ログ出力、`prUrl=null` |
-| `GitHubValidationError` | PR作成パラメータ不正 | 422 | ログ出力、`prUrl=null` |
-| `GitHubUnknownError` | その他のエラー | 5xx等 | ログ出力、`prUrl=null` |
+| エラー種別              | 発生タイミング             | HTTPステータス | 対応方針                                     |
+| ----------------------- | -------------------------- | -------------- | -------------------------------------------- |
+| `GitHubAuthFailed`      | トークン未設定、認証失敗   | 401, 403       | ログ出力、`prUrl=null`                       |
+| `GitHubRateLimited`     | レート制限到達             | 429            | ログ出力、`prUrl=null`（リトライは将来対応） |
+| `GitHubNotFound`        | リポジトリ・ブランチ未存在 | 404            | ログ出力、`prUrl=null`                       |
+| `GitHubValidationError` | PR作成パラメータ不正       | 422            | ログ出力、`prUrl=null`                       |
+| `GitHubUnknownError`    | その他のエラー             | 5xx等          | ログ出力、`prUrl=null`                       |
 
 ### エラー時の挙動
 

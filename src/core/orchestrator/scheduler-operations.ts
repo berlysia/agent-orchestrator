@@ -44,8 +44,7 @@ export const createSchedulerOperations = (deps: SchedulerDeps) => {
     const allTasksResult = await deps.taskStore.listTasks();
     return mapForResult(allTasksResult, (tasks) =>
       tasks.filter(
-        (task) =>
-          task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION,
+        (task) => task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION,
       ),
     );
   };

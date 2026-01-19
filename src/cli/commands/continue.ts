@@ -165,7 +165,9 @@ async function executeContinue(params: {
   console.log(`${'='.repeat(60)}\n`);
 
   if (!result.isComplete) {
-    console.log('💡 Tip: Run `agent continue` again to generate more tasks, or manually review the missing aspects.');
+    console.log(
+      '💡 Tip: Run `agent continue` again to generate more tasks, or manually review the missing aspects.',
+    );
     process.exit(1);
   }
 }

@@ -1,6 +1,9 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert';
-import { createJudgeOperations, type JudgeDeps } from '../../../../src/core/orchestrator/judge-operations.ts';
+import {
+  createJudgeOperations,
+  type JudgeDeps,
+} from '../../../../src/core/orchestrator/judge-operations.ts';
 import { createInitialTask } from '../../../../src/types/task.ts';
 import { TaskState } from '../../../../src/types/task.ts';
 import { taskId } from '../../../../src/types/branded.ts';

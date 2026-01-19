@@ -103,4 +103,3 @@ async function stopTask(params: {
 
   console.log(`\n${stopAll ? 'All running tasks' : 'Task'} stopped successfully.\n`);
 }
-

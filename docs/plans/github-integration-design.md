@@ -45,15 +45,9 @@ export interface GitHubEffects {
     head: string;
   }): Result<PullRequest | null, GitHubError>;
 
-  createCheckRun(input: {
-    config: GitHubConfig;
-    check: CheckRun;
-  }): Result<CheckRun, GitHubError>;
+  createCheckRun(input: { config: GitHubConfig; check: CheckRun }): Result<CheckRun, GitHubError>;
 
-  createStatus(input: {
-    config: GitHubConfig;
-    status: Status;
-  }): Result<Status, GitHubError>;
+  createStatus(input: { config: GitHubConfig; status: Status }): Result<Status, GitHubError>;
 
   dispatchWorkflow(input: WorkflowDispatchInput): Result<WorkflowDispatchResult, GitHubError>;
 }
