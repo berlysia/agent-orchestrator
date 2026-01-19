@@ -277,6 +277,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             schedulerOps,
             workerOps,
             judgeOps,
+            deps.gitEffects,
             schedulerState,
             deps.config.iterations.serialChainTaskRetries,
           );
@@ -699,6 +700,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             schedulerOps,
             workerOps,
             judgeOps,
+            deps.gitEffects,
             schedulerState,
             deps.config.iterations.serialChainTaskRetries,
           );
@@ -1045,6 +1047,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               schedulerOps,
               workerOps,
               judgeOps,
+              deps.gitEffects,
               schedulerState,
               deps.config.iterations.serialChainTaskRetries,
             );

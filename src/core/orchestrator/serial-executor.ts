@@ -6,10 +6,12 @@
  */
 
 import type { TaskId, WorktreePath } from '../../types/branded.ts';
+import { repoPath } from '../../types/branded.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
 import type { JudgeOperations } from './judge-operations.ts';
 import type { SchedulerState } from './scheduler-state.ts';
+import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import { workerId } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
@@ -50,6 +52,7 @@ export interface SerialChainExecutionResult {
  * @param schedulerOps スケジューラ操作
  * @param workerOps ワーカー操作
  * @param judgeOps ジャッジ操作
+ * @param gitEffects Git操作
  * @param schedulerState 現在のスケジューラ状態
  * @param serialChainTaskRetries タスク実行の最大リトライ回数
  * @returns 直列チェーン実行結果
@@ -60,6 +63,7 @@ export async function executeSerialChain(
   schedulerOps: SchedulerOperations,
   workerOps: WorkerOperations,
   judgeOps: JudgeOperations,
+  gitEffects: GitEffects,
   schedulerState: SchedulerState,
   serialChainTaskRetries: number,
 ): Promise<SerialChainExecutionResult> {
@@ -96,7 +100,8 @@ export async function executeSerialChain(
           break;
         }
 
-        const { newState, task: claimedTask } = claimResult.val;
+        const { newState } = claimResult.val;
+        let claimedTask = claimResult.val.task;
         schedulerState = newState;
 
         // 最初のタスク: 新しいworktreeを作成
@@ -129,6 +134,26 @@ export async function executeSerialChain(
         } else {
           // 後続タスク or リトライ: 既存のworktreeを再利用
           console.log(`  🚀 [${rawTaskId}] Executing task in existing worktree...`);
+
+          // WHY: serial chainでは全タスクが最初のタスクのブランチを共有するため、
+          // 後続タスクのtask.branchを実際のブランチ名に更新する必要がある。
+          // これにより、依存関係を持つ並列タスクが正しいブランチを参照できる。
+          const actualBranchResult = await gitEffects.getCurrentBranch(repoPath(worktreePath!));
+          if (actualBranchResult.ok && actualBranchResult.val !== claimedTask.branch) {
+            const updateBranchResult = await taskStore.updateTaskCAS(
+              tid,
+              claimedTask.version,
+              (t) => ({
+                ...t,
+                branch: actualBranchResult.val,
+              }),
+            );
+            if (updateBranchResult.ok) {
+              // 更新後のタスクを使用
+              claimedTask = updateBranchResult.val;
+            }
+          }
+
           const runResult = await workerOps.executeTaskInExistingWorktree(
             claimedTask,
             worktreePath!,
