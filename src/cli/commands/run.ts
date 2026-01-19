@@ -5,7 +5,6 @@ import { createGitEffects } from '../../adapters/vcs/index.ts';
 import { createOrchestrator } from '../../core/orchestrator/orchestrate.ts';
 import { isErr } from 'option-t/plain_result';
 import { loadConfig } from '../utils/load-config.ts';
-import { toDisplayPath } from '../utils/display-path.ts';
 
 /**
  * `agent run` コマンドの実装
@@ -42,8 +41,8 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   const config = await loadConfig(configPath);
 
   console.log(`📋 Configuration loaded`);
-  console.log(`   App Repo: ${toDisplayPath(config.appRepoPath)}`);
-  console.log(`   Coord Repo: ${toDisplayPath(config.agentCoordPath)}`);
+  console.log(`   App Repo: ${config.appRepoPath}`);
+  console.log(`   Coord Repo: ${config.agentCoordPath}`);
   console.log(`   Max Workers: ${config.maxWorkers}\n`);
 
   // TaskStoreを初期化
