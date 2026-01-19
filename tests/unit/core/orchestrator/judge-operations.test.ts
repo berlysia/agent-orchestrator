@@ -22,6 +22,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -84,6 +85,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -131,7 +133,7 @@ describe('Judge Operations', () => {
       assert.strictEqual(result.val.missingRequirements?.length, 2);
     });
 
-    it('should fallback to simple judgement when log not available', async () => {
+    it('should return error when log not available', async () => {
       const tid = taskId('task-3');
       const task = createInitialTask({
         id: tid,
@@ -143,6 +145,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -173,9 +176,8 @@ describe('Judge Operations', () => {
       const ops = createJudgeOperations(deps);
       const result = await ops.judgeTask(tid);
 
-      assert(result.ok);
-      assert.strictEqual(result.val.success, true);
-      assert(result.val.reason.includes('fallback to simple judgement'));
+      assert(!result.ok);
+      assert(result.err.message.includes('Failed to read log'));
     });
 
     it('should fallback when agent execution fails', async () => {
@@ -190,6 +192,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -239,6 +242,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -337,6 +341,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
+      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),

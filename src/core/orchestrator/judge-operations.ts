@@ -170,39 +170,18 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
     }
 
     // 実行ログを読み込み
-    // WHY: 最新のRunを取得するため、メタデータから検索する必要があるが、
-    // 現在のRunnerEffectsにはそのような機能がないため、
-    // 簡易実装としてtask.idをベースとしたRunIDを使用する
-    // Phase 5.6.1の実装では、まず簡易版を実装し、後で改善する
-    let runLog = '';
-    try {
-      // 簡易実装: task.idをそのままrunIdとして使用
-      // WHY: worker-operations.tsでは `run-${task.id}-${Date.now()}` 形式で生成されているが、
-      // 最新のRunを特定する方法がないため、まずは簡易版を実装
-      const logResult = await deps.runnerEffects.readLog(tid);
-      if (!isErr(logResult)) {
-        runLog = logResult.val;
-      } else {
-        console.warn(`⚠️  Failed to load run log for task ${tid}: ${logResult.err.message}`);
-        // ログが見つからない場合は、簡易判定にフォールバック
-        return createOk({
-          taskId: tid,
-          success: true,
-          shouldContinue: false,
-          reason:
-            'Task completed (log not available for detailed judgement - fallback to simple judgement)',
-        });
-      }
-    } catch (error) {
-      console.warn(`⚠️  Error loading run log for task ${tid}:`, error);
-      // エラー時は簡易判定にフォールバック
-      return createOk({
-        taskId: tid,
-        success: true,
-        shouldContinue: false,
-        reason: 'Task completed (error loading log - fallback to simple judgement)',
-      });
+    // latestRunIdを使用（task.idからでは見つからないため）
+    const runIdToRead = task.latestRunId;
+    if (!runIdToRead) {
+      return createErr(validationError(`No latestRunId for task ${tid}`));
     }
+
+    const logResult = await deps.runnerEffects.readLog(runIdToRead);
+    if (!logResult.ok) {
+      // RunnerErrorをTaskStoreErrorに変換
+      return createErr(validationError(`Failed to read log: ${logResult.err.message}`));
+    }
+    const runLog = logResult.val;
 
     // エージェントに判定を依頼
     const judgementPrompt = buildJudgementPrompt(task, runLog);

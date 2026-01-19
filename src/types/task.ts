@@ -93,6 +93,9 @@ export const TaskSchema = z.object({
   /** プランナーのメタデータファイルパス（絶対パス、オプショナル） */
   plannerMetadataPath: z.string().nullable().optional(),
 
+  /** 最新のWorker実行RunID（Judge判定でログ取得に使用） */
+  latestRunId: z.string().nullable().optional(),
+
   /** Judge判定フィードバック（継続実行用） */
   judgementFeedback: z
     .object({
@@ -151,5 +154,6 @@ export function createInitialTask(params: {
     plannerRunId: params.plannerRunId ?? null,
     plannerLogPath: params.plannerLogPath ?? null,
     plannerMetadataPath: params.plannerMetadataPath ?? null,
+    latestRunId: null,
   };
 }

@@ -165,6 +165,19 @@ export async function executeSerialChain(
           }
         }
 
+        // latestRunIdを更新（Judge判定でログを読むため）
+        const updateResult = await taskStore.updateTaskCAS(
+          tid,
+          task.version,
+          (t) => ({ ...t, latestRunId: previousFeedback ?? '' }),
+        );
+        if (!updateResult.ok) {
+          console.error(`  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`);
+          await schedulerOps.blockTask(tid);
+          failed.push(tid);
+          break;
+        }
+
         // Judge判定
         console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
         const judgementResult = await judgeOps.judgeTask(tid);
