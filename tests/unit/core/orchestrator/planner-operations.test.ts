@@ -8,6 +8,7 @@ import {
   buildPlanningPromptWithFeedback,
   parseQualityJudgement,
   formatFeedbackForRetry,
+  formatFeedbackForLog,
   buildFinalCompletionPrompt,
   parseFinalCompletionJudgement,
   detectCircularDependencies,
@@ -449,6 +450,63 @@ This looks good.`;
         assert(!feedback.includes('Overall Quality Score'));
         assert(feedback.includes('Issues:'));
         assert(feedback.includes('1. Problem found'));
+      });
+
+      it('should include previous full response when provided', () => {
+        const judgement: TaskQualityJudgement = {
+          isAcceptable: false,
+          issues: ['Context field incomplete'],
+          suggestions: [],
+        };
+        const previousFullResponse = 'Based on my analysis...\n```json\n[{"id":"task-1"}]\n```';
+
+        const feedback = formatFeedbackForRetry(judgement, undefined, previousFullResponse);
+
+        assert(feedback.includes('Previous Response'));
+        assert(feedback.includes('Based on my analysis'));
+      });
+
+      it('should fallback to JSON output if full response not provided', () => {
+        const judgement: TaskQualityJudgement = {
+          isAcceptable: false,
+          issues: ['Issue'],
+          suggestions: [],
+        };
+        const previousOutput = '[{"id":"task-1"}]';
+
+        const feedback = formatFeedbackForRetry(judgement, previousOutput, undefined);
+
+        assert(feedback.includes('Previous Output'));
+        assert(feedback.includes('task-1'));
+      });
+    });
+
+    describe('formatFeedbackForLog', () => {
+      it('should abbreviate previous response section', () => {
+        const feedbackWithResponse = `Issues:
+1. Problem
+
+Previous Response (for reference and modification):
+\`\`\`
+Long response text...
+\`\`\``;
+
+        const abbreviated = formatFeedbackForLog(feedbackWithResponse);
+
+        assert(abbreviated.includes('Issues'));
+        assert(abbreviated.includes('<< Previous Response Omitted'));
+        assert(!abbreviated.includes('Long response text'));
+      });
+
+      it('should handle feedback without previous response', () => {
+        const feedbackWithoutResponse = `Issues:
+1. Problem
+Suggestions:
+1. Fix it`;
+
+        const abbreviated = formatFeedbackForLog(feedbackWithoutResponse);
+
+        assert.strictEqual(abbreviated, feedbackWithoutResponse);
       });
     });
 

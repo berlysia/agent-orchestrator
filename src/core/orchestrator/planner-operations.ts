@@ -256,6 +256,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     // 品質評価ループ
     let taskBreakdowns: TaskBreakdown[] = [];
     let accumulatedFeedback: string | undefined = undefined;
+    let previousFullResponse: string | undefined = undefined;
     let consecutiveJsonErrors = 0;
     const maxConsecutiveJsonErrors = 3;
 
@@ -267,7 +268,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback)
         : buildPlanningPrompt(userInstruction);
 
-      await appendPlanningLog(`Prompt:\n${planningPrompt}\n\n`);
+      // ログには省略版を書く（重複を避けるため）
+      const promptForLog = accumulatedFeedback
+        ? formatFeedbackForLog(planningPrompt)
+        : planningPrompt;
+      await appendPlanningLog(`Prompt:\n${promptForLog}\n\n`);
 
       // 2. エージェントを実行
       // WHY: 役割ごとに最適なモデルを使用（Config から取得）
@@ -304,6 +309,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
       // 3. エージェント出力をパース
       const finalResponse = runResult.val.finalResponse || '';
+      previousFullResponse = finalResponse; // 次回のフィードバックで使用
       await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
       await appendPlanningLog(`${finalResponse}\n`);
 
@@ -465,7 +471,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
       // 前回の出力とフィードバックを含める（状態を引き継ぐ）
       const previousOutput = JSON.stringify(taskBreakdowns, null, 2);
-      accumulatedFeedback = formatFeedbackForRetry(judgement, previousOutput);
+      accumulatedFeedback = formatFeedbackForRetry(
+        judgement,
+        previousOutput,
+        previousFullResponse,
+      );
     }
 
     // タスクをTaskStoreに保存
@@ -1201,15 +1211,17 @@ export const parseQualityJudgement = (output: string): TaskQualityJudgement => {
  * フィードバックを再試行用に整形
  *
  * 品質評価結果を読みやすいフィードバック文字列に変換する。
- * 前回の出力を含めることで、エージェントが状態を引き継いで修正できる。
+ * 前回の完全な出力を含めることで、エージェントが状態を引き継いで修正できる。
  *
  * @param judgement 品質評価結果
  * @param previousOutput 前回の出力（JSON文字列）
+ * @param previousFullResponse 前回のエージェント完全レスポンス（テキスト説明含む）
  * @returns 整形されたフィードバック
  */
 export const formatFeedbackForRetry = (
   judgement: TaskQualityJudgement,
   previousOutput?: string,
+  previousFullResponse?: string,
 ): string => {
   const lines: string[] = [];
 
@@ -1231,7 +1243,14 @@ export const formatFeedbackForRetry = (
     });
   }
 
-  if (previousOutput) {
+  // 前回の完全なレスポンスを含める（エージェントが前回の説明や意図を参照できる）
+  if (previousFullResponse) {
+    lines.push('\nPrevious Response (for reference and modification):');
+    lines.push('```');
+    lines.push(previousFullResponse);
+    lines.push('```');
+  } else if (previousOutput) {
+    // フォールバック: JSONのみ
     lines.push('\nPrevious Output (for reference and modification):');
     lines.push('```json');
     lines.push(previousOutput);
@@ -1239,6 +1258,22 @@ export const formatFeedbackForRetry = (
   }
 
   return lines.join('\n');
+};
+
+/**
+ * フィードバックのログ表示用に省略版を作成
+ *
+ * WHY: ログファイルの重複を避けるため、前回のレスポンスを省略表示
+ *
+ * @param feedback 完全なフィードバック
+ * @returns ログ表示用の省略版フィードバック
+ */
+export const formatFeedbackForLog = (feedback: string): string => {
+  // "Previous Response" セクションを省略表示に置き換え
+  return feedback.replace(
+    /Previous (?:Response|Output) \(for reference and modification\):\n```(?:json)?\n[\s\S]*?\n```/,
+    '<< Previous Response Omitted (included in prompt for agent context) >>',
+  );
 };
 
 /**
