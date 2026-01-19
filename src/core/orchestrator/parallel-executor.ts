@@ -166,22 +166,9 @@ export async function executeLevelParallel(
           return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
-        // latestRunIdを更新（Judge判定でログを読むため）
-        const updateResult = await taskStore.updateTaskCAS(tid, claimedTask.version, (t) => ({
-          ...t,
-          latestRunId: result.runId,
-        }));
-        if (!updateResult.ok) {
-          console.error(
-            `  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`,
-          );
-          await schedulerOps.blockTask(tid);
-          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
-        }
-
         // 3. Judge: 完了判定
         console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-        const judgementResult = await judgeOps.judgeTask(tid);
+        const judgementResult = await judgeOps.judgeTask(tid, result.runId);
 
         if (isErr(judgementResult)) {
           console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);

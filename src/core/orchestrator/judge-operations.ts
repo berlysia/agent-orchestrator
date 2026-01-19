@@ -148,9 +148,13 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
    * Phase 5.6: エージェントベースの高度な判定を実装
    *
    * @param tid 判定するタスクのID
+   * @param runIdToRead 判定対象の実行ログRunID（実行結果から受け取る）
    * @returns 判定結果（Result型）
    */
-  const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStoreError>> => {
+  const judgeTask = async (
+    tid: TaskId,
+    runIdToRead: string,
+  ): Promise<Result<JudgementResult, TaskStoreError>> => {
     const taskResult = await deps.taskStore.readTask(tid);
 
     // Result型のエラーハンドリング
@@ -170,11 +174,9 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
       });
     }
 
-    // 実行ログを読み込み
-    // latestRunIdを使用（task.idからでは見つからないため）
-    const runIdToRead = task.latestRunId;
+    // 実行ログを読み込み（実行結果で得たRunIDを使用）
     if (!runIdToRead) {
-      return createErr(validationError(`No latestRunId for task ${tid}`));
+      return createErr(validationError(`No runId provided for task ${tid}`));
     }
 
     const logResult = await deps.runnerEffects.readLog(runIdToRead);

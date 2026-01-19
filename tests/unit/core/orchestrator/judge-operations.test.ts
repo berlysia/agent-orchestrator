@@ -25,7 +25,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -67,7 +67,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.taskId, tid);
@@ -88,7 +88,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -128,7 +128,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.success, false);
@@ -148,7 +148,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -177,7 +177,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(!result.ok);
       assert(result.err.message.includes('Failed to read log'));
@@ -195,7 +195,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -226,7 +226,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.success, true);
@@ -245,7 +245,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -278,7 +278,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.success, true);
@@ -297,6 +297,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.DONE; // Already completed
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -325,7 +326,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.success, false);
@@ -344,7 +345,7 @@ describe('Judge Operations', () => {
         taskType: 'implementation',
       });
       task.state = TaskState.RUNNING;
-      task.latestRunId = 'run-' + String(task.id) + '-1234567890';
+      const runId = 'run-' + String(task.id) + '-1234567890';
 
       const mockTaskStore: TaskStore = {
         readTask: mock.fn(async () => createOk(task)),
@@ -386,7 +387,7 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-      const result = await ops.judgeTask(tid);
+      const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
       assert.strictEqual(result.val.success, true);
