@@ -36,14 +36,17 @@ export interface ClaimTaskResult {
  */
 export const createSchedulerOperations = (deps: SchedulerDeps) => {
   /**
-   * READY状態のタスクを取得
+   * 実行可能なタスクを取得（READY または NEEDS_CONTINUATION 状態）
    *
-   * @returns READY状態のタスク配列（Result型）
+   * @returns 実行可能なタスク配列（Result型）
    */
   const getReadyTasks = async (): Promise<Result<Task[], TaskStoreError>> => {
     const allTasksResult = await deps.taskStore.listTasks();
     return mapForResult(allTasksResult, (tasks) =>
-      tasks.filter((task) => task.state === TaskState.READY),
+      tasks.filter(
+        (task) =>
+          task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION,
+      ),
     );
   };
 
@@ -79,9 +82,13 @@ export const createSchedulerOperations = (deps: SchedulerDeps) => {
 
     const task = taskResult.val;
 
-    // タスクがREADY状態でない場合は割り当て不可
-    if (task.state !== TaskState.READY) {
-      return createErr(validationError(`Task ${rawTaskId} is not in READY state: ${task.state}`));
+    // タスクが実行可能状態（READY または NEEDS_CONTINUATION）でない場合は割り当て不可
+    if (task.state !== TaskState.READY && task.state !== TaskState.NEEDS_CONTINUATION) {
+      return createErr(
+        validationError(
+          `Task ${rawTaskId} is not in executable state (READY or NEEDS_CONTINUATION): ${task.state}`,
+        ),
+      );
     }
 
     // CAS更新: owner設定 + state変更

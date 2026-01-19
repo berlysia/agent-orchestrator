@@ -94,9 +94,19 @@ Agent Orchestrator is a multi-agent collaborative development tool with Planner/
 **4. Task State Machine**
 ```
 READY → RUNNING → DONE
-   ↓       ↓
-BLOCKED  CANCELLED
+   ↓       ↓         ↓
+BLOCKED  CANCELLED  NEEDS_CONTINUATION
+                           ↓
+                       (loops back to RUNNING for continuation)
 ```
+
+States:
+- **READY**: Not yet executed, waiting for worker assignment
+- **RUNNING**: Worker is executing
+- **NEEDS_CONTINUATION**: Executed but incomplete (Judge determined continuation needed)
+- **DONE**: Completed
+- **BLOCKED**: Cannot execute due to errors or dependencies
+- **CANCELLED**: User interrupted
 
 **5. Effects Pattern for External I/O**
 

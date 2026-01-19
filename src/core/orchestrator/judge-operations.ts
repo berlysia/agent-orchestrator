@@ -272,9 +272,10 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
   };
 
   /**
-   * タスクを継続実行のためにREADY状態に戻し、判定フィードバックを記録
+   * タスクを継続実行のためにNEEDS_CONTINUATION状態に遷移し、判定フィードバックを記録
    *
    * WHY: Judgeが「未完了だが継続可能」と判定した場合、フィードバックを付けて再実行する
+   *      READY（未実行）とNEEDS_CONTINUATION（実行済みだが不完全）を明確に区別する
    *
    * @param tid タスクID
    * @param judgement 判定結果
@@ -304,7 +305,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
 
     return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({
       ...currentTask,
-      state: TaskState.READY,
+      state: TaskState.NEEDS_CONTINUATION,
       owner: null,
       updatedAt: new Date().toISOString(),
       judgementFeedback: {

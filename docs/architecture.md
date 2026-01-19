@@ -12,9 +12,21 @@ Agent Orchestratorは、Planner/Worker/Judge アーキテクチャに基づく�
 
 - **READY**: 実行可能（Workerが割り当て待ち）
 - **RUNNING**: Worker実行中
+- **NEEDS_CONTINUATION**: 実行済みだが継続が必要（Judgeが不完全と判定）
 - **DONE**: 完了
 - **BLOCKED**: エラーや依存関係により実行不可
 - **CANCELLED**: ユーザーによる中断
+
+**状態遷移**:
+```
+READY → RUNNING → (Judge判定) → DONE
+                              → BLOCKED
+                              → NEEDS_CONTINUATION
+
+NEEDS_CONTINUATION → RUNNING → (Judge判定) → DONE
+                                           → BLOCKED
+                                           → NEEDS_CONTINUATION (継続)
+```
 
 ### 2. Concurrency Control (CAS)
 

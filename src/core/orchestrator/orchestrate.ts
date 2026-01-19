@@ -327,42 +327,71 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const level = levels[levelIndex];
         if (!level) continue;
 
-        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
+        // WHY: このレベルのREADY状態タスクがなくなるまで繰り返す（継続実行）
+        let hasReadyTasks = true;
+        while (hasReadyTasks) {
+          console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
 
-        const levelResult = await executeLevelParallel(
-          level,
-          schedulerOps,
-          workerOps,
-          judgeOps,
-          schedulerState,
-          blockedTaskIdsSet,
-          deps.taskStore,
-        );
-
-        // スケジューラ状態を更新
-        schedulerState = levelResult.updatedSchedulerState;
-
-        // 結果を集計
-        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
-
-        // 失敗タスクの依存先をブロック
-        if (levelResult.failed.length > 0) {
-          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-          console.log(
-            `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
+          const levelResult = await executeLevelParallel(
+            level,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            schedulerState,
+            blockedTaskIdsSet,
+            deps.taskStore,
           );
 
-          for (const tid of newBlocked) {
-            blockedTaskIdsSet.add(tid);
-            await schedulerOps.blockTask(tid);
-            blockedTaskIds.push(String(tid));
+          // スケジューラ状態を更新
+          schedulerState = levelResult.updatedSchedulerState;
+
+          // 結果を集計
+          completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+          failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+
+          // 失敗タスクの依存先をブロック
+          if (levelResult.failed.length > 0) {
+            const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+            console.log(
+              `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
+            );
+
+            for (const tid of newBlocked) {
+              blockedTaskIdsSet.add(tid);
+              await schedulerOps.blockTask(tid);
+              blockedTaskIds.push(String(tid));
+            }
+          }
+
+          console.log(
+            `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
+          );
+
+          // このレベルに実行可能なタスク（READY または NEEDS_CONTINUATION）が残っているかチェック
+          const executableTasksInLevel: TaskId[] = [];
+          for (const tid of level) {
+            if (blockedTaskIdsSet.has(tid)) {
+              continue; // ブロック済みタスクはスキップ
+            }
+            const taskResult = await deps.taskStore.readTask(tid);
+            if (
+              taskResult.ok &&
+              (taskResult.val.state === TaskState.READY ||
+                taskResult.val.state === TaskState.NEEDS_CONTINUATION)
+            ) {
+              executableTasksInLevel.push(tid);
+            }
+          }
+
+          if (executableTasksInLevel.length > 0) {
+            console.log(
+              `  🔄 ${executableTasksInLevel.length} tasks need continuation: ${executableTasksInLevel.map((id) => String(id)).join(', ')}`,
+            );
+            hasReadyTasks = true;
+          } else {
+            hasReadyTasks = false;
           }
         }
-
-        console.log(
-          `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
-        );
       }
 
       // 9. 統合フェーズ（並列実行されたタスクが複数ある場合のみ）
@@ -711,28 +740,57 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const level = levels[levelIndex];
         if (!level) continue;
 
-        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
+        // WHY: このレベルのREADY状態タスクがなくなるまで繰り返す（継続実行）
+        let hasReadyTasks = true;
+        while (hasReadyTasks) {
+          console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
 
-        const levelResult = await executeLevelParallel(
-          level,
-          schedulerOps,
-          workerOps,
-          judgeOps,
-          schedulerState,
-          blockedTaskIdsSet,
-          deps.taskStore,
-        );
+          const levelResult = await executeLevelParallel(
+            level,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            schedulerState,
+            blockedTaskIdsSet,
+            deps.taskStore,
+          );
 
-        schedulerState = levelResult.updatedSchedulerState;
-        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+          schedulerState = levelResult.updatedSchedulerState;
+          completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+          failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
 
-        if (levelResult.failed.length > 0) {
-          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-          for (const tid of newBlocked) {
-            blockedTaskIdsSet.add(tid);
-            await schedulerOps.blockTask(tid);
-            blockedTaskIds.push(String(tid));
+          if (levelResult.failed.length > 0) {
+            const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+            for (const tid of newBlocked) {
+              blockedTaskIdsSet.add(tid);
+              await schedulerOps.blockTask(tid);
+              blockedTaskIds.push(String(tid));
+            }
+          }
+
+          // このレベルに実行可能なタスク（READY または NEEDS_CONTINUATION）が残っているかチェック
+          const executableTasksInLevel: TaskId[] = [];
+          for (const tid of level) {
+            if (blockedTaskIdsSet.has(tid)) {
+              continue; // ブロック済みタスクはスキップ
+            }
+            const taskResult = await deps.taskStore.readTask(tid);
+            if (
+              taskResult.ok &&
+              (taskResult.val.state === TaskState.READY ||
+                taskResult.val.state === TaskState.NEEDS_CONTINUATION)
+            ) {
+              executableTasksInLevel.push(tid);
+            }
+          }
+
+          if (executableTasksInLevel.length > 0) {
+            console.log(
+              `  🔄 ${executableTasksInLevel.length} tasks need continuation: ${executableTasksInLevel.map((id) => String(id)).join(', ')}`,
+            );
+            hasReadyTasks = true;
+          } else {
+            hasReadyTasks = false;
           }
         }
       }
@@ -1073,26 +1131,51 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           const level = levels[levelIndex];
           if (!level) continue;
 
-          const levelResult = await executeLevelParallel(
-            level,
-            schedulerOps,
-            workerOps,
-            judgeOps,
-            schedulerState,
-            blockedTaskIds,
-            deps.taskStore,
-          );
+          // WHY: このレベルのREADY状態タスクがなくなるまで繰り返す（継続実行）
+          let hasReadyTasks = true;
+          while (hasReadyTasks) {
+            const levelResult = await executeLevelParallel(
+              level,
+              schedulerOps,
+              workerOps,
+              judgeOps,
+              schedulerState,
+              blockedTaskIds,
+              deps.taskStore,
+            );
 
-          schedulerState = levelResult.updatedSchedulerState;
-          allCompletedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-          allFailedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+            schedulerState = levelResult.updatedSchedulerState;
+            allCompletedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+            allFailedTaskIds.push(...levelResult.failed.map((id) => String(id)));
 
-          if (levelResult.failed.length > 0) {
-            const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-            for (const tid of newBlocked) {
-              blockedTaskIds.add(tid);
-              await schedulerOps.blockTask(tid);
-              allFailedTaskIds.push(String(tid));
+            if (levelResult.failed.length > 0) {
+              const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+              for (const tid of newBlocked) {
+                blockedTaskIds.add(tid);
+                await schedulerOps.blockTask(tid);
+                allFailedTaskIds.push(String(tid));
+              }
+            }
+
+            // このレベルにREADY状態のタスクが残っているかチェック
+            const readyTasksInLevel: TaskId[] = [];
+            for (const tid of level) {
+              if (blockedTaskIds.has(tid)) {
+                continue; // ブロック済みタスクはスキップ
+              }
+              const taskResult = await deps.taskStore.readTask(tid);
+              if (taskResult.ok && taskResult.val.state === TaskState.READY) {
+                readyTasksInLevel.push(tid);
+              }
+            }
+
+            if (readyTasksInLevel.length > 0) {
+              console.log(
+                `  🔄 ${readyTasksInLevel.length} tasks need continuation: ${readyTasksInLevel.map((id) => String(id)).join(', ')}`,
+              );
+              hasReadyTasks = true;
+            } else {
+              hasReadyTasks = false;
             }
           }
         }

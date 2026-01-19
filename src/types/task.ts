@@ -10,6 +10,7 @@ export type { CheckId, WorkerId } from './branded.ts';
  *
  * - READY: 実行可能（Workerが割り当て待ち）
  * - RUNNING: Worker実行中
+ * - NEEDS_CONTINUATION: 実行済みだが継続が必要（Judgeが不完全と判定）
  * - DONE: 完了
  * - BLOCKED: エラーや依存関係により実行不可
  * - CANCELLED: ユーザーによる中断
@@ -17,6 +18,7 @@ export type { CheckId, WorkerId } from './branded.ts';
 export const TaskState = {
   READY: 'READY',
   RUNNING: 'RUNNING',
+  NEEDS_CONTINUATION: 'NEEDS_CONTINUATION',
   DONE: 'DONE',
   BLOCKED: 'BLOCKED',
   CANCELLED: 'CANCELLED',
@@ -37,6 +39,7 @@ export const TaskSchema = z.object({
   state: z.enum([
     TaskState.READY,
     TaskState.RUNNING,
+    TaskState.NEEDS_CONTINUATION,
     TaskState.DONE,
     TaskState.BLOCKED,
     TaskState.CANCELLED,
