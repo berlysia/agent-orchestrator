@@ -197,3 +197,97 @@ export function computeExecutionLevels(graph: DependencyGraph): ExecutionLevels 
 
   return { levels, unschedulable };
 }
+
+/**
+ * 直列チェーン（連続した依存関係）を検出
+ *
+ * WHY: 直列チェーンのタスクは同じworktreeを共有することで、前のタスクの変更を次のタスクに引き継げる
+ *
+ * 例:
+ * - A → B → C は直列チェーン（BはAにのみ依存、CはBにのみ依存）
+ * - A → B ← D の場合、BはAとDに依存されるため、A→Bは直列チェーンではない
+ *
+ * @param graph 依存関係グラフ
+ * @returns 直列チェーンの配列（各チェーンはTaskId配列）
+ */
+export function detectSerialChains(graph: DependencyGraph): TaskId[][] {
+  const { adjacencyList, reverseAdjacencyList, allTaskIds } = graph;
+
+  const visited = new Set<TaskId>();
+  const chains: TaskId[][] = [];
+
+  // 入次数（依存先の数）を計算
+  const inDegree = new Map<TaskId, number>();
+  for (const taskId of allTaskIds) {
+    const deps = adjacencyList.get(taskId) || [];
+    inDegree.set(taskId, deps.length);
+  }
+
+  // 出次数（依存元の数）を計算
+  const outDegree = new Map<TaskId, number>();
+  for (const taskId of allTaskIds) {
+    const dependents = reverseAdjacencyList.get(taskId) || [];
+    outDegree.set(taskId, dependents.length);
+  }
+
+  /**
+   * 特定のタスクから直列チェーンを構築
+   */
+  function buildChainFrom(startTaskId: TaskId): TaskId[] | null {
+    const chain: TaskId[] = [startTaskId];
+    let current = startTaskId;
+
+    while (true) {
+      const dependents = reverseAdjacencyList.get(current) || [];
+
+      // 出次数が1でない場合、チェーン終了
+      if (dependents.length !== 1) {
+        break;
+      }
+
+      const next = dependents[0];
+      if (!next) break; // 型安全性のためのガード（実際には発生しない）
+
+      // 次のタスクが既に訪問済みの場合、チェーン終了（循環防止）
+      if (visited.has(next)) {
+        break;
+      }
+
+      // 次のタスクの入次数が1でない場合、チェーン終了
+      const nextInDegree = inDegree.get(next) || 0;
+      if (nextInDegree !== 1) {
+        break;
+      }
+
+      // チェーンを継続
+      chain.push(next);
+      visited.add(next);
+      current = next;
+    }
+
+    // チェーンの長さが2以上の場合のみ返す
+    return chain.length >= 2 ? chain : null;
+  }
+
+  // すべてのタスクについて、チェーンの開始点になりうるかチェック
+  for (const taskId of allTaskIds) {
+    if (visited.has(taskId)) {
+      continue;
+    }
+
+    // 入次数0（依存先なし）のタスクはチェーンの開始点候補
+    const taskInDegree = inDegree.get(taskId) || 0;
+    if (taskInDegree === 0) {
+      const chain = buildChainFrom(taskId);
+      if (chain) {
+        // チェーン内のすべてのタスクを訪問済みにマーク
+        for (const tid of chain) {
+          visited.add(tid);
+        }
+        chains.push(chain);
+      }
+    }
+  }
+
+  return chains;
+}

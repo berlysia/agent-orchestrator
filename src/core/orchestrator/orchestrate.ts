@@ -11,8 +11,13 @@ import { taskId, repoPath } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
-import { buildDependencyGraph, computeExecutionLevels } from './dependency-graph.ts';
+import {
+  buildDependencyGraph,
+  computeExecutionLevels,
+  detectSerialChains,
+} from './dependency-graph.ts';
 import { executeLevelParallel, computeBlockedTasks } from './parallel-executor.ts';
+import { executeSerialChain } from './serial-executor.ts';
 import type { Task } from '../../types/task.ts';
 
 /**
@@ -151,8 +156,34 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      // 4. 実行レベルを計算
-      const { levels, unschedulable } = computeExecutionLevels(graph);
+      // 4. 直列チェーンを検出
+      console.log('\n🔗 Detecting serial chains...');
+      const serialChains = detectSerialChains(graph);
+
+      if (serialChains.length > 0) {
+        console.log(`  Found ${serialChains.length} serial chains:`);
+        for (const chain of serialChains) {
+          console.log(`    Chain: ${chain.map((id) => String(id)).join(' → ')}`);
+        }
+      } else {
+        console.log('  No serial chains detected');
+      }
+
+      // 5. 直列チェーンのタスクIDを記録
+      const serialTaskIds = new Set(graph.cyclicDependencies ?? []);
+      for (const chain of serialChains) {
+        for (const tid of chain) {
+          serialTaskIds.add(tid);
+        }
+      }
+
+      // 6. 直列チェーンを除外して実行レベルを計算
+      const parallelTasks = tasks.filter((task) => !serialTaskIds.has(task.id));
+      const parallelGraph =
+        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+      const { levels, unschedulable } = parallelGraph
+        ? computeExecutionLevels(parallelGraph)
+        : { levels: [], unschedulable: [] };
 
       if (unschedulable.length > 0) {
         console.warn(`⚠️  Unschedulable tasks: ${unschedulable.map((id) => String(id)).join(', ')}`);
@@ -162,17 +193,48 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      console.log(`\n📊 Execution plan: ${levels.length} levels`);
+      console.log(
+        `\n📊 Execution plan: ${serialChains.length} serial chains, ${levels.length} parallel levels`,
+      );
       for (let i = 0; i < levels.length; i++) {
         const levelTasks = levels[i];
         if (levelTasks) {
-          console.log(`  Level ${i}: ${levelTasks.map((id) => String(id)).join(', ')}`);
+          console.log(`  Parallel Level ${i}: ${levelTasks.map((id) => String(id)).join(', ')}`);
         }
       }
 
-      // 5. レベルごとに並列実行
+      // 7. 直列チェーンを順番に実行
+      if (serialChains.length > 0) {
+        console.log('\n🔗 Executing serial chains...');
+        for (const chain of serialChains) {
+          const result = await executeSerialChain(
+            chain,
+            deps.taskStore,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            schedulerState,
+          );
+          schedulerState = result.updatedSchedulerState;
+
+          completedTaskIds.push(...result.completed.map((id) => String(id)));
+          failedTaskIds.push(...result.failed.map((id) => String(id)));
+
+          // Worktreeをクリーンアップ
+          if (result.worktreePath && chain[0]) {
+            const firstTaskId = chain[0];
+            await workerOps.cleanupWorktree(firstTaskId);
+          }
+        }
+      }
+
+      // 8. レベルごとに並列実行（直列チェーンを除外）
       const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
       for (const tid of unschedulable) {
+        blockedTaskIds.add(tid);
+      }
+      // 直列チェーンのタスクもブロック済みとして扱う（並列実行から除外）
+      for (const tid of serialTaskIds) {
         blockedTaskIds.add(tid);
       }
 
@@ -180,7 +242,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const level = levels[levelIndex];
         if (!level) continue;
 
-        console.log(`\n📍 Executing Level ${levelIndex}...`);
+        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
 
         const levelResult = await executeLevelParallel(
           level,
@@ -212,7 +274,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
-        console.log(`  ✅ Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`);
+        console.log(
+          `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
+        );
       }
 
       const success = failedTaskIds.length === 0;

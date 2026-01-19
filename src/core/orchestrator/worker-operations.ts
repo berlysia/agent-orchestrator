@@ -328,6 +328,152 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   };
 
   /**
+   * 既存のworktreeでタスクを実行
+   *
+   * WHY: 直列チェーンのタスクは同じworktreeを共有することで、前のタスクの変更を引き継げる
+   *
+   * @param task タスク
+   * @param worktreePath 既存のworktreeパス
+   * @param previousFeedback 前のタスクのフィードバック（任意）
+   * @returns 実行結果
+   */
+  const executeTaskInExistingWorktree = async (
+    task: Task,
+    worktreePath: WorktreePath,
+    previousFeedback?: string,
+  ): Promise<Result<WorkerResult, OrchestratorError>> => {
+    // 1. runsディレクトリを確保
+    const ensureResult = await deps.runnerEffects.ensureRunsDir();
+    if (isErr(ensureResult)) {
+      return createErr(ensureResult.err);
+    }
+
+    // 2. RunID生成（タスクIDベース）
+    const timestamp = Date.now();
+    const theRunId = runId(`run-${task.id}-${timestamp}`);
+    const logPath = `runs/${theRunId}.log`;
+
+    // 3. 実行メタデータを初期化
+    const run = createInitialRun({
+      id: theRunId,
+      taskId: task.id,
+      agentType: deps.agentType,
+      logPath,
+    });
+
+    // メタデータ保存
+    const saveMetaResult = await deps.runnerEffects.saveRunMetadata(run);
+    if (isErr(saveMetaResult)) {
+      return createErr(saveMetaResult.err);
+    }
+
+    console.log(`  📝 Execution log: ${getRunDisplayPath(theRunId, 'log')}`);
+    console.log(`  📊 Metadata: ${getRunDisplayPath(theRunId, 'json')}`);
+
+    // 4. ログにタスク開始を記録
+    await deps.runnerEffects.appendLog(
+      theRunId,
+      `[${new Date().toISOString()}] Starting task: ${task.acceptance}\n`,
+    );
+    await deps.runnerEffects.appendLog(theRunId, `Agent Type: ${deps.agentType}\n`);
+    await deps.runnerEffects.appendLog(theRunId, `Worktree: ${worktreePath} (reused)\n`);
+
+    if (previousFeedback) {
+      await deps.runnerEffects.appendLog(
+        theRunId,
+        `Previous task feedback:\n${previousFeedback}\n\n`,
+      );
+    }
+
+    // 5. エージェントを実行（プロンプトにフィードバックを追加）
+    let agentPrompt = `Execute task: ${task.acceptance}`;
+
+    if (previousFeedback) {
+      agentPrompt += `\n\nPrevious task feedback:\n${previousFeedback}`;
+    }
+
+    const agentResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(
+            agentPrompt,
+            worktreePath as string,
+            deps.model!,
+          )
+        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
+
+    // 6. 結果をログに記録
+    if (isErr(agentResult)) {
+      const errorMsg = agentResult.err.message;
+      await deps.runnerEffects.appendLog(
+        theRunId,
+        `[${new Date().toISOString()}] ❌ Agent execution failed\n`,
+      );
+      await deps.runnerEffects.appendLog(theRunId, `Error: ${errorMsg}\n`);
+
+      // メタデータ更新（失敗）
+      const failedRun = {
+        ...run,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: errorMsg,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createOk({
+        runId: theRunId,
+        success: false,
+        error: errorMsg,
+      });
+    }
+
+    // 7. 成功時の処理
+    const output = agentResult.val;
+    const rateLimitReason = detectRateLimitReason(output.finalResponse ?? '');
+    if (rateLimitReason) {
+      const errorMsg = `Rate limit detected (${rateLimitReason})`;
+      await deps.runnerEffects.appendLog(
+        theRunId,
+        `[${new Date().toISOString()}] ❌ Agent execution failed\n`,
+      );
+      await deps.runnerEffects.appendLog(theRunId, `Error: ${errorMsg}\n`);
+      await deps.runnerEffects.appendLog(theRunId, `Final Response:\n${output.finalResponse}\n`);
+
+      const failedRun = {
+        ...run,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: errorMsg,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createOk({
+        runId: theRunId,
+        success: false,
+        error: errorMsg,
+      });
+    }
+
+    await deps.runnerEffects.appendLog(
+      theRunId,
+      `[${new Date().toISOString()}] ✅ Agent execution completed\n`,
+    );
+    await deps.runnerEffects.appendLog(theRunId, `Final Response:\n${output.finalResponse}\n`);
+
+    // メタデータ更新（成功）
+    const completedRun = {
+      ...run,
+      status: RunStatus.SUCCESS,
+      finishedAt: new Date().toISOString(),
+    };
+    await deps.runnerEffects.saveRunMetadata(completedRun);
+
+    return createOk({
+      runId: theRunId,
+      success: true,
+    });
+  };
+
+  /**
    * タスクを実行（全体のオーケストレーション）
    *
    * 1. worktreeを作成
@@ -389,6 +535,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   return {
     setupWorktree,
     executeTask,
+    executeTaskInExistingWorktree,
     commitChanges,
     pushChanges,
     cleanupWorktree,
