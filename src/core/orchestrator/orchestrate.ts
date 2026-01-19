@@ -6,11 +6,14 @@ import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
-import { initialSchedulerState, removeRunningWorker } from './scheduler-state.ts';
-import { taskId, workerId, repoPath } from '../../types/branded.ts';
+import { initialSchedulerState } from './scheduler-state.ts';
+import { taskId, repoPath } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
+import { buildDependencyGraph, computeExecutionLevels } from './dependency-graph.ts';
+import { executeLevelParallel, computeBlockedTasks } from './parallel-executor.ts';
+import type { Task } from '../../types/task.ts';
 
 /**
  * Orchestrator依存関係
@@ -119,77 +122,97 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      // 2-4. 各タスクを順次実行（Scheduler→Worker→Judge）
+      // 2. すべてのタスクを取得して依存関係グラフを構築
+      console.log('\n🔗 Building dependency graph...');
+      const tasks: Task[] = [];
       for (const rawTaskId of taskIds) {
-        console.log(`\n🔨 Processing task: ${rawTaskId}`);
-
-        // 2. Scheduler: タスク割り当て
-        const wid = `worker-${rawTaskId}`;
-        const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
-
-        if (isErr(claimResult)) {
-          console.log(`⚠️  Failed to claim task: ${claimResult.err.message}`);
+        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+        if (!taskResult.ok) {
+          console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
           failedTaskIds.push(rawTaskId);
           continue;
         }
+        tasks.push(taskResult.val);
+      }
 
-        const { task: claimedTask, newState } = claimResult.val;
-        schedulerState = newState;
+      const graph = buildDependencyGraph(tasks);
 
-        const tid = taskId(rawTaskId);
-        try {
-          // 3. Worker: タスク実行
-          console.log(`  🚀 Executing task...`);
-          const workerResult = await workerOps.executeTaskWithWorktree(claimedTask);
+      // 3. 循環依存をチェック
+      if (graph.cyclicDependencies && graph.cyclicDependencies.length > 0) {
+        console.warn(
+          `⚠️  Circular dependencies detected: ${graph.cyclicDependencies.map((id) => String(id)).join(', ')}`,
+        );
+        console.warn('   These tasks will be BLOCKED');
 
-          if (isErr(workerResult)) {
-            console.log(`  ❌ Task execution failed: ${workerResult.err.message}`);
-            await schedulerOps.blockTask(tid);
-            failedTaskIds.push(rawTaskId);
-            continue;
-          }
-
-          const result = workerResult.val;
-
-          if (!result.success) {
-            console.log(`  ❌ Task execution failed: ${result.error ?? 'Unknown error'}`);
-            await schedulerOps.blockTask(tid);
-            failedTaskIds.push(rawTaskId);
-            continue;
-          }
-
-          // 4. Judge: 完了判定
-          console.log(`  ⚖️  Judging task...`);
-          const judgementResult = await judgeOps.judgeTask(tid);
-
-          if (isErr(judgementResult)) {
-            console.log(`  ❌ Failed to judge task: ${judgementResult.err.message}`);
-            await schedulerOps.blockTask(tid);
-            failedTaskIds.push(rawTaskId);
-            continue;
-          }
-
-          const judgement = judgementResult.val;
-
-          if (judgement.success) {
-            console.log(`  ✅ Task completed: ${judgement.reason}`);
-            await judgeOps.markTaskAsCompleted(tid);
-            completedTaskIds.push(rawTaskId);
-          } else {
-            console.log(`  ❌ Task failed judgement: ${judgement.reason}`);
-            await judgeOps.markTaskAsBlocked(tid);
-            failedTaskIds.push(rawTaskId);
-          }
-        } finally {
-          // Worktreeをクリーンアップ
-          const cleanupResult = await workerOps.cleanupWorktree(tid);
-          if (isErr(cleanupResult)) {
-            console.warn(`  ⚠️  Failed to cleanup worktree: ${cleanupResult.err.message}`);
-          }
-
-          // Workerスロットを解放
-          schedulerState = removeRunningWorker(schedulerState, workerId(wid));
+        // 循環依存タスクをBLOCKEDにする
+        for (const tid of graph.cyclicDependencies) {
+          await schedulerOps.blockTask(tid);
+          failedTaskIds.push(String(tid));
         }
+      }
+
+      // 4. 実行レベルを計算
+      const { levels, unschedulable } = computeExecutionLevels(graph);
+
+      if (unschedulable.length > 0) {
+        console.warn(`⚠️  Unschedulable tasks: ${unschedulable.map((id) => String(id)).join(', ')}`);
+        for (const tid of unschedulable) {
+          await schedulerOps.blockTask(tid);
+          failedTaskIds.push(String(tid));
+        }
+      }
+
+      console.log(`\n📊 Execution plan: ${levels.length} levels`);
+      for (let i = 0; i < levels.length; i++) {
+        const levelTasks = levels[i];
+        if (levelTasks) {
+          console.log(`  Level ${i}: ${levelTasks.map((id) => String(id)).join(', ')}`);
+        }
+      }
+
+      // 5. レベルごとに並列実行
+      const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
+      for (const tid of unschedulable) {
+        blockedTaskIds.add(tid);
+      }
+
+      for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+        const level = levels[levelIndex];
+        if (!level) continue;
+
+        console.log(`\n📍 Executing Level ${levelIndex}...`);
+
+        const levelResult = await executeLevelParallel(
+          level,
+          schedulerOps,
+          workerOps,
+          judgeOps,
+          schedulerState,
+          blockedTaskIds,
+        );
+
+        // スケジューラ状態を更新
+        schedulerState = levelResult.updatedSchedulerState;
+
+        // 結果を集計
+        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+
+        // 失敗タスクの依存先をブロック
+        if (levelResult.failed.length > 0) {
+          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+          console.log(
+            `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
+          );
+
+          for (const tid of newBlocked) {
+            blockedTaskIds.add(tid);
+            await schedulerOps.blockTask(tid);
+            failedTaskIds.push(String(tid));
+          }
+        }
+
+        console.log(`  ✅ Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`);
       }
 
       const success = failedTaskIds.length === 0;

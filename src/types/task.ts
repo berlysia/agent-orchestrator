@@ -69,6 +69,9 @@ export const TaskSchema = z.object({
   /** タスク実行に必要なコンテキスト情報 */
   context: z.string(),
 
+  /** 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスク） */
+  dependencies: z.array(z.string().transform(taskId)).default([]),
+
   /** CI/Lintチェック結果への参照（checkId） */
   check: z
     .string()
@@ -98,6 +101,7 @@ export function createInitialTask(params: {
   acceptance: string;
   taskType: 'implementation' | 'documentation' | 'investigation' | 'integration';
   context: string;
+  dependencies?: TaskId[];
 }): Task {
   const now = new Date().toISOString();
   return {
@@ -111,6 +115,7 @@ export function createInitialTask(params: {
     acceptance: params.acceptance,
     taskType: params.taskType,
     context: params.context,
+    dependencies: params.dependencies ?? [],
     check: null,
     createdAt: now,
     updatedAt: now,

@@ -90,6 +90,8 @@ export type TaskType = (typeof TaskTypeEnum)[keyof typeof TaskTypeEnum];
  * WHY: 厳格なバリデーションによりエージェント出力の品質を保証
  */
 export const TaskBreakdownSchema = z.object({
+  /** タスクID（Planner段階で割り当てる） */
+  id: z.string(),
   /** タスクの説明 */
   description: z.string().min(1, 'description must not be empty'),
   /** ブランチ名 */
@@ -109,6 +111,8 @@ export const TaskBreakdownSchema = z.object({
   estimatedDuration: z.number().min(0.5).max(8),
   /** タスク実行に必要なコンテキスト情報（必須） */
   context: z.string().min(1, 'context must not be empty'),
+  /** 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスクのID） */
+  dependencies: z.array(z.string()).default([]),
 });
 
 /**
@@ -352,7 +356,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const errors: string[] = [];
 
     for (const breakdown of taskBreakdowns) {
-      const rawTaskId = `task-${randomUUID()}`;
+      const rawTaskId = breakdown.id;
       const task = createInitialTask({
         id: taskId(rawTaskId),
         repo: repoPath(deps.appRepoPath),
@@ -361,6 +365,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
+        dependencies: breakdown.dependencies.map((depId) => taskId(depId)),
       });
 
       const result = await deps.taskStore.createTask(task);
@@ -434,26 +439,30 @@ ${userInstruction}
 
 Your task is to break down this instruction into concrete, implementable tasks.
 
+IMPORTANT: You must assign a unique ID to each task. Use the format "task-1", "task-2", etc.
+When one task depends on another, reference it by ID in the dependencies array.
+
 For each task, provide:
-1. description: Clear description of what needs to be done
-2. branch: Git branch name (e.g., "feature/add-login")
-3. scopePaths: Array of file/directory paths that will be modified (e.g., ["src/auth/", "tests/auth/"])
-4. acceptance: COMPLETE, VERIFIABLE acceptance criteria (REQUIRED)
+1. id: Unique task identifier (e.g., "task-1", "task-2")
+2. description: Clear description of what needs to be done
+3. branch: Git branch name (e.g., "feature/add-login")
+4. scopePaths: Array of file/directory paths that will be modified (e.g., ["src/auth/", "tests/auth/"])
+5. acceptance: COMPLETE, VERIFIABLE acceptance criteria (REQUIRED)
    - Must be specific enough to verify task completion without ambiguity
    - Include WHAT to verify (e.g., "User can login with email/password")
    - Include HOW to verify (e.g., "Test with valid/invalid credentials, check JWT token generation")
    - Specify edge cases and error scenarios to test
    - Define performance/security requirements if applicable
    - Example: "Users can login with email/password. Valid credentials generate JWT token with 24h expiry. Invalid credentials return 401 with error message. Rate limiting allows 5 attempts per minute."
-5. type: Task type (REQUIRED) - one of:
+6. type: Task type (REQUIRED) - one of:
    - "implementation": New features or existing feature modifications
    - "documentation": Documentation creation or updates
    - "investigation": Research or investigation tasks
    - "integration": System integration or connectivity work
-6. estimatedDuration: Estimated hours (REQUIRED) - number between 0.5 and 8
+7. estimatedDuration: Estimated hours (REQUIRED) - number between 0.5 and 8
    - Aim for 1-4 hours per task (smaller, focused tasks preferred)
    - If a task exceeds 4 hours, consider breaking it down further
-7. context: COMPLETE implementation context (REQUIRED)
+8. context: COMPLETE implementation context (REQUIRED)
    This field must contain ALL information needed to execute the task WITHOUT referring to external sources.
    Include the following:
    - Technical approach: Specific libraries, patterns, or techniques to use
@@ -465,48 +474,63 @@ For each task, provide:
    - Security: Authentication, authorization, validation requirements
    - Testing: What types of tests are needed and what they should cover
    Example: "Implement JWT authentication using jsonwebtoken library. Use bcrypt for password hashing (cost factor 10). Store user credentials in existing users table (src/db/schema.sql). Follow existing auth pattern in src/auth/oauth.ts. Tokens expire in 24h, store in HTTP-only cookies. Handle login failures with exponential backoff. Validate email format before lookup. Add unit tests for token generation/validation, integration tests for login flow. Must pass OWASP security review."
+9. dependencies: Array of task IDs this task depends on (REQUIRED)
+   - Empty array [] if the task has no dependencies
+   - List task IDs that must be completed BEFORE this task can start
+   - Example: If task-3 depends on task-1 and task-2, use ["task-1", "task-2"]
+   - Tasks with no dependencies can be executed in parallel
+   - Ensure no circular dependencies (task-1 depends on task-2, task-2 depends on task-1)
 
 Output format (JSON array):
 [
   {
+    "id": "task-1",
     "description": "Task description",
     "branch": "feature/branch-name",
     "scopePaths": ["path1/", "path2/"],
     "acceptance": "Acceptance criteria",
     "type": "implementation",
     "estimatedDuration": 2.5,
-    "context": "Context information for task execution"
+    "context": "Context information for task execution",
+    "dependencies": []
   }
 ]
 
 Rules:
 - Create 1-5 tasks (prefer smaller, focused tasks)
-- Each task should be independently implementable
+- Each task must have a unique ID (task-1, task-2, etc.)
+- Each task should be independently implementable (or list its dependencies)
 - Branch names must be valid Git branch names (lowercase, hyphens for spaces)
 - Scope paths should be specific but allow flexibility
 - Acceptance criteria should be testable
+- Dependencies must reference valid task IDs from the same breakdown
+- Avoid circular dependencies
 - ALL fields are REQUIRED - tasks missing any field will be rejected
 - Granularity guideline: Aim for 1-4 hour tasks; break down larger work
 
 Example:
 [
   {
+    "id": "task-1",
     "description": "Implement user authentication with JWT",
     "branch": "feature/auth-jwt",
     "scopePaths": ["src/auth/", "tests/auth/"],
     "acceptance": "Users can login with email/password and receive JWT token with 24h expiry. VERIFY: (1) Valid credentials (test@example.com / password123) generate token and return 200. (2) Invalid credentials return 401 with error message 'Invalid credentials'. (3) Missing email/password returns 400 with validation errors. (4) Token validation succeeds for valid tokens, fails for expired/invalid tokens. (5) Rate limiting blocks after 5 failed attempts per minute per IP. (6) All tests pass including unit tests for token generation/validation and integration tests for full login flow.",
     "type": "implementation",
     "estimatedDuration": 3.0,
-    "context": "Implement using jsonwebtoken v9.0+ library for JWT generation/validation. Use bcrypt with cost factor 10 for password hashing. Store user credentials in existing 'users' table defined in src/db/schema.sql (columns: id, email, password_hash, created_at). Follow the authentication pattern from src/auth/oauth.ts for middleware structure. JWT payload: {userId, email, exp}. Store token in HTTP-only cookie named 'auth_token'. Implement rate limiting using existing RateLimiter class in src/middleware/rate-limit.ts (5 attempts per minute per IP). Handle errors: validation errors (400), authentication failures (401), server errors (500). Add unit tests in tests/auth/jwt.test.ts for token generation, validation, expiry. Add integration tests in tests/auth/login.test.ts for full login flow with database. Security: validate email format with regex, sanitize inputs, use constant-time comparison for passwords. Must pass existing security linter rules in .eslintrc.json."
+    "context": "Implement using jsonwebtoken v9.0+ library for JWT generation/validation. Use bcrypt with cost factor 10 for password hashing. Store user credentials in existing 'users' table defined in src/db/schema.sql (columns: id, email, password_hash, created_at). Follow the authentication pattern from src/auth/oauth.ts for middleware structure. JWT payload: {userId, email, exp}. Store token in HTTP-only cookie named 'auth_token'. Implement rate limiting using existing RateLimiter class in src/middleware/rate-limit.ts (5 attempts per minute per IP). Handle errors: validation errors (400), authentication failures (401), server errors (500). Add unit tests in tests/auth/jwt.test.ts for token generation, validation, expiry. Add integration tests in tests/auth/login.test.ts for full login flow with database. Security: validate email format with regex, sanitize inputs, use constant-time comparison for passwords. Must pass existing security linter rules in .eslintrc.json.",
+    "dependencies": []
   },
   {
+    "id": "task-2",
     "description": "Document authentication flow and API endpoints",
     "branch": "docs/auth-api",
     "scopePaths": ["docs/api/"],
     "acceptance": "API documentation includes all authentication endpoints with complete request/response examples. VERIFY: (1) POST /auth/login documented with example request body {email, password}, success response {token, user}, error responses 400/401/429/500. (2) POST /auth/logout documented with cookie clearing behavior. (3) GET /auth/verify documented with token validation. (4) Authentication flow diagram shows login -> token generation -> cookie storage -> subsequent requests. (5) Rate limiting rules documented (5 attempts/minute). (6) Security considerations section includes password requirements, token expiry, HTTPS requirement. (7) All examples are copy-pasteable and work with actual API.",
     "type": "documentation",
     "estimatedDuration": 1.5,
-    "context": "Follow existing API documentation format in docs/api/README.md (uses Markdown with code blocks). Reference the authentication implementation in src/auth/ for accurate technical details. Include complete curl examples for each endpoint. Document all HTTP status codes: 200 (success), 400 (validation error), 401 (authentication failed), 429 (rate limited), 500 (server error). Add Mermaid sequence diagram for authentication flow (see docs/diagrams/ for examples). Cross-reference related docs: docs/security/authentication.md for security details, docs/setup/environment.md for HTTPS setup. Include troubleshooting section for common issues: cookie not set (check HTTPS), rate limited (wait 1 minute), token expired (re-login). Validation: run through examples manually and verify they work with local dev server."
+    "context": "Follow existing API documentation format in docs/api/README.md (uses Markdown with code blocks). Reference the authentication implementation in src/auth/ for accurate technical details. Include complete curl examples for each endpoint. Document all HTTP status codes: 200 (success), 400 (validation error), 401 (authentication failed), 429 (rate limited), 500 (server error). Add Mermaid sequence diagram for authentication flow (see docs/diagrams/ for examples). Cross-reference related docs: docs/security/authentication.md for security details, docs/setup/environment.md for HTTPS setup. Include troubleshooting section for common issues: cookie not set (check HTTPS), rate limited (wait 1 minute), token expired (re-login). Validation: run through examples manually and verify they work with local dev server.",
+    "dependencies": ["task-1"]
   }
 ]
 

@@ -24,7 +24,7 @@
 | Phase 5.9: モデルの使い分け | 低 | ✅ 完了 | 2-3時間 | 2026-01-19 | 95114c4 |
 | Phase 5.1: プランナーの品質向上 | 高 | ✅ 完了 | 4-6時間 | 2026-01-19 | ab6fcea, 2a4f003 |
 | Phase 5.2: ジャッジによるタスク品質評価 | 高 | ✅ 完了 | 6-8時間 | 2026-01-19 | 546f55d |
-| Phase 5.3: 並列実行サポート | 高 | 📋 計画中 | 8-12時間 | - | - |
+| Phase 5.3: 並列実行サポート | 高 | ✅ 完了 | 10-12時間 | 2026-01-19 | - |
 | Phase 5.4: 直列タスクの変更統合 | 中 | 📋 計画中 | 6-8時間 | - | - |
 | Phase 5.5: 統合処理とコンフリクト解決 | 中 | 📋 計画中 | 8-10時間 | - | - |
 | Phase 5.6: ジャッジ判定の高度化 | 中 | 📋 計画中 | 4-6時間 | - | - |
@@ -972,68 +972,126 @@ const planTasks = async (userInstruction: string) => {
 
 ---
 
-### 5.3 並列実行サポート 【優先度: 高】
+### 5.3 並列実行サポート 【優先度: 高】【ステータス: ✅ 完了】
+
+**完了日**: 2026-01-19
 
 #### 問題点
-- `maxWorkers`パラメータが存在するが、実際には直列実行されている（orchestrate.ts:118のforループ）
+- `maxWorkers`パラメータが存在するが、実際には直列実行されている（orchestrate.ts:122-193のforループ）
 - タスク間の依存関係が考慮されていない
 
-#### 改善内容
+#### 改善内容（実装済み）
 
-**5.3.1 タスク依存関係の定義**
+**5.3.1 型定義の拡張**
 
-`TaskBreakdown`型の拡張:
+Task型とTaskBreakdownに`dependencies`フィールドを追加:
 ```typescript
-export interface TaskBreakdown {
-  description: string;
-  type: 'implementation' | 'documentation' | 'investigation' | 'integration';
-  branch: string;
-  scopePaths: string[];
-  acceptance: string;
-  dependencies: string[]; // 依存するタスクのdescriptionまたはID
-  canRunInParallel: boolean; // 並列実行可能かどうか
+// src/types/task.ts
+export const TaskSchema = z.object({
+  // ...
+  dependencies: z.array(z.string().transform(taskId)).default([]),
+});
+
+// src/core/orchestrator/planner-operations.ts
+export const TaskBreakdownSchema = z.object({
+  id: z.string(),  // Planner段階でID割り当て
+  // ...
+  dependencies: z.array(z.string()).default([]),
+});
+```
+
+**5.3.2 依存関係グラフモジュールの実装**
+
+新規ファイル `src/core/orchestrator/dependency-graph.ts`:
+- `buildDependencyGraph`: タスク間の依存関係グラフを構築
+- `detectCycles`: Tarjan's SCCアルゴリズムで循環依存を検出
+- `computeExecutionLevels`: Kahn's Algorithmでトポロジカルソート、実行レベルを計算
+
+**5.3.3 並列実行器の実装**
+
+新規ファイル `src/core/orchestrator/parallel-executor.ts`:
+- `executeLevelParallel`: 同レベルのタスクを`Promise.allSettled`で並列実行
+- `computeBlockedTasks`: 失敗タスクの依存先を自動的にブロック
+
+**5.3.4 Orchestrator統合**
+
+`src/core/orchestrator/orchestrate.ts`の`executeInstruction`を書き換え:
+```typescript
+// 1. すべてのタスクを取得して依存関係グラフを構築
+const tasks: Task[] = [];
+for (const rawTaskId of taskIds) {
+  const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+  tasks.push(taskResult.val);
 }
-```
+const graph = buildDependencyGraph(tasks);
 
-**5.3.2 プランナープロンプトの拡張**
+// 2. 循環依存をチェック
+if (graph.cyclicDependencies && graph.cyclicDependencies.length > 0) {
+  // 循環依存タスクをBLOCKEDにする
+}
 
-依存関係情報を含めるように`buildPlanningPrompt`を更新:
-```typescript
-For each task, provide:
-...
-6. dependencies: Array of task descriptions this task depends on (empty array if independent)
-7. canRunInParallel: true if this task can run in parallel with others
-```
+// 3. 実行レベルを計算
+const { levels, unschedulable } = computeExecutionLevels(graph);
 
-**5.3.3 並列実行ロジックの実装**
-
-`orchestrate.ts`の`executeInstruction`を書き換え:
-```typescript
-// 依存関係グラフを構築
-const taskGraph = buildDependencyGraph(taskBreakdowns);
-
-// トポロジカルソートで実行順序を決定
-const executionLevels = topologicalSort(taskGraph);
-
-// 各レベルを並列実行
-for (const level of executionLevels) {
-  const results = await Promise.allSettled(
-    level.map(taskId => executeTaskInWorker(taskId))
+// 4. レベルごとに並列実行
+for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+  const level = levels[levelIndex];
+  const levelResult = await executeLevelParallel(
+    level,
+    schedulerOps,
+    workerOps,
+    judgeOps,
+    schedulerState,
+    blockedTaskIds,
   );
 
-  // 結果を処理
-  for (const result of results) {
-    if (result.status === 'rejected') {
-      failedTaskIds.push(result.reason.taskId);
-    } else {
-      completedTaskIds.push(result.value.taskId);
-    }
-  }
+  // 失敗タスクの依存先をブロック
+  const newBlocked = computeBlockedTasks(levelResult.failed, graph);
 }
+```
+
+**5.3.5 プランナープロンプトの拡張**
+
+`buildPlanningPrompt`にIDと依存関係の説明を追加:
+```
+IMPORTANT: You must assign a unique ID to each task. Use the format "task-1", "task-2", etc.
+When one task depends on another, reference it by ID in the dependencies array.
+
+For each task, provide:
+1. id: Unique task identifier (e.g., "task-1", "task-2")
+...
+9. dependencies: Array of task IDs this task depends on (REQUIRED)
+   - Empty array [] if the task has no dependencies
+   - List task IDs that must be completed BEFORE this task can start
+```
+
+#### 実装ファイル
+- `src/types/task.ts`: Task型に`dependencies`フィールド追加
+- `src/core/orchestrator/planner-operations.ts`: TaskBreakdownに`id`と`dependencies`追加
+- `src/core/orchestrator/dependency-graph.ts`: 依存関係グラフ構築・循環依存検出・レベル計算（新規）
+- `src/core/orchestrator/parallel-executor.ts`: 並列実行ロジック（新規）
+- `src/core/orchestrator/orchestrate.ts`: 並列実行統合
+- `tests/unit/core/orchestrator/dependency-graph.test.ts`: 依存関係グラフテスト（新規、11テスト）
+- `tests/unit/core/orchestrator/planner-operations.test.ts`: 既存テスト更新
+
+#### エラーハンドリング戦略
+- 循環依存検出時: 該当タスクをBLOCKED、他は続行
+- 依存タスク失敗時: 後続タスクをBLOCKED、同レベル他タスクは続行
+- 並列実行中の1タスク失敗: 同レベル他タスクは続行
+
+#### テスト結果
+- ユニットテスト: 41/41 パス ✅
+- ビルド: 成功 ✅
+
+#### 実行フロー
+```
+Level 0: [A, B]     ← 依存なし、並列実行
+Level 1: [C]        ← A,Bに依存
+Level 2: [D, E, F]  ← Cに依存、並列実行
 ```
 
 #### 推定工数
-8-12時間
+8-12時間（実績: 約10時間）
 
 ---
 

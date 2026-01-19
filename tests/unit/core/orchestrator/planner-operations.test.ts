@@ -48,6 +48,7 @@ describe('Planner Operations', () => {
     it('should parse valid JSON array with all required fields', () => {
       const output = JSON.stringify([
         {
+          id: 'task-1',
           description: 'Implement user authentication',
           branch: 'feature/auth',
           scopePaths: ['src/auth/'],
@@ -55,6 +56,7 @@ describe('Planner Operations', () => {
           type: 'implementation',
           estimatedDuration: 3.0,
           context: 'Use bcrypt for password hashing',
+          dependencies: [],
         },
       ]);
 
@@ -76,13 +78,15 @@ describe('Planner Operations', () => {
 \`\`\`json
 [
   {
+    "id": "task-1",
     "description": "Add login form",
     "branch": "feature/login-ui",
     "scopePaths": ["src/components/"],
     "acceptance": "Login form is displayed",
     "type": "implementation",
     "estimatedDuration": 2.0,
-    "context": "Use existing form components"
+    "context": "Use existing form components",
+    "dependencies": []
   }
 ]
 \`\`\`
@@ -107,6 +111,7 @@ This is the recommended approach.`;
     it('should filter out invalid task breakdown items (Zod validation)', () => {
       const output = JSON.stringify([
         {
+          id: 'task-1',
           description: 'Valid task',
           branch: 'feature/valid',
           scopePaths: ['src/'],
@@ -114,16 +119,20 @@ This is the recommended approach.`;
           type: 'implementation',
           estimatedDuration: 2.0,
           context: 'Valid context',
+          dependencies: [],
         },
         {
+          id: 'task-2',
           description: 'Invalid task - missing type',
           branch: 'feature/invalid',
           scopePaths: ['src/'],
           acceptance: 'This should be filtered out',
           estimatedDuration: 2.0,
           context: 'Missing type field',
+          dependencies: [],
         },
         {
+          id: 'task-3',
           description: 'Invalid task - invalid estimatedDuration',
           branch: 'feature/invalid2',
           scopePaths: ['src/'],
@@ -131,6 +140,7 @@ This is the recommended approach.`;
           type: 'implementation',
           estimatedDuration: 10.0, // Exceeds max (8)
           context: 'Duration too high',
+          dependencies: [],
         },
       ]);
 
@@ -142,6 +152,7 @@ This is the recommended approach.`;
 
     it('should wrap single object in array', () => {
       const output = JSON.stringify({
+        id: 'task-1',
         description: 'Single task',
         branch: 'feature/single',
         scopePaths: ['src/'],
@@ -149,6 +160,7 @@ This is the recommended approach.`;
         type: 'implementation',
         estimatedDuration: 1.5,
         context: 'Single task context',
+        dependencies: [],
       });
 
       const result = parseAgentOutput(output);
@@ -168,22 +180,26 @@ This is the recommended approach.`;
     it('should parse JSON without code blocks', () => {
       const output = `[
         {
+          "id": "task-1",
           "description": "Create database schema",
           "branch": "feature/db-schema",
           "scopePaths": ["db/migrations/"],
           "acceptance": "Schema is created and tested",
           "type": "implementation",
           "estimatedDuration": 3.5,
-          "context": "Use existing migration tools"
+          "context": "Use existing migration tools",
+          "dependencies": []
         },
         {
+          "id": "task-2",
           "description": "Implement API endpoints",
           "branch": "feature/api",
           "scopePaths": ["src/api/"],
           "acceptance": "Endpoints are functional",
           "type": "implementation",
           "estimatedDuration": 4.0,
-          "context": "Follow REST best practices"
+          "context": "Follow REST best practices",
+          "dependencies": []
         }
       ]`;
 
@@ -218,6 +234,7 @@ This is the recommended approach.`;
       validTypes.forEach((type) => {
         const output = JSON.stringify([
           {
+            id: 'task-1',
             description: `Task with type ${type}`,
             branch: 'feature/test',
             scopePaths: ['src/'],
@@ -225,6 +242,7 @@ This is the recommended approach.`;
             type: type,
             estimatedDuration: 2.0,
             context: 'Test context',
+            dependencies: [],
           },
         ]);
 
@@ -260,6 +278,7 @@ This is the recommended approach.`;
       invalidDurations.forEach((duration) => {
         const output = JSON.stringify([
           {
+            id: 'task-1',
             description: 'Task',
             branch: 'feature/test',
             scopePaths: ['src/'],
@@ -267,6 +286,7 @@ This is the recommended approach.`;
             type: 'implementation',
             estimatedDuration: duration,
             context: 'Test',
+            dependencies: [],
           },
         ]);
 
@@ -279,6 +299,7 @@ This is the recommended approach.`;
       validDurations.forEach((duration) => {
         const output = JSON.stringify([
           {
+            id: 'task-1',
             description: 'Task',
             branch: 'feature/test',
             scopePaths: ['src/'],
@@ -286,6 +307,7 @@ This is the recommended approach.`;
             type: 'implementation',
             estimatedDuration: duration,
             context: 'Test',
+            dependencies: [],
           },
         ]);
 
@@ -301,6 +323,7 @@ This is the recommended approach.`;
         const userInstruction = 'Build a TODO app';
         const tasks: TaskBreakdown[] = [
           {
+            id: 'task-1',
             description: 'Implement task list',
             branch: 'feature/task-list',
             scopePaths: ['src/tasks/'],
@@ -308,6 +331,7 @@ This is the recommended approach.`;
             type: 'implementation',
             estimatedDuration: 2.0,
             context: 'Use React hooks',
+            dependencies: [],
           },
         ];
 
