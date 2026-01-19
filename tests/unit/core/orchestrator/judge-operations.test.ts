@@ -8,6 +8,7 @@ import { createInitialTask } from '../../../../src/types/task.ts';
 import { TaskState } from '../../../../src/types/task.ts';
 import { taskId } from '../../../../src/types/branded.ts';
 import { createOk, createErr } from 'option-t/plain_result';
+import { agentExecutionError } from '../../../../src/types/errors.ts';
 import type { TaskStore } from '../../../../src/core/task-store/interface.ts';
 import type { RunnerEffects } from '../../../../src/core/runner/runner-effects.ts';
 
@@ -64,6 +65,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -125,6 +127,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -174,6 +177,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -183,7 +187,7 @@ describe('Judge Operations', () => {
       assert(result.err.message.includes('Failed to read log'));
     });
 
-    it('should fallback when agent execution fails', async () => {
+    it('should return error when agent execution fails', async () => {
       const tid = taskId('task-4');
       const task = createInitialTask({
         id: tid,
@@ -223,17 +227,17 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
       const result = await ops.judgeTask(tid, runId);
 
-      assert(result.ok);
-      assert.strictEqual(result.val.success, true);
-      assert(result.val.reason.includes('fallback to simple judgement'));
+      assert(!result.ok);
+      assert(result.err.message.includes('Judge agent execution failed'));
     });
 
-    it('should fallback when response parsing fails', async () => {
+    it('should return error when response parsing fails', async () => {
       const tid = taskId('task-5');
       const task = createInitialTask({
         id: tid,
@@ -275,14 +279,85 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
       const result = await ops.judgeTask(tid, runId);
 
+      assert(!result.ok);
+      assert(result.err.message.includes('Failed to parse judge response'));
+    });
+
+    it('should retry when rate limited and then succeed', async () => {
+      const tid = taskId('task-8');
+      const task = createInitialTask({
+        id: tid,
+        description: 'Implement feature',
+        branch: 'feature/test',
+        scopePaths: ['src/'],
+        acceptance: 'Feature works',
+        context: 'Test context',
+        taskType: 'implementation',
+      });
+      task.state = TaskState.RUNNING;
+      const runId = 'run-' + String(task.id) + '-1234567890';
+
+      const mockTaskStore: TaskStore = {
+        readTask: mock.fn(async () => createOk(task)),
+        updateTaskCAS: mock.fn(),
+        listTasks: mock.fn(),
+        listTasksByState: mock.fn(),
+        updateTask: mock.fn(),
+      };
+
+      const rateLimitError = agentExecutionError('claude', {
+        status: 429,
+        headers: { 'retry-after': '0' },
+      });
+
+      const mockRunnerEffects: RunnerEffects = {
+        readLog: mock.fn(async () => createOk('Log content')),
+        runClaudeAgent: mock.fn(async () => createErr(rateLimitError)),
+        runCodexAgent: mock.fn(),
+        ensureRunsDir: mock.fn(),
+        appendLog: mock.fn(),
+        saveRunMetadata: mock.fn(),
+        loadRunMetadata: mock.fn(),
+      };
+
+      const deps: JudgeDeps = {
+        taskStore: mockTaskStore,
+        runnerEffects: mockRunnerEffects,
+        appRepoPath: '/app',
+        agentType: 'claude',
+        model: 'claude-haiku-4-5',
+        judgeTaskRetries: 2,
+      };
+
+      const ops = createJudgeOperations(deps);
+
+      let callCount = 0;
+      mockRunnerEffects.runClaudeAgent = mock.fn(async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return createErr(rateLimitError);
+        }
+        return createOk({
+          finalResponse: JSON.stringify({
+            success: true,
+            reason: 'All acceptance criteria met',
+            missingRequirements: [],
+            shouldContinue: false,
+          }),
+        });
+      });
+
+      const result = await ops.judgeTask(tid, runId);
+
       assert(result.ok);
+      assert.strictEqual(callCount, 2);
       assert.strictEqual(result.val.success, true);
-      assert(result.val.reason.includes('fallback to simple judgement'));
     });
 
     it('should handle task not in RUNNING state', async () => {
@@ -323,6 +398,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -384,6 +460,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -435,6 +512,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);
@@ -486,6 +564,7 @@ describe('Judge Operations', () => {
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
       };
 
       const ops = createJudgeOperations(deps);

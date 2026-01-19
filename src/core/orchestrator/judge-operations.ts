@@ -7,8 +7,84 @@ import type { TaskStoreError } from '../../types/errors.ts';
 import { validationError } from '../../types/errors.ts';
 import type { AgentType } from '../../types/config.ts';
 import type { Result } from 'option-t/plain_result';
-import { createOk, createErr, isErr } from 'option-t/plain_result';
+import { createOk, createErr } from 'option-t/plain_result';
 import { z } from 'zod';
+
+/**
+ * 指定された秒数だけ待機するPromise
+ *
+ * WHY: Rate limit時に retry-after 秒数だけ待機する
+ */
+const sleep = (seconds: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+};
+
+/**
+ * 待機終了時刻を計算してフォーマット
+ *
+ * @param seconds 待機秒数
+ * @returns ISO 8601形式の時刻文字列
+ */
+const formatWaitUntilTime = (seconds: number): string => {
+  const waitUntil = new Date(Date.now() + seconds * 1000);
+  return waitUntil.toISOString();
+};
+
+const getErrorCause = (err: unknown): unknown => {
+  if (err && typeof err === 'object' && 'cause' in err) {
+    const cause = (err as { cause?: unknown }).cause;
+    return cause ?? err;
+  }
+  return err;
+};
+
+/**
+ * Rate Limit エラーかどうかを判定
+ */
+const isRateLimited = (err: unknown): boolean => {
+  const target = getErrorCause(err);
+
+  // RateLimitError インスタンスチェック（最優先）
+  if (target && typeof target === 'object' && target.constructor?.name === 'RateLimitError') {
+    return true;
+  }
+
+  const status =
+    (target as any)?.status ??
+    (target as any)?.statusCode ??
+    (target as any)?.response?.status ??
+    (target as any)?.response?.statusCode;
+  if (status === 429) {
+    return true;
+  }
+
+  if ((target as any)?.error?.type === 'rate_limit_error') {
+    return true;
+  }
+  if ((target as any)?.type === 'rate_limit_error') {
+    return true;
+  }
+
+  return false;
+};
+
+/**
+ * retry-after ヘッダから待機秒数を取得
+ */
+const getRetryAfterSeconds = (err: unknown): number | undefined => {
+  const target = getErrorCause(err) as any;
+  const h = target?.headers ?? target?.response?.headers;
+  const v =
+    typeof h?.get === 'function'
+      ? h.get('retry-after')
+      : typeof h === 'object' && h
+        ? (h['retry-after'] ?? h['Retry-After'])
+        : undefined;
+
+  if (v == null) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
 
 /**
  * Judge依存関係
@@ -125,10 +201,16 @@ const parseJudgementResult = (output: string): z.infer<typeof AgentJudgementSche
       return result.data;
     }
 
-    console.error('❌ Agent judgement validation failed:', result.error.format());
+    console.error(
+      '❌ Agent judgement validation failed:',
+      JSON.stringify(result.error.format()),
+    );
     return undefined;
   } catch (error) {
-    console.error('❌ Failed to parse agent judgement:', error);
+    console.error(
+      '❌ Failed to parse agent judgement:',
+      error instanceof Error ? error.message : String(error),
+    );
     console.error('Output was:', output);
     return undefined;
   }
@@ -189,44 +271,65 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
     // エージェントに判定を依頼
     const judgementPrompt = buildJudgementPrompt(task, runLog);
 
-    const agentResult =
-      deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(judgementPrompt, deps.appRepoPath, deps.model)
-        : await deps.runnerEffects.runCodexAgent(judgementPrompt, deps.appRepoPath, deps.model);
+    const attemptLimit = deps.judgeTaskRetries;
+    let lastError: unknown;
 
-    if (isErr(agentResult)) {
-      console.warn(`⚠️  Judge agent execution failed: ${agentResult.err.message}`);
-      // エージェント失敗時は簡易判定にフォールバック
-      return createOk({
-        taskId: tid,
-        success: true,
-        shouldContinue: false,
-        reason: 'Task completed (judge agent failed - fallback to simple judgement)',
-      });
+    for (let attempt = 1; attempt <= attemptLimit; attempt++) {
+      const agentResult =
+        deps.agentType === 'claude'
+          ? await deps.runnerEffects.runClaudeAgent(judgementPrompt, deps.appRepoPath, deps.model)
+          : await deps.runnerEffects.runCodexAgent(judgementPrompt, deps.appRepoPath, deps.model);
+
+      if (agentResult.ok) {
+        const parsedJudgement = parseJudgementResult(agentResult.val.finalResponse ?? '');
+        if (!parsedJudgement) {
+          return createErr(validationError('Failed to parse judge response'));
+        }
+
+        return createOk({
+          taskId: tid,
+          success: parsedJudgement.success,
+          shouldContinue: parsedJudgement.shouldContinue,
+          reason: parsedJudgement.reason,
+          missingRequirements: parsedJudgement.missingRequirements,
+        });
+      }
+
+      lastError = agentResult.err;
+
+      if (isRateLimited(agentResult.err)) {
+        const retryAfter = getRetryAfterSeconds(agentResult.err);
+
+        if (attempt >= attemptLimit) {
+          const errorMessage = retryAfter
+            ? `Rate limit exceeded. Retry after ${retryAfter} seconds.`
+            : 'Rate limit exceeded.';
+          return createErr(validationError(`Judge agent rate limited: ${errorMessage}`));
+        }
+
+        const waitSeconds = retryAfter ?? 60;
+        const waitUntil = formatWaitUntilTime(waitSeconds);
+        console.log(
+          `  ⏱️  Judge rate limit exceeded. Waiting until ${waitUntil} (${waitSeconds} seconds)...`,
+        );
+        console.log(`     Attempt ${attempt}/${attemptLimit}`);
+        await sleep(waitSeconds);
+        console.log(`  🔄 Retrying judge... (attempt ${attempt + 1}/${attemptLimit})`);
+        continue;
+      }
+
+      const errorMessage =
+        agentResult.err && typeof agentResult.err === 'object' && 'message' in agentResult.err
+          ? String((agentResult.err as { message?: unknown }).message)
+          : String(agentResult.err);
+      return createErr(validationError(`Judge agent execution failed: ${errorMessage}`));
     }
 
-    // エージェント応答をパース
-    const parsedJudgement = parseJudgementResult(agentResult.val.finalResponse ?? '');
-
-    if (!parsedJudgement) {
-      console.warn('⚠️  Failed to parse judge agent response - using fallback judgement');
-      // パース失敗時は簡易判定にフォールバック
-      return createOk({
-        taskId: tid,
-        success: true,
-        shouldContinue: false,
-        reason: 'Task completed (failed to parse judge response - fallback to simple judgement)',
-      });
-    }
-
-    // 判定結果を返す
-    return createOk({
-      taskId: tid,
-      success: parsedJudgement.success,
-      shouldContinue: parsedJudgement.shouldContinue,
-      reason: parsedJudgement.reason,
-      missingRequirements: parsedJudgement.missingRequirements,
-    });
+    const fallbackMessage =
+      lastError && typeof lastError === 'object' && 'message' in lastError
+        ? String((lastError as { message?: unknown }).message)
+        : 'Unknown error';
+    return createErr(validationError(`Judge agent execution failed: ${fallbackMessage}`));
   };
 
   /**
