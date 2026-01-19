@@ -569,7 +569,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     // sessionEffectsが提供されていない場合はエラー
     if (!deps.sessionEffects) {
       return createErr(
-        ioError('planAdditionalTasks', 'Session management is not enabled (sessionEffects not provided)'),
+        ioError(
+          'planAdditionalTasks',
+          'Session management is not enabled (sessionEffects not provided)',
+        ),
       );
     }
 
@@ -577,7 +580,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const loadResult = await deps.sessionEffects.loadSession(sessionId);
     if (isErr(loadResult)) {
       return createErr(
-        ioError('planAdditionalTasks.loadSession', `Failed to load session: ${loadResult.err.message}`),
+        ioError(
+          'planAdditionalTasks.loadSession',
+          `Failed to load session: ${loadResult.err.message}`,
+        ),
       );
     }
 
@@ -765,12 +771,20 @@ Output only the JSON array, no additional text.`;
       }
     }
 
+    if (errors.length > 0) {
+      await appendPlanningLog(`\n⚠️  Some tasks failed to create:\n`);
+      for (const error of errors) {
+        await appendPlanningLog(`  - ${error}\n`);
+      }
+    }
+
     const completedRun =
       taskIds.length > 0
         ? {
             ...planningRun,
             status: RunStatus.SUCCESS,
             finishedAt: new Date().toISOString(),
+            errorMessage: errors.length > 0 ? `Partial success: ${errors.join(', ')}` : null,
           }
         : {
             ...planningRun,
@@ -805,7 +819,9 @@ Output only the JSON array, no additional text.`;
 
     // 一部でもタスク作成に成功していれば成功とみなす
     if (taskIds.length === 0) {
-      return createErr(ioError('planAdditionalTasks', `Failed to create any tasks: ${errors.join(', ')}`));
+      return createErr(
+        ioError('planAdditionalTasks', `Failed to create any tasks: ${errors.join(', ')}`),
+      );
     }
 
     return createOk({

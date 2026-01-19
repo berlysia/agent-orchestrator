@@ -192,11 +192,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const agentPrompt = `Execute task: ${task.acceptance}`;
     const agentResult =
       deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(
-            agentPrompt,
-            worktreePath as string,
-            deps.model!,
-          )
+        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!)
         : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
 
     // 6. 結果をログに記録
@@ -226,7 +222,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 7. 成功時の処理
     const output = agentResult.val;
-    const rateLimitReason = detectRateLimitReason(output.finalResponse ?? "");
+    const rateLimitReason = detectRateLimitReason(output.finalResponse ?? '');
     if (rateLimitReason) {
       const errorMsg = `Rate limit detected (${rateLimitReason})`;
       await deps.runnerEffects.appendLog(
@@ -404,11 +400,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     const agentResult =
       deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(
-            agentPrompt,
-            worktreePath as string,
-            deps.model!,
-          )
+        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!)
         : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
 
     // 6. 結果をログに記録

@@ -163,7 +163,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         if (deps.length === 0) {
           console.log(`  ${String(task.id)}: no dependencies`);
         } else {
-          console.log(`  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`);
+          console.log(
+            `  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`,
+          );
         }
       }
 
@@ -204,14 +206,15 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       // 6. 直列チェーンを除外して実行レベルを計算
       const parallelTasks = tasks.filter((task) => !serialTaskIds.has(task.id));
-      const parallelGraph =
-        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+      const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
       const { levels, unschedulable } = parallelGraph
         ? computeExecutionLevels(parallelGraph)
         : { levels: [], unschedulable: [] };
 
       if (unschedulable.length > 0) {
-        console.warn(`⚠️  Unschedulable tasks: ${unschedulable.map((id) => String(id)).join(', ')}`);
+        console.warn(
+          `⚠️  Unschedulable tasks: ${unschedulable.map((id) => String(id)).join(', ')}`,
+        );
         for (const tid of unschedulable) {
           await schedulerOps.blockTask(tid);
           failedTaskIds.push(String(tid));
@@ -322,15 +325,10 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           const currentBranchResult = await deps.gitEffects.getCurrentBranch(
             repoPath(deps.config.appRepoPath),
           );
-          const baseBranch = currentBranchResult.ok
-            ? currentBranchResult.val
-            : branchName('main');
+          const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
 
           // タスクを統合
-          const integrationResult = await integrationOps.integrateTasks(
-            completedTasks,
-            baseBranch,
-          );
+          const integrationResult = await integrationOps.integrateTasks(completedTasks, baseBranch);
 
           if (integrationResult.ok) {
             const result = integrationResult.val;
@@ -352,9 +350,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
                   console.log(`     ${finalResult.val.mergeCommand}`);
                 }
               } else {
-                console.warn(
-                  `  ⚠️  Failed to finalize integration: ${finalResult.err.message}`,
-                );
+                console.warn(`  ⚠️  Failed to finalize integration: ${finalResult.err.message}`);
               }
             } else {
               console.log(`  ⚠️  Integration completed with conflicts`);
