@@ -378,8 +378,56 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           if (integrationResult.ok) {
             const result = integrationResult.val;
+
+            // WHY: 統合処理の透明性を高めるため、成功/失敗に関わらず詳細なログを出力
+            console.log(`\n  📊 Integration results:`);
+            console.log(`    Integration branch: ${result.integrationBranch}`);
+            console.log(`    Base branch: ${baseBranch}`);
+            console.log(
+              `    Successfully integrated: ${result.integratedTaskIds.length} tasks`,
+            );
+            console.log(`    Failed to integrate: ${result.conflictedTaskIds.length} tasks`);
+
+            // 各タスクのマージ結果を詳細表示
+            if (result.mergeDetails && result.mergeDetails.length > 0) {
+              console.log(`\n    Detailed merge results:`);
+              for (const detail of result.mergeDetails) {
+                const taskShortId = detail.taskId.substring(0, 16);
+                if (detail.result.success) {
+                  // 成功時
+                  console.log(`      ✅ ${taskShortId}: merged successfully`);
+                  console.log(`         Source: ${detail.sourceBranch}`);
+                  if (detail.result.mergedFiles && detail.result.mergedFiles.length > 0) {
+                    console.log(`         Files: ${detail.result.mergedFiles.length} files merged`);
+                  }
+                } else {
+                  // 失敗時
+                  const statusText = detail.result.status || 'unknown';
+                  console.log(`      ❌ ${taskShortId}: ${statusText}`);
+                  console.log(`         Source: ${detail.sourceBranch}`);
+
+                  if (detail.result.hasConflicts && detail.result.conflicts) {
+                    console.log(`         Conflicts in ${detail.result.conflicts.length} files:`);
+                    detail.result.conflicts.slice(0, 3).forEach((conflict) => {
+                      console.log(`           - ${conflict.filePath}`);
+                    });
+                    if (detail.result.conflicts.length > 3) {
+                      console.log(
+                        `           ... and ${detail.result.conflicts.length - 3} more`,
+                      );
+                    }
+                  } else if (statusText === 'failed') {
+                    console.log(
+                      `         Reason: Merge failed (possibly branch not found or git error)`,
+                    );
+                  }
+                }
+              }
+            }
+
             if (result.success) {
-              console.log(`  ✅ Successfully integrated ${result.integratedTaskIds.length} tasks`);
+              // 全タスク統合成功
+              console.log(`\n  ✅ All tasks integrated successfully`);
 
               // 統合ブランチの取り込み方法を提示（設定に基づく）
               const finalResult = await integrationOps.finalizeIntegration(
@@ -399,33 +447,14 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
                 console.warn(`  ⚠️  Failed to finalize integration: ${finalResult.err.message}`);
               }
             } else {
-              console.log(`  ⚠️  Integration completed with conflicts`);
-              console.log(`    Integrated: ${result.integratedTaskIds.length} tasks`);
-              console.log(`    Conflicted: ${result.conflictedTaskIds.length} tasks`);
-
-              // WHY: デバッグのため、各タスクのマージ結果を詳細表示
-              if (result.mergeDetails && result.mergeDetails.length > 0) {
-                console.log(`\n    Merge details:`);
-                for (const detail of result.mergeDetails) {
-                  const status = detail.result.success ? '✅' : '❌';
-                  const statusText = detail.result.status || 'unknown';
-                  console.log(
-                    `      ${status} ${detail.taskId}: ${statusText} (${detail.sourceBranch})`,
-                  );
-                  if (!detail.result.success && detail.result.hasConflicts) {
-                    console.log(
-                      `         Conflicts in ${detail.result.conflicts?.length || 0} files`,
-                    );
-                  }
-                }
-              }
-
+              // 一部統合失敗
+              console.log(`\n  ⚠️  Integration completed with ${result.conflictedTaskIds.length} failures`);
               if (result.conflictResolutionTaskId) {
-                console.log(`\n    Resolution task: ${result.conflictResolutionTaskId}`);
+                console.log(`  📝 Conflict resolution task created: ${result.conflictResolutionTaskId}`);
               }
             }
           } else {
-            console.warn(`  ⚠️  Integration failed: ${integrationResult.err.message}`);
+            console.error(`  ❌ Integration failed: ${integrationResult.err.message}`);
           }
         }
       }
