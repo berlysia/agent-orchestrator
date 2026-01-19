@@ -107,6 +107,11 @@ export const ConfigSchema = z.object({
 export type Config = z.infer<typeof ConfigSchema>;
 
 /**
+ * エージェントタイプ
+ */
+export type AgentType = 'claude' | 'codex';
+
+/**
  * デフォルトConfig生成ヘルパー
  */
 export function createDefaultConfig(params: {

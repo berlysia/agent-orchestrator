@@ -88,7 +88,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     model: getModel(deps.config, 'worker'),
   };
   const workerOps = createWorkerOperations(workerDeps);
-  const judgeOps = createJudgeOperations({ taskStore: deps.taskStore });
+  const judgeOps = createJudgeOperations({
+    taskStore: deps.taskStore,
+    runnerEffects: deps.runnerEffects,
+    appRepoPath: deps.config.appRepoPath,
+    agentType: getAgentType(deps.config, 'judge'),
+    model: getModel(deps.config, 'judge') ?? 'claude-haiku-4-5',
+  });
   const integrationOps = createIntegrationOperations({
     taskStore: deps.taskStore,
     gitEffects: deps.gitEffects,
