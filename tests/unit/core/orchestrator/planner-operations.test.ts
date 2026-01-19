@@ -56,6 +56,12 @@ describe('Planner Operations', () => {
       assert(prompt.includes('between 0.5 and 2'));
       assert(prompt.includes('MUST NOT exceed 2 hours'));
     });
+
+    it('should respect custom maxTasks', () => {
+      const prompt = buildPlanningPrompt('test', 4, 10);
+
+      assert(prompt.includes('Create 1-10 tasks'));
+    });
   });
 
   describe('parseAgentOutput', () => {

@@ -29,6 +29,7 @@ export interface PlannerDeps {
   readonly qualityThreshold?: number;
   readonly strictContextValidation?: boolean;
   readonly maxTaskDuration?: number;
+  readonly maxTasks?: number;
 }
 
 /**
@@ -279,9 +280,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
       // 1. Plannerプロンプトを構築
       const maxTaskDuration = deps.maxTaskDuration ?? 4;
+      const maxTasks = deps.maxTasks ?? 5;
       const planningPrompt = accumulatedFeedback
-        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback, maxTaskDuration)
-        : buildPlanningPrompt(userInstruction, maxTaskDuration);
+        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback, maxTaskDuration, maxTasks)
+        : buildPlanningPrompt(userInstruction, maxTaskDuration, maxTasks);
 
       // ログには省略版を書く（重複を避けるため）
       const promptForLog = accumulatedFeedback
@@ -977,6 +979,7 @@ export type PlannerOperations = ReturnType<typeof createPlannerOperations>;
 export const buildPlanningPrompt = (
   userInstruction: string,
   maxTaskDuration: number = 4,
+  maxTasks: number = 5,
 ): string => {
   return `You are a task planner for a multi-agent development system.
 
@@ -1056,7 +1059,7 @@ Output format (JSON array):
 ]
 
 Rules:
-- Create 1-5 tasks (prefer smaller, focused tasks)
+- Create 1-${maxTasks} tasks (prefer smaller, focused tasks)
 - Each task must have a unique ID (task-1, task-2, etc.)
 - Each task should be independently implementable (or list its dependencies)
 - Branch names must be valid Git branch names (lowercase, hyphens for spaces)
@@ -1211,8 +1214,9 @@ export const buildPlanningPromptWithFeedback = (
   userInstruction: string,
   feedback: string,
   maxTaskDuration: number = 4,
+  maxTasks: number = 5,
 ): string => {
-  const basePrompt = buildPlanningPrompt(userInstruction, maxTaskDuration);
+  const basePrompt = buildPlanningPrompt(userInstruction, maxTaskDuration, maxTasks);
 
   return `${basePrompt}
 

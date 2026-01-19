@@ -74,8 +74,15 @@ const PlanningConfigSchema = z
     strictContextValidation: z.boolean().default(false),
     /** タスクあたりの最大見積時間（時間単位）*/
     maxTaskDuration: z.number().min(0.5).max(8).default(4),
+    /** 1回の計画で生成する最大タスク数 */
+    maxTasks: z.number().int().min(1).max(20).default(5),
   })
-  .default({ qualityThreshold: 60, strictContextValidation: false, maxTaskDuration: 4 });
+  .default({
+    qualityThreshold: 60,
+    strictContextValidation: false,
+    maxTaskDuration: 4,
+    maxTasks: 5,
+  });
 
 /**
  * 反復実行回数設定のスキーマ
@@ -185,6 +192,7 @@ export function createDefaultConfig(params: {
       qualityThreshold: 60,
       strictContextValidation: false,
       maxTaskDuration: 4,
+      maxTasks: 5,
     },
     iterations: {
       plannerQualityRetries: 5,
