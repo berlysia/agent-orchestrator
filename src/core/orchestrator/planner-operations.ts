@@ -156,6 +156,51 @@ export const TaskBreakdownSchema = z.object({
 export type TaskBreakdown = z.infer<typeof TaskBreakdownSchema>;
 
 /**
+ * プランナーセッションIDから短縮版を抽出
+ *
+ * WHY: タスクIDを一意にするため、セッションIDの一部を使用
+ *
+ * @param runId プランナー実行ID（"planner-xxx" または "planner-additional-xxx"）
+ * @returns 短縮版ID（8文字）
+ */
+const extractSessionShort = (runId: string): string => {
+  // "planner-" の後の8文字、または "planner-additional-" の後の8文字を取得
+  if (runId.startsWith('planner-additional-')) {
+    return runId.substring(19, 27);
+  }
+  return runId.substring(8, 16);
+};
+
+/**
+ * 生のタスクIDから一意のタスクIDを生成
+ *
+ * WHY: 異なるセッションで同じタスクID（task-1, task-2など）が生成されても衝突しないよう、
+ *      セッションIDを含めて一意にする
+ *
+ * @param rawId 生のタスクID（"task-1"など）
+ * @param sessionShort セッション短縮ID
+ * @returns 一意のタスクID（"task-7682b3a8-1"など）
+ */
+const makeUniqueTaskId = (rawId: string, sessionShort: string): string => {
+  const baseId = rawId.replace(/^task-/, '');
+  return `task-${sessionShort}-${baseId}`;
+};
+
+/**
+ * ブランチ名にタスクIDを付加して衝突を回避
+ *
+ * WHY: 異なるセッションで同じブランチ名が生成される可能性があり、
+ *      既存ブランチとの衝突を避けるためタスクIDを含める
+ *
+ * @param originalBranch 元のブランチ名（"feature/auth"など）
+ * @param taskIdStr タスクID（"task-7682b3a8-1"など）
+ * @returns タスクIDを含むブランチ名（"feature/auth-task-7682b3a8-1"など）
+ */
+const makeBranchNameWithTaskId = (originalBranch: string, taskIdStr: string): string => {
+  return `${originalBranch}-${taskIdStr}`;
+};
+
+/**
  * Planner操作を提供するファクトリ関数
  *
  * @param deps Planner依存関係
@@ -512,24 +557,20 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const errors: string[] = [];
 
     // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
-    const sessionShort = plannerRunId.substring(8, 16); // "planner-" の後の8文字
-    const makeUniqueTaskId = (rawId: string): string => {
-      const baseId = rawId.replace(/^task-/, '');
-      return `task-${sessionShort}-${baseId}`;
-    };
+    const sessionShort = extractSessionShort(plannerRunId);
 
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
-      const uniqueTaskId = makeUniqueTaskId(rawTaskId);
+      const uniqueTaskId = makeUniqueTaskId(rawTaskId, sessionShort);
       const task = createInitialTask({
         id: taskId(uniqueTaskId),
         repo: repoPath(deps.appRepoPath),
-        branch: branchName(breakdown.branch),
+        branch: branchName(makeBranchNameWithTaskId(breakdown.branch, uniqueTaskId)),
         scopePaths: breakdown.scopePaths,
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId))),
+        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId, sessionShort))),
         plannerRunId: plannerRunId,
         plannerLogPath: plannerLogPath,
         plannerMetadataPath: plannerMetadataPath,
@@ -853,24 +894,20 @@ Output only the JSON array, no additional text.`;
     const errors: string[] = [];
 
     // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
-    const sessionShort = additionalRunId.substring(18, 26); // "planner-additional-" の後の8文字
-    const makeUniqueTaskId = (rawId: string): string => {
-      const baseId = rawId.replace(/^task-/, '');
-      return `task-${sessionShort}-${baseId}`;
-    };
+    const sessionShort = extractSessionShort(additionalRunId);
 
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
-      const uniqueTaskId = makeUniqueTaskId(rawTaskId);
+      const uniqueTaskId = makeUniqueTaskId(rawTaskId, sessionShort);
       const task = createInitialTask({
         id: taskId(uniqueTaskId),
         repo: repoPath(deps.appRepoPath),
-        branch: branchName(breakdown.branch),
+        branch: branchName(makeBranchNameWithTaskId(breakdown.branch, uniqueTaskId)),
         scopePaths: breakdown.scopePaths,
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId))),
+        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId, sessionShort))),
         plannerRunId: additionalRunId,
         plannerLogPath: additionalPlannerLogPath,
         plannerMetadataPath: additionalPlannerMetadataPath,
