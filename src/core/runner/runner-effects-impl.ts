@@ -21,13 +21,39 @@ export interface RunnerEffectsOptions {
   coordRepoPath: string;
   /** タイムアウト（ミリ秒）。0でタイムアウトなし */
   timeout?: number;
+  /** Rate limit時の最大リトライ回数（デフォルト: 3） */
+  maxRetries?: number;
+  /** Rate limit自動リトライを有効にするか（デフォルト: true） */
+  enableRateLimitRetry?: boolean;
 }
+
+/**
+ * 指定された秒数だけ待機するPromise
+ *
+ * WHY: Rate limit時に retry-after 秒数だけ待機する
+ */
+const sleep = (seconds: number): Promise<void> => {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+};
+
+/**
+ * 待機終了時刻を計算してフォーマット
+ *
+ * @param seconds 待機秒数
+ * @returns ISO 8601形式の時刻文字列
+ */
+const formatWaitUntilTime = (seconds: number): string => {
+  const waitUntil = new Date(Date.now() + seconds * 1000);
+  return waitUntil.toISOString();
+};
 
 /**
  * RunnerEffects 実装を生成するファクトリ関数
  */
 export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffects => {
   const runsDir = path.join(options.coordRepoPath, 'runs');
+  const maxRetries = options.maxRetries ?? 3;
+  const enableRateLimitRetry = options.enableRateLimitRetry ?? true;
 
   // ===== ヘルパー関数 =====
 
@@ -187,66 +213,98 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
    * ClaudeRunner の実装を関数型に移植。
    * unstable_v2_prompt を使用してエージェントを実行する。
    *
-   * WHY: query() の AsyncGenerator では：
-   * - (1) ストリーム中に例外として投げられる
-   * - (2) 最終 result メッセージが success 以外になる
-   * のどちらかで握る必要がある
+   * WHY: Rate limit エラー時は retry-after 秒数だけ待機して自動リトライする
    */
   const runClaudeAgent = async (
     prompt: string,
     workingDirectory: string,
     model: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
-    const result = await tryCatchIntoResultAsync(async () => {
-      // Claude Agent SDK をインポート
-      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+    let lastError: unknown;
+    const attemptLimit = enableRateLimitRetry ? maxRetries : 1;
 
-      // Claude Agent実行
-      // WHY: Workerエージェントは自動実行されるため、パーミッション要求をバイパス
-      const responseStream = query({
-        prompt,
-        options: {
-          model: model || 'claude-sonnet-4-5-20250929',
-          cwd: workingDirectory,
-          permissionMode: 'bypassPermissions',
-        },
-      });
+    for (let attempt = 1; attempt <= attemptLimit; attempt++) {
+      const result = await tryCatchIntoResultAsync(async () => {
+        // Claude Agent SDK をインポート
+        const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
-      // ストリームからresultメッセージを収集
-      // WHY: subtype が success 以外の場合もあるため、明示的にチェック
-      // 参考: https://github.com/anthropics/claude-code/issues/6408
-      let finalResult = '';
-      for await (const message of responseStream) {
-        if (message.type === 'result') {
-          if (message.subtype === 'success') {
-            finalResult = message.result;
-            break;
-          } else {
-            // success以外（error等）の場合はエラーとして扱う
-            throw new Error(
-              `Agent execution failed: result.subtype = ${message.subtype}, message = ${JSON.stringify(message)}`,
-            );
+        // Claude Agent実行
+        // WHY: Workerエージェントは自動実行されるため、パーミッション要求をバイパス
+        const responseStream = query({
+          prompt,
+          options: {
+            model: model || 'claude-sonnet-4-5-20250929',
+            cwd: workingDirectory,
+            permissionMode: 'bypassPermissions',
+          },
+        });
+
+        // ストリームからresultメッセージを収集
+        // WHY: subtype が success 以外の場合もあるため、明示的にチェック
+        // 参考: https://github.com/anthropics/claude-code/issues/6408
+        let finalResult = '';
+        for await (const message of responseStream) {
+          if (message.type === 'result') {
+            if (message.subtype === 'success') {
+              finalResult = message.result;
+              break;
+            } else {
+              // success以外（error等）の場合はエラーとして扱う
+              throw new Error(
+                `Agent execution failed: result.subtype = ${message.subtype}, message = ${JSON.stringify(message)}`,
+              );
+            }
           }
         }
+
+        // AgentOutput形式に変換
+        return {
+          finalResponse: finalResult,
+        } satisfies AgentOutput;
+      });
+
+      // 成功した場合は即座に返す
+      if (result.ok) {
+        if (attempt > 1) {
+          console.log(`  ✅ Retry successful (attempt ${attempt}/${attemptLimit})`);
+        }
+        return result;
       }
 
-      // AgentOutput形式に変換
-      return {
-        finalResponse: finalResult,
-      } satisfies AgentOutput;
-    });
+      lastError = result.err;
 
-    // Rate Limit エラーの特別処理
-    if (!result.ok && isRateLimited(result.err)) {
-      const retryAfter = getRetryAfterSeconds(result.err);
-      const errorMessage = retryAfter
-        ? `Rate limit exceeded. Retry after ${retryAfter} seconds.`
-        : 'Rate limit exceeded.';
+      // Rate Limit エラーの場合
+      if (isRateLimited(result.err)) {
+        const retryAfter = getRetryAfterSeconds(result.err);
 
-      return createErr(agentExecutionError('claude', new Error(errorMessage)));
+        // リトライが無効、または最後の試行の場合はエラーを返す
+        if (!enableRateLimitRetry || attempt >= attemptLimit) {
+          const errorMessage = retryAfter
+            ? `Rate limit exceeded. Retry after ${retryAfter} seconds.`
+            : 'Rate limit exceeded.';
+          return createErr(agentExecutionError('claude', new Error(errorMessage)));
+        }
+
+        // リトライ可能な場合は待機してリトライ
+        const waitSeconds = retryAfter ?? 60; // デフォルト60秒
+        const waitUntil = formatWaitUntilTime(waitSeconds);
+
+        console.log(
+          `  ⏱️  Rate limit exceeded. Waiting until ${waitUntil} (${waitSeconds} seconds)...`,
+        );
+        console.log(`     Attempt ${attempt}/${attemptLimit}`);
+
+        await sleep(waitSeconds);
+        console.log(`  🔄 Retrying... (attempt ${attempt + 1}/${attemptLimit})`);
+        continue;
+      }
+
+      // Rate Limit以外のエラーは即座に返す
+      return createErr(agentExecutionError('claude', result.err));
     }
 
-    return mapErrForResult(result, (e) => agentExecutionError('claude', e));
+    // すべてのリトライが失敗した場合
+    return createErr(agentExecutionError('claude', lastError));
   };
 
   /**
