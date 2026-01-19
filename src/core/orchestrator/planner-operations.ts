@@ -1011,13 +1011,15 @@ For each task, provide:
    - List ALL required package installations (e.g., "Install: pnpm add option-t @octokit/rest")
    - Provide CODE EXAMPLES for complex patterns (inline TypeScript/JavaScript snippets)
    - Specify EXACT import statements and module paths
+   - IMPORTANT: DO NOT use markdown code blocks (backticks) inside the context field. Use plain text with line breaks (\\n) instead.
+   - Format code examples as plain text with clear labels (e.g., "Code example: const token = jwt.sign(...)")
 
    Include the following:
    - Technical approach: Specific libraries, patterns, or techniques to use
    - Package dependencies: Exact package names and installation commands
    - Constraints: Technical limitations, compatibility requirements, performance targets
    - Existing patterns: Reference similar implementations with EXACT file paths and line numbers
-   - Code examples: Inline code snippets for complex logic or patterns
+   - Code examples: Inline code snippets for complex logic or patterns (NO backticks, use plain text)
    - Data models: Complete type definitions, schema definitions with examples
    - Error handling: How to handle failures and edge cases with code examples
    - Security: Authentication, authorization, validation requirements
@@ -1084,7 +1086,15 @@ Example:
   }
 ]
 
-Output only the JSON array, no additional text.`;
+Output only the JSON array, no additional text.
+
+CRITICAL JSON FORMATTING RULES:
+- The context field is a JSON string and must NOT contain unescaped quotes, newlines, or backticks
+- DO NOT use markdown code blocks (\`\`\`) inside the context field
+- Use \\\\n for line breaks within the context string
+- Escape all special characters properly (quotes as \\\\", backslashes as \\\\\\\\)
+- Keep code examples as plain text within the string (e.g., "Code: const x = 1;")
+- If you need to show multiple lines of code, separate them with \\\\n (e.g., "Line 1\\\\nLine 2\\\\nLine 3")`;
 };
 
 /**
