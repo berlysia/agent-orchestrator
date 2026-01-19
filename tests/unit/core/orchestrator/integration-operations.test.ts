@@ -86,7 +86,7 @@ describe('Integration Operations', () => {
 
       // createBranch, switchBranch, mergeが呼ばれたことを確認
       assert.strictEqual(mockGitEffects.createBranch.mock.calls.length, 1);
-      assert.strictEqual(mockGitEffects.switchBranch.mock.calls.length, 1);
+      assert.strictEqual(mockGitEffects.switchBranch.mock.calls.length, 2);
       assert.strictEqual(mockGitEffects.merge.mock.calls.length, 2);
     });
 
