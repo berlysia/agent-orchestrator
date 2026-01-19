@@ -5,13 +5,14 @@ import { createInitCommand } from './commands/init.ts';
 import { createRunCommand } from './commands/run.ts';
 import { createStatusCommand } from './commands/status.ts';
 import { createStopCommand } from './commands/stop.ts';
+import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
 
 program
   .name('agent')
   .description('Multi-agent collaborative development orchestrator')
-  .version('0.1.0');
+  .version(getVersion());
 
 // Register subcommands
 program.addCommand(createInitCommand());

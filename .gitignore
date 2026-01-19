@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Build temporary files
+*.original
+
 # Temporary files
 .tmp/
 *.log

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsgo --noEmit",
-    "compile": "rm -rf dist && tsgo && chmod +x dist/cli/index.js && pnpm generate:schema",
+    "compile": "rm -rf dist && pnpm generate:version && tsgo && chmod +x dist/cli/index.js && pnpm generate:schema && pnpm restore:version",
     "test": "node --test tests/unit/**/*.test.ts",
     "test:e2e": "node --test tests/e2e/**/*.test.ts",
     "test:all": "node --test tests/**/*.test.ts",
@@ -17,7 +17,9 @@
     "lint": "oxlint src/",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "generate:schema": "node scripts/generate-config-schema.ts"
+    "generate:schema": "node scripts/generate-config-schema.ts",
+    "generate:version": "node scripts/generate-version.ts",
+    "restore:version": "node scripts/restore-version.ts"
   },
   "keywords": [
     "agent",
