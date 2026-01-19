@@ -208,17 +208,79 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   };
 
   /**
+   * ストリームメッセージをログフォーマットに変換
+   *
+   * WHY: Claude Agent SDKのストリームメッセージを読みやすい形式でログに記録する
+   */
+  const formatClaudeStreamMessage = (message: any): string => {
+    const timestamp = new Date().toISOString();
+
+    // stream_event (thinking, tool use等の詳細)
+    if (message.type === 'stream_event') {
+      const event = message.event;
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        return `[${timestamp}] [OUTPUT] ${event.delta.text}`;
+      }
+      if (event.type === 'content_block_start') {
+        const block = event.content_block;
+        if (block?.type === 'thinking') {
+          return `[${timestamp}] [THINKING] Start`;
+        }
+        if (block?.type === 'tool_use') {
+          return `[${timestamp}] [TOOL_USE] ${block.name} (id: ${block.id})`;
+        }
+      }
+      // その他のstream_eventは簡潔に記録
+      return `[${timestamp}] [STREAM_EVENT] ${event.type}`;
+    }
+
+    // assistant メッセージ (完了したメッセージ)
+    if (message.type === 'assistant') {
+      return `[${timestamp}] [ASSISTANT_MESSAGE] Completed (role: ${message.message?.role})`;
+    }
+
+    // system メッセージ (初期化、ステータス等)
+    if (message.type === 'system') {
+      if (message.subtype === 'init') {
+        return `[${timestamp}] [SYSTEM_INIT] Model: ${message.model}, Tools: ${message.tools?.length ?? 0}`;
+      }
+      if (message.subtype === 'status') {
+        return `[${timestamp}] [STATUS] ${message.status}`;
+      }
+      if (message.subtype === 'compact_boundary') {
+        return `[${timestamp}] [COMPACT_BOUNDARY] Conversation compacted`;
+      }
+      return `[${timestamp}] [SYSTEM] ${message.subtype ?? 'unknown'}`;
+    }
+
+    // result メッセージ (最終結果)
+    if (message.type === 'result') {
+      if (message.subtype === 'success') {
+        return `[${timestamp}] [RESULT_SUCCESS] Turns: ${message.num_turns}, Duration: ${message.duration_ms}ms`;
+      }
+      if (message.subtype === 'error') {
+        return `[${timestamp}] [RESULT_ERROR] ${message.error ?? 'Unknown error'}`;
+      }
+    }
+
+    // その他のメッセージタイプ
+    return `[${timestamp}] [${message.type?.toUpperCase() ?? 'UNKNOWN'}] ${JSON.stringify(message).substring(0, 100)}`;
+  };
+
+  /**
    * Claude エージェントを実行
    *
    * ClaudeRunner の実装を関数型に移植。
    * unstable_v2_prompt を使用してエージェントを実行する。
    *
    * WHY: Rate limit エラー時は retry-after 秒数だけ待機して自動リトライする
+   * WHY: ストリームの全メッセージをログに記録し、実行過程を可視化する
    */
   const runClaudeAgent = async (
     prompt: string,
     workingDirectory: string,
     model: string,
+    runId?: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     let lastError: unknown;
     const attemptLimit = enableRateLimitRetry ? maxRetries : 1;
@@ -239,11 +301,17 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
           },
         });
 
-        // ストリームからresultメッセージを収集
-        // WHY: subtype が success 以外の場合もあるため、明示的にチェック
-        // 参考: https://github.com/anthropics/claude-code/issues/6408
+        // ストリームから全メッセージを収集してログに記録
+        // WHY: thinking、tool use、outputなどの途中経過をログに記録して実行過程を可視化
         let finalResult = '';
         for await (const message of responseStream) {
+          // ログに記録（runIdが指定されている場合）
+          if (runId) {
+            const logLine = formatClaudeStreamMessage(message) + '\n';
+            await appendLog(runId, logLine);
+          }
+
+          // result メッセージを処理
           if (message.type === 'result') {
             if (message.subtype === 'success') {
               finalResult = message.result;
@@ -308,15 +376,118 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   };
 
   /**
+   * Codexストリームイベントをログフォーマットに変換
+   *
+   * WHY: Codex SDKのストリームイベントを読みやすい形式でログに記録する
+   */
+  const formatCodexStreamEvent = (event: any): string => {
+    const timestamp = new Date().toISOString();
+
+    switch (event.type) {
+      case 'thread.started':
+        return `[${timestamp}] [THREAD_STARTED] Thread ID: ${event.thread_id}`;
+
+      case 'turn.started':
+        return `[${timestamp}] [TURN_STARTED]`;
+
+      case 'turn.completed':
+        return `[${timestamp}] [TURN_COMPLETED] Input: ${event.usage?.input_tokens ?? 0}, Output: ${event.usage?.output_tokens ?? 0} tokens`;
+
+      case 'turn.failed':
+        return `[${timestamp}] [TURN_FAILED] ${event.error?.message ?? 'Unknown error'}`;
+
+      case 'item.started': {
+        const item = event.item;
+        if (item.type === 'reasoning') {
+          return `[${timestamp}] [REASONING_START]`;
+        }
+        if (item.type === 'agent_message') {
+          return `[${timestamp}] [AGENT_MESSAGE_START]`;
+        }
+        if (item.type === 'command_execution') {
+          return `[${timestamp}] [COMMAND_START] ${item.command}`;
+        }
+        if (item.type === 'file_change') {
+          return `[${timestamp}] [FILE_CHANGE_START] ${item.changes?.length ?? 0} file(s)`;
+        }
+        if (item.type === 'mcp_tool_call') {
+          return `[${timestamp}] [MCP_TOOL_START] ${item.server}::${item.tool}`;
+        }
+        if (item.type === 'web_search') {
+          return `[${timestamp}] [WEB_SEARCH_START] Query: ${item.query}`;
+        }
+        if (item.type === 'todo_list') {
+          return `[${timestamp}] [TODO_LIST_START] ${item.items?.length ?? 0} item(s)`;
+        }
+        return `[${timestamp}] [ITEM_START] ${item.type}`;
+      }
+
+      case 'item.updated': {
+        const item = event.item;
+        if (item.type === 'reasoning') {
+          return `[${timestamp}] [REASONING] ${item.text?.substring(0, 100) ?? ''}`;
+        }
+        if (item.type === 'agent_message') {
+          return `[${timestamp}] [AGENT_MESSAGE] ${item.text?.substring(0, 100) ?? ''}`;
+        }
+        if (item.type === 'command_execution') {
+          return `[${timestamp}] [COMMAND_OUTPUT] ${item.aggregated_output?.substring(0, 100) ?? ''}`;
+        }
+        if (item.type === 'todo_list') {
+          const completed = item.items?.filter((i: any) => i.completed).length ?? 0;
+          const total = item.items?.length ?? 0;
+          return `[${timestamp}] [TODO_LIST_UPDATE] ${completed}/${total} completed`;
+        }
+        return `[${timestamp}] [ITEM_UPDATE] ${item.type}`;
+      }
+
+      case 'item.completed': {
+        const item = event.item;
+        if (item.type === 'reasoning') {
+          return `[${timestamp}] [REASONING_COMPLETE]`;
+        }
+        if (item.type === 'agent_message') {
+          return `[${timestamp}] [AGENT_MESSAGE_COMPLETE]`;
+        }
+        if (item.type === 'command_execution') {
+          return `[${timestamp}] [COMMAND_COMPLETE] Exit code: ${item.exit_code ?? 'N/A'}, Status: ${item.status}`;
+        }
+        if (item.type === 'file_change') {
+          return `[${timestamp}] [FILE_CHANGE_COMPLETE] Status: ${item.status}`;
+        }
+        if (item.type === 'mcp_tool_call') {
+          return `[${timestamp}] [MCP_TOOL_COMPLETE] Status: ${item.status}`;
+        }
+        if (item.type === 'web_search') {
+          return `[${timestamp}] [WEB_SEARCH_COMPLETE]`;
+        }
+        if (item.type === 'todo_list') {
+          return `[${timestamp}] [TODO_LIST_COMPLETE]`;
+        }
+        return `[${timestamp}] [ITEM_COMPLETE] ${item.type}`;
+      }
+
+      case 'error':
+        return `[${timestamp}] [ERROR] ${event.message ?? 'Unknown error'}`;
+
+      default:
+        return `[${timestamp}] [${event.type?.toUpperCase() ?? 'UNKNOWN'}] ${JSON.stringify(event).substring(0, 100)}`;
+    }
+  };
+
+  /**
    * Codex エージェントを実行
    *
    * CodexRunner の実装を関数型に移植。
    * @openai/codex-sdk を使用してエージェントを実行する。
+   *
+   * WHY: runStreamed()を使用してストリームイベントをログに記録し、実行過程を可視化する
    */
   const runCodexAgent = async (
     prompt: string,
     workingDirectory: string,
     model?: string,
+    runId?: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       // Codex SDK をインポート
@@ -329,13 +500,35 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         model,
       });
 
-      // Codex実行
-      const turn = await thread.run(prompt);
+      // Codex実行（ストリーミング）
+      // WHY: runStreamed()を使用して途中経過を取得し、ログに記録する
+      const streamedTurn = await thread.runStreamed(prompt);
+
+      // イベントストリームからログを記録
+      const items: unknown[] = [];
+      let finalResponse = '';
+
+      for await (const event of streamedTurn.events) {
+        // ログに記録（runIdが指定されている場合）
+        if (runId) {
+          const logLine = formatCodexStreamEvent(event) + '\n';
+          await appendLog(runId, logLine);
+        }
+
+        // item.completed イベントから items を収集
+        if (event.type === 'item.completed') {
+          items.push(event.item);
+          // agent_message から finalResponse を取得
+          if (event.item.type === 'agent_message') {
+            finalResponse = event.item.text ?? '';
+          }
+        }
+      }
 
       // AgentOutput形式に変換
       return {
-        finalResponse: turn.finalResponse,
-        items: turn.items,
+        finalResponse,
+        items,
         threadId: thread.id ?? undefined,
       } satisfies AgentOutput;
     });

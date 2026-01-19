@@ -34,12 +34,14 @@ export interface RunnerEffects {
    * @param prompt プロンプト文字列
    * @param workingDirectory 作業ディレクトリ
    * @param model 使用するモデル
+   * @param runId Run ID（ログ記録用、省略可）
    * @returns エージェント出力
    */
   runClaudeAgent(
     prompt: string,
     workingDirectory: string,
     model: string,
+    runId?: string,
   ): Promise<Result<AgentOutput, RunnerError>>;
 
   /**
@@ -47,12 +49,14 @@ export interface RunnerEffects {
    * @param prompt プロンプト文字列
    * @param workingDirectory 作業ディレクトリ
    * @param model 使用するモデル（省略時はCodexのデフォルト）
+   * @param runId Run ID（ログ記録用、省略可）
    * @returns エージェント出力
    */
   runCodexAgent(
     prompt: string,
     workingDirectory: string,
     model?: string,
+    runId?: string,
   ): Promise<Result<AgentOutput, RunnerError>>;
 
   // ===== ログ記録 =====

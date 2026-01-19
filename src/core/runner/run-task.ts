@@ -85,8 +85,8 @@ export const createRunTask = (deps: RunTaskDeps) => {
     await deps.effects.appendLog(rawRunId, `Working Directory: ${workingDirectory}\n`);
     await deps.effects.appendLog(rawRunId, `Prompt: ${prompt}\n\n`);
 
-    // Claude Agent 実行
-    const agentResult = await deps.effects.runClaudeAgent(prompt, workingDirectory, model);
+    // Claude Agent 実行（runIdを渡してストリームログを記録）
+    const agentResult = await deps.effects.runClaudeAgent(prompt, workingDirectory, model, rawRunId);
 
     const duration = Date.now() - startTime;
 
@@ -155,8 +155,8 @@ export const createRunTask = (deps: RunTaskDeps) => {
     await deps.effects.appendLog(rawRunId, `Working Directory: ${workingDirectory}\n`);
     await deps.effects.appendLog(rawRunId, `Prompt: ${prompt}\n\n`);
 
-    // Codex Agent 実行
-    const agentResult = await deps.effects.runCodexAgent(prompt, workingDirectory);
+    // Codex Agent 実行（runIdを渡してストリームログを記録）
+    const agentResult = await deps.effects.runCodexAgent(prompt, workingDirectory, undefined, rawRunId);
 
     const duration = Date.now() - startTime;
 
