@@ -235,7 +235,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       // 6. 直列チェーンを除外して実行レベルを計算
       const parallelTasks = tasks.filter((task) => !serialTaskIds.has(task.id));
-      const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+      const parallelGraph =
+        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
       const { levels, unschedulable } = parallelGraph
         ? computeExecutionLevels(parallelGraph)
         : { levels: [], unschedulable: [] };
@@ -653,7 +654,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       const parallelTasks = allTasks.filter((task) => !serialTaskIds.has(task.id));
-      const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+      const parallelGraph =
+        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
       const { levels } = parallelGraph
         ? computeExecutionLevels(parallelGraph)
         : { levels: [] };
@@ -1012,7 +1014,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
 
         const parallelTasks = tasks.filter((task) => !serialTaskIds.has(String(task.id)));
-        const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+        const parallelGraph =
+          parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
         const { levels } = parallelGraph
           ? computeExecutionLevels(parallelGraph)
           : { levels: [] };

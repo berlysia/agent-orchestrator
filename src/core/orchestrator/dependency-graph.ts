@@ -33,9 +33,13 @@ export interface ExecutionLevels {
  * タスク配列から依存関係グラフを構築
  *
  * @param tasks タスク配列
+ * @param globalTaskIds グローバルなタスクIDセット（部分グラフ構築時に使用）
  * @returns 依存関係グラフ
  */
-export function buildDependencyGraph(tasks: Task[]): DependencyGraph {
+export function buildDependencyGraph(
+  tasks: Task[],
+  globalTaskIds?: Set<TaskId>,
+): DependencyGraph {
   const adjacencyList = new Map<TaskId, TaskId[]>();
   const reverseAdjacencyList = new Map<TaskId, TaskId[]>();
   const allTaskIds = new Set<TaskId>();
@@ -54,6 +58,13 @@ export function buildDependencyGraph(tasks: Task[]): DependencyGraph {
     for (const depId of task.dependencies) {
       // 依存先タスクが存在するか確認
       if (!allTaskIds.has(depId)) {
+        // グローバルタスクセットが提供されている場合、そちらで存在確認
+        if (globalTaskIds && globalTaskIds.has(depId)) {
+          // 依存先はグローバルには存在するが、このサブグラフには含まれていない（例: serial chain）
+          // この場合は警告を出さず、エッジも追加しない（別途実行される）
+          continue;
+        }
+
         missingDependencies.push({ taskId: task.id, missingDepId: depId });
         console.warn(`⚠️  Task ${String(task.id)} depends on non-existent task ${String(depId)}`);
         continue; // 存在しない依存関係はスキップ
