@@ -187,6 +187,16 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const plannerRunId = `planner-${randomUUID()}`;
     const maxRetries = deps.maxQualityRetries ?? 3;
 
+    const appendPlanningLog = async (content: string): Promise<void> => {
+      const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);
+      if (isErr(logResult)) {
+        console.warn(`⚠️  Failed to write planner log: ${logResult.err.message}`);
+      }
+    };
+
+    await appendPlanningLog(`=== Planning Start ===\n`);
+    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
+
     const planningRun = createInitialRun({
       id: runId(plannerRunId),
       taskId: taskId(plannerRunId),
@@ -203,16 +213,6 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     if (isErr(saveRunResult)) {
       return createErr(ioError('planTasks.saveRunMetadata', saveRunResult.err));
     }
-
-    const appendPlanningLog = async (content: string): Promise<void> => {
-      const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);
-      if (isErr(logResult)) {
-        console.warn(`⚠️  Failed to write planner log: ${logResult.err.message}`);
-      }
-    };
-
-    await appendPlanningLog(`=== Planning Start ===\n`);
-    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
 
     // 品質評価ループ
     let taskBreakdowns: TaskBreakdown[] = [];
