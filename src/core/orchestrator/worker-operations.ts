@@ -80,13 +80,23 @@ const detectRateLimitReason = (text: string): string | null => {
 export type AgentType = 'claude' | 'codex';
 
 /**
+ * タスク固有のブランチ名を生成（純粋関数）
+ *
+ * WHY: ブランチ名にタスクIDを含めることで、並列実行時の衝突を防ぐ
+ * 例: feature/auth → feature/auth-task-2b8c0253-1
+ */
+export const getTaskBranchName = (task: Task): BranchName => {
+  return branchName(`${task.branch}-${task.id}`);
+};
+
+/**
  * コミットメッセージを生成（純粋関数）
  */
 export const generateCommitMessage = (task: Task): string => {
   return `feat: ${task.acceptance}
 
 Task ID: ${task.id}
-Branch: ${task.branch}
+Branch: ${getTaskBranchName(task)}
 
 🤖 Generated with Agent Orchestrator
 
@@ -116,6 +126,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    *
    * ブランチが存在しない場合は新規作成します。
    *
+   * WHY: ブランチ名にタスクIDを含めることで、並列実行時の衝突を防ぐ
+   * 例: feature/auth → feature/auth-task-2b8c0253-1
+   *
    * @param task タスク
    * @param baseBranch 起点となるブランチ（新規ブランチ作成時のみ使用）
    * @returns worktreeのパス（Result型）
@@ -124,6 +137,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     task: Task,
     baseBranch?: BranchName,
   ): Promise<Result<WorktreePath, OrchestratorError>> => {
+    // タスク固有のブランチ名を生成
+    const taskBranchName = getTaskBranchName(task);
+
     // ブランチが存在するか確認
     const branchesResult = await deps.gitEffects.listBranches(deps.appRepoPath);
     if (isErr(branchesResult)) {
@@ -131,7 +147,6 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     }
 
     const branches = branchesResult.val;
-    const taskBranchName = branchName(task.branch);
     const branchExists = branches.some((b) => b.name === taskBranchName);
 
     // Worktreeを作成（createBranchフラグでブランチも同時作成）
@@ -344,7 +359,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     task: Task,
     worktreePath: WorktreePath,
   ): Promise<Result<void, OrchestratorError>> => {
-    const taskBranchName = branchName(task.branch);
+    const taskBranchName = getTaskBranchName(task);
     const pushResult = await deps.gitEffects.push(worktreePath, 'origin', taskBranchName);
 
     if (isErr(pushResult)) {
