@@ -48,12 +48,21 @@ export function buildDependencyGraph(tasks: Task[]): DependencyGraph {
   }
 
   // エッジを構築
+  const missingDependencies: Array<{ taskId: TaskId; missingDepId: TaskId }> = [];
+
   for (const task of tasks) {
     for (const depId of task.dependencies) {
+      // 依存先タスクが存在するか確認
+      if (!allTaskIds.has(depId)) {
+        missingDependencies.push({ taskId: task.id, missingDepId: depId });
+        console.warn(`⚠️  Task ${String(task.id)} depends on non-existent task ${String(depId)}`);
+        continue; // 存在しない依存関係はスキップ
+      }
+
       // task.id は depId に依存する
       adjacencyList.get(task.id)!.push(depId);
       // 逆方向：depId は task.id に依存される
-      reverseAdjacencyList.get(depId)?.push(task.id);
+      reverseAdjacencyList.get(depId)!.push(task.id);
     }
   }
 
