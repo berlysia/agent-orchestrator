@@ -233,7 +233,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         const responseStream = query({
           prompt,
           options: {
-            model: model || 'claude-sonnet-4-5-20250929',
+            model,
             cwd: workingDirectory,
             permissionMode: 'bypassPermissions',
           },
