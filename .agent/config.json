@@ -1,7 +1,7 @@
 {
   "$schema": "../dist/config.schema.json",
-  "appRepoPath": ".",
-  "agentCoordPath": "../agent-orchestorator-coord",
+  "appRepoPath": "/home/berlysia/workspace/agent-orchestorator",
+  "agentCoordPath": "/home/berlysia/workspace/agent-orchestorator-coord",
   "maxWorkers": 3,
   "agents": {
     "planner": {
@@ -20,5 +20,13 @@
   "checks": {
     "enabled": true,
     "failureMode": "block"
+  },
+  "integration": {
+    "method": "auto"
+  },
+  "planning": {
+    "maxQualityRetries": 5,
+    "qualityThreshold": 60,
+    "strictContextValidation": false
   }
 }
