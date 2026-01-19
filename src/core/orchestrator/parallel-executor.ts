@@ -9,6 +9,7 @@ import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
 import { getTaskBranchName } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
+import { TaskState } from '../../types/task.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -55,170 +56,207 @@ export async function executeLevelParallel(
   const failed: TaskId[] = [];
   const blocked: TaskId[] = [];
 
-  // ブロック済みタスクをスキップ
-  const executableTaskIds = levelTaskIds.filter((tid) => !blockedTaskIds.has(tid));
+  // WHY: 実行対象を追跡（最初はlevelTaskIdsから開始）
+  // NEEDS_CONTINUATION タスクの継続実行をサポートするため、内部でループを持つ
+  let pendingTaskIds = new Set(levelTaskIds);
 
-  if (executableTaskIds.length === 0) {
-    return {
-      completed,
-      failed,
-      blocked: levelTaskIds.filter((tid) => blockedTaskIds.has(tid)),
-      updatedSchedulerState: schedulerState,
-    };
-  }
-
-  console.log(`\n🔨 Executing level with ${executableTaskIds.length} tasks in parallel`);
-  for (const tid of executableTaskIds) {
-    console.log(`  - ${tid}`);
-  }
-
-  // 並列実行用のPromiseを生成
-  const taskPromises = executableTaskIds.map(async (tid) => {
-    const rawTaskId = String(tid);
-    const wid = `worker-${rawTaskId}`;
-
-    try {
-      // 1. Scheduler: タスク割り当て
-      const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
-
-      if (isErr(claimResult)) {
-        console.log(`  ⚠️  [${rawTaskId}] Failed to claim task: ${claimResult.err.message}`);
-        return { taskId: tid, status: 'failed' as const, workerId: wid };
+  // WHY: 全タスクがDONE/BLOCKED/FAILEDになるまでループ
+  // これにより、NEEDS_CONTINUATION 状態のタスクのみが再実行される
+  while (pendingTaskIds.size > 0) {
+    // 1. 現在実行可能なタスク（READY or NEEDS_CONTINUATION）をフィルタ
+    const executableTaskIds: TaskId[] = [];
+    for (const tid of pendingTaskIds) {
+      if (blockedTaskIds.has(tid)) {
+        blocked.push(tid);
+        pendingTaskIds.delete(tid);
+        continue;
       }
-
-      const { task: claimedTask, newState } = claimResult.val;
-      schedulerState = newState;
-
-      // 2. Worker: タスク実行
-      // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
-      // NOTE: serial chainでは実際のブランチ名がtask.branchと異なるため、
-      //       getTaskBranchName()を使って実際に作成されたブランチ名を取得する
-      let baseBranch: BranchName | undefined;
-      if (claimedTask.dependencies.length === 1) {
-        const depId = claimedTask.dependencies[0];
-        if (depId) {
-          const depTaskResult = await taskStore.readTask(depId);
-          if (depTaskResult.ok) {
-            baseBranch = getTaskBranchName(depTaskResult.val);
-          }
-        }
+      const taskResult = await taskStore.readTask(tid);
+      if (!taskResult.ok) {
+        failed.push(tid);
+        pendingTaskIds.delete(tid);
+        continue;
       }
-      // 複数依存の場合は将来実装（マージベース作成）
-
-      console.log(`  🚀 [${rawTaskId}] Executing task...`);
-      const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
-
-      if (isErr(workerResult)) {
-        const errorMsg =
-          workerResult.err && typeof workerResult.err === 'object' && 'message' in workerResult.err
-            ? String((workerResult.err as { message: unknown }).message)
-            : String(workerResult.err);
-        console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
-        await schedulerOps.blockTask(tid);
-        return { taskId: tid, status: 'failed' as const, workerId: wid };
+      const task = taskResult.val;
+      if (task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION) {
+        executableTaskIds.push(tid);
+      } else if (task.state === TaskState.DONE) {
+        completed.push(tid);
+        pendingTaskIds.delete(tid);
+      } else if (task.state === TaskState.BLOCKED || task.state === TaskState.CANCELLED) {
+        blocked.push(tid);
+        pendingTaskIds.delete(tid);
       }
+      // RUNNING は待機（他のworkerが処理中）
+    }
 
-      const result = workerResult.val;
+    if (executableTaskIds.length === 0) {
+      break; // 実行可能なタスクがない
+    }
 
-      if (!result.success) {
-        console.log(`  ❌ [${rawTaskId}] Task execution failed: ${result.error ?? 'Unknown error'}`);
-        await schedulerOps.blockTask(tid);
-        return { taskId: tid, status: 'failed' as const, workerId: wid };
-      }
+    // 2. 実行可能なタスクを並列実行
+    console.log(`\n🔨 Executing ${executableTaskIds.length} tasks in parallel`);
+    for (const tid of executableTaskIds) {
+      console.log(`  - ${tid}`);
+    }
 
-      // latestRunIdを更新（Judge判定でログを読むため）
-      const updateResult = await taskStore.updateTaskCAS(
-        tid,
-        claimedTask.version,
-        (t) => ({ ...t, latestRunId: result.runId }),
-      );
-      if (!updateResult.ok) {
-        console.error(`  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`);
-        await schedulerOps.blockTask(tid);
-        return { taskId: tid, status: 'failed' as const, workerId: wid };
-      }
+    // 並列実行用のPromiseを生成
+    const taskPromises = executableTaskIds.map(async (tid) => {
+      const rawTaskId = String(tid);
+      const wid = `worker-${rawTaskId}`;
 
-      // 3. Judge: 完了判定
-      console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-      const judgementResult = await judgeOps.judgeTask(tid);
+      try {
+        // 1. Scheduler: タスク割り当て
+        const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
 
-      if (isErr(judgementResult)) {
-        console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
-        await schedulerOps.blockTask(tid);
-        return { taskId: tid, status: 'failed' as const, workerId: wid };
-      }
-
-      const judgement = judgementResult.val;
-
-      if (judgement.success) {
-        console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
-        await judgeOps.markTaskAsCompleted(tid);
-        return { taskId: tid, status: 'completed' as const, workerId: wid };
-      } else if (judgement.shouldContinue) {
-        // 継続実行可能な場合、タスクをREADY状態に戻す
-        console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);
-        if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
-          console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
-        }
-
-        const continuationResult = await judgeOps.markTaskForContinuation(tid, judgement);
-        if (isErr(continuationResult)) {
-          // 最大リトライ回数を超えた場合
-          console.log(
-            `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
-          );
-          await judgeOps.markTaskAsBlocked(tid);
+        if (isErr(claimResult)) {
+          console.log(`  ⚠️  [${rawTaskId}] Failed to claim task: ${claimResult.err.message}`);
           return { taskId: tid, status: 'failed' as const, workerId: wid };
         }
 
-        console.log(
-          `  ➡️  [${rawTaskId}] Scheduled for re-execution (iteration ${continuationResult.val.judgementFeedback?.iteration ?? 0})`,
-        );
-        return { taskId: tid, status: 'retry' as const, workerId: wid };
-      } else {
-        console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
-        await judgeOps.markTaskAsBlocked(tid);
+        const { task: claimedTask, newState } = claimResult.val;
+        schedulerState = newState;
+
+        // 2. Worker: タスク実行
+        // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
+        // NOTE: serial chainでは実際のブランチ名がtask.branchと異なるため、
+        //       getTaskBranchName()を使って実際に作成されたブランチ名を取得する
+        let baseBranch: BranchName | undefined;
+        if (claimedTask.dependencies.length === 1) {
+          const depId = claimedTask.dependencies[0];
+          if (depId) {
+            const depTaskResult = await taskStore.readTask(depId);
+            if (depTaskResult.ok) {
+              baseBranch = getTaskBranchName(depTaskResult.val);
+            }
+          }
+        }
+        // 複数依存の場合は将来実装（マージベース作成）
+
+        console.log(`  🚀 [${rawTaskId}] Executing task...`);
+        const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
+
+        if (isErr(workerResult)) {
+          const errorMsg =
+            workerResult.err &&
+            typeof workerResult.err === 'object' &&
+            'message' in workerResult.err
+              ? String((workerResult.err as { message: unknown }).message)
+              : String(workerResult.err);
+          console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
+          await schedulerOps.blockTask(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+
+        const result = workerResult.val;
+
+        if (!result.success) {
+          console.log(
+            `  ❌ [${rawTaskId}] Task execution failed: ${result.error ?? 'Unknown error'}`,
+          );
+          await schedulerOps.blockTask(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+
+        // latestRunIdを更新（Judge判定でログを読むため）
+        const updateResult = await taskStore.updateTaskCAS(tid, claimedTask.version, (t) => ({
+          ...t,
+          latestRunId: result.runId,
+        }));
+        if (!updateResult.ok) {
+          console.error(
+            `  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`,
+          );
+          await schedulerOps.blockTask(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+
+        // 3. Judge: 完了判定
+        console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
+        const judgementResult = await judgeOps.judgeTask(tid);
+
+        if (isErr(judgementResult)) {
+          console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
+          await schedulerOps.blockTask(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+
+        const judgement = judgementResult.val;
+
+        if (judgement.success) {
+          console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
+          await judgeOps.markTaskAsCompleted(tid);
+          return { taskId: tid, status: 'completed' as const, workerId: wid };
+        } else if (judgement.shouldContinue) {
+          // 継続実行可能な場合、タスクをREADY状態に戻す
+          console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);
+          if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
+            console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
+          }
+
+          const continuationResult = await judgeOps.markTaskForContinuation(tid, judgement);
+          if (isErr(continuationResult)) {
+            // 最大リトライ回数を超えた場合
+            console.log(
+              `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
+            );
+            await judgeOps.markTaskAsBlocked(tid);
+            return { taskId: tid, status: 'failed' as const, workerId: wid };
+          }
+
+          console.log(
+            `  ➡️  [${rawTaskId}] Scheduled for re-execution (iteration ${continuationResult.val.judgementFeedback?.iteration ?? 0})`,
+          );
+          return { taskId: tid, status: 'retry' as const, workerId: wid };
+        } else {
+          console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
+          await judgeOps.markTaskAsBlocked(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`  ❌ [${rawTaskId}] Unexpected error: ${errorMessage}`);
+        await schedulerOps.blockTask(tid);
         return { taskId: tid, status: 'failed' as const, workerId: wid };
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`  ❌ [${rawTaskId}] Unexpected error: ${errorMessage}`);
-      await schedulerOps.blockTask(tid);
-      return { taskId: tid, status: 'failed' as const, workerId: wid };
-    } finally {
-      // Worktreeをクリーンアップ
-      const cleanupResult = await workerOps.cleanupWorktree(tid);
-      if (isErr(cleanupResult)) {
-        const errorMsg =
-          cleanupResult.err && typeof cleanupResult.err === 'object' && 'message' in cleanupResult.err
-            ? String((cleanupResult.err as { message: unknown }).message)
-            : String(cleanupResult.err);
-        console.warn(`  ⚠️  [${rawTaskId}] Failed to cleanup worktree: ${errorMsg}`);
-      }
+      } finally {
+        // Worktreeをクリーンアップ
+        const cleanupResult = await workerOps.cleanupWorktree(tid);
+        if (isErr(cleanupResult)) {
+          const errorMsg =
+            cleanupResult.err &&
+            typeof cleanupResult.err === 'object' &&
+            'message' in cleanupResult.err
+              ? String((cleanupResult.err as { message: unknown }).message)
+              : String(cleanupResult.err);
+          console.warn(`  ⚠️  [${rawTaskId}] Failed to cleanup worktree: ${errorMsg}`);
+        }
 
-      // Workerスロットを解放
-      schedulerState = removeRunningWorker(schedulerState, workerId(wid));
+        // Workerスロットを解放
+        schedulerState = removeRunningWorker(schedulerState, workerId(wid));
+      }
+    });
+
+    // Promise.allSettled で並列実行
+    const results = await Promise.allSettled(taskPromises);
+
+    // 3. 結果に基づいてpendingTaskIdsを更新
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        const { taskId, status } = result.value;
+        if (status === 'completed') {
+          completed.push(taskId);
+          pendingTaskIds.delete(taskId);
+        } else if (status === 'failed') {
+          failed.push(taskId);
+          pendingTaskIds.delete(taskId);
+        }
+        // status === 'retry' の場合はpendingに残す → 次のループで再実行
+      } else {
+        // Promise自体が失敗した場合（通常は発生しない）
+        console.error(`  ❌ Task promise rejected: ${result.reason}`);
+      }
     }
-  });
-
-  // Promise.allSettled で並列実行
-  const results = await Promise.allSettled(taskPromises);
-
-  // 結果を集計
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      const taskResult = result.value;
-      if (taskResult.status === 'completed') {
-        completed.push(taskResult.taskId);
-      } else if (taskResult.status === 'failed') {
-        failed.push(taskResult.taskId);
-      }
-      // 'retry' ステータスの場合はどちらにも追加しない（次の実行サイクルで再処理される）
-    } else {
-      // Promise自体が失敗した場合（通常は発生しない）
-      console.error(`  ❌ Task promise rejected: ${result.reason}`);
-    }
-  }
+  } // while ループの終了
 
   return {
     completed,
@@ -237,10 +275,7 @@ export async function executeLevelParallel(
  * @param graph 依存関係グラフ
  * @returns ブロック対象タスクID配列
  */
-export function computeBlockedTasks(
-  failedTaskIds: TaskId[],
-  graph: DependencyGraph,
-): TaskId[] {
+export function computeBlockedTasks(failedTaskIds: TaskId[], graph: DependencyGraph): TaskId[] {
   const blockedSet = new Set<TaskId>();
 
   /**
