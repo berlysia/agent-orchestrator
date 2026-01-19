@@ -1,5 +1,6 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
+import type { PlannerSessionEffects } from './planner-session-effects.ts';
 import { createInitialTask } from '../../types/task.ts';
 import { taskId, repoPath, branchName, runId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +10,7 @@ import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
 import { z } from 'zod';
+import { createPlannerSession } from '../../types/planner-session.ts';
 
 /**
  * Planner依存関係
@@ -16,6 +18,7 @@ import { z } from 'zod';
 export interface PlannerDeps {
   readonly taskStore: TaskStore;
   readonly runnerEffects: RunnerEffects;
+  readonly sessionEffects?: PlannerSessionEffects;
   readonly appRepoPath: string;
   readonly agentType: 'claude' | 'codex';
   readonly model?: string;
@@ -425,6 +428,32 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           };
     await deps.runnerEffects.saveRunMetadata(completedRun);
 
+    // セッション情報を保存（sessionEffectsが提供されている場合のみ）
+    if (deps.sessionEffects && taskIds.length > 0) {
+      const session = createPlannerSession(plannerRunId, userInstruction);
+      session.generatedTasks = taskBreakdowns;
+      // 会話履歴を記録（簡易版: プロンプトと応答のみ）
+      session.conversationHistory.push({
+        role: 'user',
+        content: userInstruction,
+        timestamp: new Date().toISOString(),
+      });
+      if (taskBreakdowns.length > 0) {
+        session.conversationHistory.push({
+          role: 'assistant',
+          content: JSON.stringify(taskBreakdowns, null, 2),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const saveSessionResult = await deps.sessionEffects.saveSession(session);
+      if (isErr(saveSessionResult)) {
+        console.warn(`⚠️  Failed to save planner session: ${saveSessionResult.err.message}`);
+      } else {
+        await appendPlanningLog(`\n✅ Session saved: ${plannerRunId}\n`);
+      }
+    }
+
     // 一部でもタスク作成に成功していれば成功とみなす
     if (taskIds.length === 0) {
       return createErr(ioError('planTasks', `Failed to create any tasks: ${errors.join(', ')}`));
@@ -489,9 +518,248 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     return judgement;
   };
 
+  /**
+   * 既存セッションを継続して追加タスクを生成
+   *
+   * 会話履歴を維持しながら、不足している側面に対する追加タスクを生成する。
+   *
+   * WHY: 最終完了判定で不足している側面が見つかった場合、
+   *      前回のコンテキストを保持したまま追加タスクを生成するため
+   *
+   * @param sessionId 継続するセッションID
+   * @param missingAspects 達成できていない側面のリスト
+   * @returns タスク分解結果（Result型）
+   */
+  const planAdditionalTasks = async (
+    sessionId: string,
+    missingAspects: string[],
+  ): Promise<Result<PlanningResult, TaskStoreError>> => {
+    // sessionEffectsが提供されていない場合はエラー
+    if (!deps.sessionEffects) {
+      return createErr(
+        ioError('planAdditionalTasks', 'Session management is not enabled (sessionEffects not provided)'),
+      );
+    }
+
+    // セッションを読み込み
+    const loadResult = await deps.sessionEffects.loadSession(sessionId);
+    if (isErr(loadResult)) {
+      return createErr(
+        ioError('planAdditionalTasks.loadSession', `Failed to load session: ${loadResult.err.message}`),
+      );
+    }
+
+    const session = loadResult.val;
+
+    // 追加タスク生成用のRunIDを作成
+    const additionalRunId = `planner-additional-${randomUUID()}`;
+
+    const appendPlanningLog = async (content: string): Promise<void> => {
+      const logResult = await deps.runnerEffects.appendLog(additionalRunId, content);
+      if (isErr(logResult)) {
+        console.warn(`⚠️  Failed to write planner log: ${logResult.err.message}`);
+      }
+    };
+
+    await appendPlanningLog(`=== Additional Task Planning Start ===\n`);
+    await appendPlanningLog(`Session ID: ${sessionId}\n`);
+    await appendPlanningLog(`Original Instruction: ${session.instruction}\n`);
+    await appendPlanningLog(`Missing Aspects:\n${missingAspects.map((a, i) => `  ${i + 1}. ${a}`).join('\n')}\n`);
+
+    const planningRun = createInitialRun({
+      id: runId(additionalRunId),
+      taskId: taskId(additionalRunId),
+      agentType: deps.agentType,
+      logPath: `runs/${additionalRunId}.log`,
+    });
+
+    const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
+    if (isErr(ensureRunsResult)) {
+      return createErr(ioError('planAdditionalTasks.ensureRunsDir', ensureRunsResult.err));
+    }
+
+    const saveRunResult = await deps.runnerEffects.saveRunMetadata(planningRun);
+    if (isErr(saveRunResult)) {
+      return createErr(ioError('planAdditionalTasks.saveRunMetadata', saveRunResult.err));
+    }
+
+    // 会話履歴を含めたプロンプトを構築
+    const conversationContext = session.conversationHistory
+      .map((msg) => `${msg.role}: ${msg.content}`)
+      .join('\n\n');
+
+    const additionalPrompt = `Previous conversation:
+${conversationContext}
+
+Based on the above context, the following aspects are still missing:
+${missingAspects.map((aspect, i) => `${i + 1}. ${aspect}`).join('\n')}
+
+Generate additional tasks to address these missing aspects.
+Follow the same format and guidelines as before.
+
+Output format (JSON array):
+[
+  {
+    "id": "task-X",
+    "description": "Task description",
+    "branch": "feature/branch-name",
+    "scopePaths": ["path1/", "path2/"],
+    "acceptance": "Acceptance criteria",
+    "type": "implementation|documentation|investigation|integration",
+    "estimatedDuration": 2.5,
+    "context": "Complete context for task execution",
+    "dependencies": []
+  }
+]
+
+Output only the JSON array, no additional text.`;
+
+    await appendPlanningLog(`\nPrompt:\n${additionalPrompt}\n\n`);
+
+    // エージェントを実行
+    const runResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(additionalPrompt, deps.appRepoPath, deps.model!)
+        : await deps.runnerEffects.runCodexAgent(additionalPrompt, deps.appRepoPath, deps.model);
+
+    if (isErr(runResult)) {
+      await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
+      await appendPlanningLog(`${runResult.err.message}\n`);
+
+      const failedRun = {
+        ...planningRun,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: `Additional task planner agent execution failed: ${runResult.err.message}`,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createErr(
+        ioError('planAdditionalTasks.runAgent', `Agent execution failed: ${runResult.err.message}`),
+      );
+    }
+
+    // エージェント出力をパース
+    const finalResponse = runResult.val.finalResponse || '';
+    await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
+    await appendPlanningLog(`${finalResponse}\n`);
+
+    const parseResult = parseAgentOutputWithErrors(finalResponse);
+
+    if (parseResult.errors.length > 0) {
+      await appendPlanningLog(`\n=== Validation Errors ===\n`);
+      parseResult.errors.forEach((err) => {
+        appendPlanningLog(`${err}\n`);
+      });
+    }
+
+    if (parseResult.tasks.length === 0) {
+      const errorMsg =
+        parseResult.errors.length > 0
+          ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
+          : 'No valid task breakdowns found in agent output';
+
+      await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+
+      const failedRun = {
+        ...planningRun,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: errorMsg,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createErr(ioError('planAdditionalTasks.parseOutput', errorMsg));
+    }
+
+    const taskBreakdowns = parseResult.tasks;
+
+    // タスクをTaskStoreに保存
+    const taskIds: string[] = [];
+    const errors: string[] = [];
+
+    for (const breakdown of taskBreakdowns) {
+      const rawTaskId = breakdown.id;
+      const task = createInitialTask({
+        id: taskId(rawTaskId),
+        repo: repoPath(deps.appRepoPath),
+        branch: branchName(breakdown.branch),
+        scopePaths: breakdown.scopePaths,
+        acceptance: breakdown.acceptance,
+        taskType: breakdown.type,
+        context: breakdown.context,
+        dependencies: breakdown.dependencies.map((depId) => taskId(depId)),
+      });
+
+      const result = await deps.taskStore.createTask(task);
+      if (!result.ok) {
+        errors.push(`Failed to create task ${rawTaskId}: ${result.err.message}`);
+        continue;
+      }
+
+      taskIds.push(rawTaskId);
+    }
+
+    if (taskIds.length > 0) {
+      await appendPlanningLog(`\n=== Generated Additional Tasks ===\n`);
+      for (const rawTaskId of taskIds) {
+        await appendPlanningLog(`- ${rawTaskId}\n`);
+      }
+    }
+
+    const completedRun =
+      taskIds.length > 0
+        ? {
+            ...planningRun,
+            status: RunStatus.SUCCESS,
+            finishedAt: new Date().toISOString(),
+          }
+        : {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: errors.length > 0 ? errors.join(', ') : 'No tasks created',
+          };
+    await deps.runnerEffects.saveRunMetadata(completedRun);
+
+    // 会話履歴を更新してセッションを保存
+    if (taskIds.length > 0) {
+      const timestamp = new Date().toISOString();
+      session.conversationHistory.push({
+        role: 'user',
+        content: `Missing aspects: ${missingAspects.join(', ')}`,
+        timestamp,
+      });
+      session.conversationHistory.push({
+        role: 'assistant',
+        content: JSON.stringify(taskBreakdowns, null, 2),
+        timestamp,
+      });
+      session.generatedTasks.push(...taskBreakdowns);
+
+      const saveSessionResult = await deps.sessionEffects.saveSession(session);
+      if (isErr(saveSessionResult)) {
+        console.warn(`⚠️  Failed to update planner session: ${saveSessionResult.err.message}`);
+      } else {
+        await appendPlanningLog(`\n✅ Session updated: ${sessionId}\n`);
+      }
+    }
+
+    // 一部でもタスク作成に成功していれば成功とみなす
+    if (taskIds.length === 0) {
+      return createErr(ioError('planAdditionalTasks', `Failed to create any tasks: ${errors.join(', ')}`));
+    }
+
+    return createOk({
+      taskIds,
+      runId: additionalRunId,
+    });
+  };
+
   return {
     planTasks,
     judgeFinalCompletion,
+    planAdditionalTasks,
   };
 };
 
