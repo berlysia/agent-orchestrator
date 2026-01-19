@@ -112,11 +112,13 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
       // Claude Agent実行
+      // WHY: Workerエージェントは自動実行されるため、パーミッション要求をバイパス
       const responseStream = query({
         prompt,
         options: {
           model: model || 'claude-sonnet-4-5-20250929',
           cwd: workingDirectory,
+          permissionMode: 'bypassPermissions',
         },
       });
 
