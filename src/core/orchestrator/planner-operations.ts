@@ -28,6 +28,7 @@ export interface PlannerDeps {
   readonly plannerQualityRetries?: number;
   readonly qualityThreshold?: number;
   readonly strictContextValidation?: boolean;
+  readonly maxTaskDuration?: number;
 }
 
 /**
@@ -190,6 +191,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       userInstruction,
       tasks,
       deps.strictContextValidation ?? false,
+      deps.maxTaskDuration ?? 4,
       previousFeedback,
     );
 
@@ -276,9 +278,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       await appendPlanningLog(`\n--- Attempt ${attempt}/${maxRetries} ---\n`);
 
       // 1. Plannerプロンプトを構築
+      const maxTaskDuration = deps.maxTaskDuration ?? 4;
       const planningPrompt = accumulatedFeedback
-        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback)
-        : buildPlanningPrompt(userInstruction);
+        ? buildPlanningPromptWithFeedback(userInstruction, accumulatedFeedback, maxTaskDuration)
+        : buildPlanningPrompt(userInstruction, maxTaskDuration);
 
       // ログには省略版を書く（重複を避けるため）
       const promptForLog = accumulatedFeedback
@@ -971,7 +974,10 @@ export type PlannerOperations = ReturnType<typeof createPlannerOperations>;
  * @param userInstruction ユーザーの指示
  * @returns Plannerプロンプト
  */
-export const buildPlanningPrompt = (userInstruction: string): string => {
+export const buildPlanningPrompt = (
+  userInstruction: string,
+  maxTaskDuration: number = 4,
+): string => {
   return `You are a task planner for a multi-agent development system.
 
 USER INSTRUCTION:
@@ -999,9 +1005,10 @@ For each task, provide:
    - "documentation": Documentation creation or updates
    - "investigation": Research or investigation tasks
    - "integration": System integration or connectivity work
-7. estimatedDuration: Estimated hours (REQUIRED) - number between 0.5 and 8
-   - Aim for 1-4 hours per task (smaller, focused tasks preferred)
-   - If a task exceeds 4 hours, consider breaking it down further
+7. estimatedDuration: Estimated hours (REQUIRED) - number between 0.5 and ${maxTaskDuration}
+   - CRITICAL: Tasks MUST NOT exceed ${maxTaskDuration} hours
+   - Preferred range: 1-${Math.min(maxTaskDuration, 3)} hours per task (smaller, focused tasks)
+   - If a task would exceed ${maxTaskDuration} hours, you MUST break it down into smaller subtasks
 8. context: COMPLETE implementation context (REQUIRED)
    This field must contain ALL information needed to execute the task WITHOUT referring to external sources.
 
@@ -1058,7 +1065,8 @@ Rules:
 - Dependencies must reference valid task IDs from the same breakdown
 - Avoid circular dependencies
 - ALL fields are REQUIRED - tasks missing any field will be rejected
-- Granularity guideline: Aim for 1-4 hour tasks; break down larger work
+- CRITICAL Granularity guideline: Tasks MUST be ${maxTaskDuration} hours or less; aim for 1-${Math.min(maxTaskDuration, 3)} hours
+- Break down any work that would exceed ${maxTaskDuration} hours into multiple smaller tasks
 
 Example:
 [
@@ -1112,6 +1120,7 @@ export const buildTaskQualityPrompt = (
   userInstruction: string,
   tasks: TaskBreakdown[],
   strictContextValidation: boolean,
+  maxTaskDuration: number = 4,
   previousFeedback?: string,
 ): string => {
   const tasksJson = JSON.stringify(tasks, null, 2);
@@ -1164,7 +1173,7 @@ CRITICAL (must pass - weight: 70%):
 IMPORTANT (should pass - weight: 20%):
 5. **Context sufficiency**: Does the context field contain information needed to execute the task?
 ${contextCriteria}
-6. **Granularity**: Are tasks appropriately sized (1-4 hours each)?
+6. **Granularity**: Are tasks appropriately sized? CRITICAL: All tasks MUST be ${maxTaskDuration} hours or less (preferred: 1-${Math.min(maxTaskDuration, 3)} hours)
 
 NICE TO HAVE (improves quality - weight: 10%):
 7. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
@@ -1201,8 +1210,9 @@ Output only the JSON object, no additional text.`;
 export const buildPlanningPromptWithFeedback = (
   userInstruction: string,
   feedback: string,
+  maxTaskDuration: number = 4,
 ): string => {
-  const basePrompt = buildPlanningPrompt(userInstruction);
+  const basePrompt = buildPlanningPrompt(userInstruction, maxTaskDuration);
 
   return `${basePrompt}
 

@@ -106,6 +106,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     plannerQualityRetries: deps.config.iterations.plannerQualityRetries,
     qualityThreshold: deps.config.planning.qualityThreshold,
     strictContextValidation: deps.config.planning.strictContextValidation,
+    maxTaskDuration: deps.config.planning.maxTaskDuration,
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,

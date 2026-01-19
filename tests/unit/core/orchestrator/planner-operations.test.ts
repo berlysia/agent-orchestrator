@@ -45,8 +45,16 @@ describe('Planner Operations', () => {
     it('should include granularity guidelines', () => {
       const prompt = buildPlanningPrompt('test');
 
-      assert(prompt.includes('1-4 hour'));
+      assert(prompt.includes('hours'));
+      assert(prompt.includes('CRITICAL'));
       assert(prompt.includes('ALL fields are REQUIRED'));
+    });
+
+    it('should respect custom maxTaskDuration', () => {
+      const prompt = buildPlanningPrompt('test', 2);
+
+      assert(prompt.includes('between 0.5 and 2'));
+      assert(prompt.includes('MUST NOT exceed 2 hours'));
     });
   });
 
@@ -363,7 +371,7 @@ This is the recommended approach.`;
         ];
         const feedback = 'Acceptance criteria are too vague';
 
-        const prompt = buildTaskQualityPrompt(userInstruction, tasks, false, feedback);
+        const prompt = buildTaskQualityPrompt(userInstruction, tasks, false, 4, feedback);
 
         assert(prompt.includes(feedback));
         assert(prompt.includes('PREVIOUS FEEDBACK'));
