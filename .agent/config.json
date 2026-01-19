@@ -25,8 +25,15 @@
     "method": "auto"
   },
   "planning": {
-    "maxQualityRetries": 5,
     "qualityThreshold": 60,
-    "strictContextValidation": false
+    "strictContextValidation": false,
+    "maxTaskDuration": 2,
+    "maxTasks": 10
+  },
+  "iterations": {
+    "plannerQualityRetries": 5,
+    "judgeTaskRetries": 5,
+    "orchestrateMainLoop": 5,
+    "serialChainTaskRetries": 5
   }
 }
