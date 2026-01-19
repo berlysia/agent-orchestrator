@@ -31,7 +31,7 @@ export interface OrchestrateDeps {
   readonly taskStore: TaskStore;
   readonly gitEffects: GitEffects;
   readonly runnerEffects: RunnerEffects;
-  readonly sessionEffects?: PlannerSessionEffects;
+  readonly sessionEffects: PlannerSessionEffects;
   readonly config: Config;
   readonly maxWorkers?: number;
 }
@@ -99,6 +99,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   const plannerOps = createPlannerOperations({
     taskStore: deps.taskStore,
     runnerEffects: deps.runnerEffects,
+    sessionEffects: deps.sessionEffects,
     appRepoPath: deps.config.appRepoPath,
     coordRepoPath: deps.config.agentCoordPath,
     agentType: getAgentType(deps.config, 'planner'),
@@ -125,7 +126,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     runnerEffects: deps.runnerEffects,
     appRepoPath: deps.config.appRepoPath,
     agentType: getAgentType(deps.config, 'judge'),
-    model: getModel(deps.config, 'judge') ?? 'claude-haiku-4-5',
+    model: getModel(deps.config, 'judge'),
     judgeTaskRetries: deps.config.iterations.judgeTaskRetries,
   });
   const integrationOps = createIntegrationOperations({
@@ -473,24 +474,22 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
 
         // 最終判定結果をセッションに保存
-        if (deps.sessionEffects) {
-          const sessionResult = await deps.sessionEffects.loadSession(sessionId);
-          if (!isErr(sessionResult)) {
-            const session = sessionResult.val;
-            session.finalJudgement = {
-              isComplete: finalJudgement.isComplete,
-              missingAspects: finalJudgement.missingAspects,
-              additionalTaskSuggestions: finalJudgement.additionalTaskSuggestions,
-              completionScore: finalJudgement.completionScore,
-              evaluatedAt: new Date().toISOString(),
-            };
+        const sessionResult = await deps.sessionEffects.loadSession(sessionId);
+        if (!isErr(sessionResult)) {
+          const session = sessionResult.val;
+          session.finalJudgement = {
+            isComplete: finalJudgement.isComplete,
+            missingAspects: finalJudgement.missingAspects,
+            additionalTaskSuggestions: finalJudgement.additionalTaskSuggestions,
+            completionScore: finalJudgement.completionScore,
+            evaluatedAt: new Date().toISOString(),
+          };
 
-            const saveResult = await deps.sessionEffects.saveSession(session);
-            if (isErr(saveResult)) {
-              console.warn(
-                `⚠️  Failed to save final judgement to session: ${saveResult.err.message}`,
-              );
-            }
+          const saveResult = await deps.sessionEffects.saveSession(session);
+          if (isErr(saveResult)) {
+            console.warn(
+              `⚠️  Failed to save final judgement to session: ${saveResult.err.message}`,
+            );
           }
         }
       }
@@ -543,15 +542,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
 
     try {
-      // 1. セッションEffectsが提供されていない場合はエラー
-      if (!deps.sessionEffects) {
-        return createErr({
-          type: 'UNKNOWN_ERROR',
-          message: 'PlannerSessionEffects not provided to Orchestrator',
-        });
-      }
-
-      // 2. セッションを読み込み
+      // 1. セッションを読み込み
       console.log(`📂 Loading session: ${sessionId}`);
       const sessionResult = await deps.sessionEffects.loadSession(sessionId);
       if (isErr(sessionResult)) {
@@ -773,20 +764,12 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     const maxIterations = Math.min(options.maxIterations, HARD_CAP_ITERATIONS);
 
     try {
-      // 1. セッションEffectsが提供されていない場合はエラー
-      if (!deps.sessionEffects) {
-        return createErr({
-          type: 'UNKNOWN_ERROR',
-          message: 'PlannerSessionEffects not provided to Orchestrator',
-        });
-      }
-
       console.log(`🔄 Continue from session: ${sessionId}`);
       console.log(`   Max iterations: ${maxIterations}`);
 
       // 反復ループ
       while (iterationsPerformed < maxIterations) {
-        // 2. セッションを読み込み
+        // 1. セッションを読み込み
         const sessionResult = await deps.sessionEffects.loadSession(sessionId);
         if (isErr(sessionResult)) {
           return createErr({

@@ -25,9 +25,9 @@ export interface WorkerDeps {
   readonly runnerEffects: RunnerEffects;
   readonly taskStore: TaskStore;
   readonly appRepoPath: RepoPath;
-  readonly agentCoordPath?: string;
+  readonly agentCoordPath: string;
   readonly agentType: 'claude' | 'codex';
-  readonly model?: string;
+  readonly model: string;
 }
 
 /**
@@ -82,10 +82,6 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   };
 
   const getRunDisplayPath = (runIdValue: string, ext: 'log' | 'json'): string => {
-    if (!deps.agentCoordPath) {
-      return `runs/${runIdValue}.${ext}`;
-    }
-
     return toRelativePath(path.join(deps.agentCoordPath, 'runs', `${runIdValue}.${ext}`));
   };
 
@@ -154,9 +150,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     // 2. RunID生成（タスクIDベース）
     const timestamp = Date.now();
     const theRunId = runId(`run-${task.id}-${timestamp}`);
-    const logPath = deps.agentCoordPath
-      ? path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`)
-      : `runs/${theRunId}.log`;
+    const logPath = path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`);
 
     // 3. 実行メタデータを初期化
     const run = createInitialRun({
@@ -355,9 +349,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     // 2. RunID生成（タスクIDベース）
     const timestamp = Date.now();
     const theRunId = runId(`run-${task.id}-${timestamp}`);
-    const logPath = deps.agentCoordPath
-      ? path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`)
-      : `runs/${theRunId}.log`;
+    const logPath = path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`);
 
     // 3. 実行メタデータを初期化
     const run = createInitialRun({
@@ -569,23 +561,21 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
       // 2. 前回の実行ログを読み込む（存在する場合）
       let previousLog: string | undefined;
-      if (deps.agentCoordPath) {
-        const logFilesResult = await deps.runnerEffects.listRunLogs();
-        const logFiles = logFilesResult.ok ? logFilesResult.val : [];
+      const logFilesResult = await deps.runnerEffects.listRunLogs();
+      const logFiles = logFilesResult.ok ? logFilesResult.val : [];
 
-        // タスクIDに関連するログファイルを検索
-        const taskLogs = logFiles.filter((logFile) => logFile.includes(String(task.id)));
+      // タスクIDに関連するログファイルを検索
+      const taskLogs = logFiles.filter((logFile) => logFile.includes(String(task.id)));
 
-        if (taskLogs.length > 0) {
-          // 最新のログを取得（ファイル名から.logを除去してrunIdとして使用）
-          const latestLogFile = taskLogs[taskLogs.length - 1];
-          const runIdStr = latestLogFile?.replace('.log', '') ?? '';
+      if (taskLogs.length > 0) {
+        // 最新のログを取得（ファイル名から.logを除去してrunIdとして使用）
+        const latestLogFile = taskLogs[taskLogs.length - 1];
+        const runIdStr = latestLogFile?.replace('.log', '') ?? '';
 
-          const logContentResult = await deps.runnerEffects.readLog(runIdStr);
-          if (logContentResult.ok) {
-            previousLog = logContentResult.val;
-            console.log(`  📋 Loaded previous execution log: ${latestLogFile}`);
-          }
+        const logContentResult = await deps.runnerEffects.readLog(runIdStr);
+        if (logContentResult.ok) {
+          previousLog = logContentResult.val;
+          console.log(`  📋 Loaded previous execution log: ${latestLogFile}`);
         }
       }
 
