@@ -8,6 +8,7 @@
 import type { Result } from 'option-t/plain_result';
 import type { GitError } from '../../types/errors.ts';
 import type { RepoPath, WorktreePath, BranchName } from '../../types/branded.ts';
+import type { MergeResult, ConflictContent } from '../../types/integration.ts';
 
 /**
  * Git ブランチ情報
@@ -198,4 +199,53 @@ export interface GitEffects {
    * @param options 差分オプション（例: ['--cached'] でステージング済みの差分）
    */
   getDiff(path: RepoPath | WorktreePath, options?: string[]): Promise<Result<string, GitError>>;
+
+  // ===== マージ操作 =====
+
+  /**
+   * ブランチをマージ
+   * @param path リポジトリまたは Worktree のパス
+   * @param sourceBranch マージ元のブランチ名
+   * @param options マージオプション（例: ['--no-ff']）
+   * @returns マージ結果（コンフリクトが発生した場合も含む）
+   */
+  merge(
+    path: RepoPath | WorktreePath,
+    sourceBranch: BranchName,
+    options?: string[],
+  ): Promise<Result<MergeResult, GitError>>;
+
+  /**
+   * 進行中のマージを中止
+   * @param path リポジトリまたは Worktree のパス
+   */
+  abortMerge(path: RepoPath | WorktreePath): Promise<Result<void, GitError>>;
+
+  /**
+   * コンフリクトが発生しているファイルのリストを取得
+   * @param path リポジトリまたは Worktree のパス
+   * @returns コンフリクトしているファイルパスのリスト
+   */
+  getConflictedFiles(path: RepoPath | WorktreePath): Promise<Result<string[], GitError>>;
+
+  /**
+   * コンフリクトの内容を取得
+   * @param path リポジトリまたは Worktree のパス
+   * @param filePath コンフリクトが発生しているファイルパス
+   * @returns コンフリクトの詳細内容
+   */
+  getConflictContent(
+    path: RepoPath | WorktreePath,
+    filePath: string,
+  ): Promise<Result<ConflictContent, GitError>>;
+
+  /**
+   * コンフリクトを解決済みとしてマーク
+   * @param path リポジトリまたは Worktree のパス
+   * @param filePath 解決したファイルパス
+   */
+  markConflictResolved(
+    path: RepoPath | WorktreePath,
+    filePath: string,
+  ): Promise<Result<void, GitError>>;
 }

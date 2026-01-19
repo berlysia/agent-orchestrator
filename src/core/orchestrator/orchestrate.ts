@@ -6,8 +6,9 @@ import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
+import { createIntegrationOperations } from './integration-operations.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
-import { taskId, repoPath } from '../../types/branded.ts';
+import { taskId, repoPath, branchName } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
@@ -19,6 +20,7 @@ import {
 import { executeLevelParallel, computeBlockedTasks } from './parallel-executor.ts';
 import { executeSerialChain } from './serial-executor.ts';
 import type { Task } from '../../types/task.ts';
+import { TaskState } from '../../types/task.ts';
 
 /**
  * Orchestrator依存関係
@@ -87,6 +89,11 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   };
   const workerOps = createWorkerOperations(workerDeps);
   const judgeOps = createJudgeOperations({ taskStore: deps.taskStore });
+  const integrationOps = createIntegrationOperations({
+    taskStore: deps.taskStore,
+    gitEffects: deps.gitEffects,
+    appRepoPath: deps.config.appRepoPath,
+  });
 
   /**
    * ユーザー指示を実行
@@ -277,6 +284,72 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         console.log(
           `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
         );
+      }
+
+      // 9. 統合フェーズ（並列実行されたタスクが複数ある場合のみ）
+      if (completedTaskIds.length > 1) {
+        console.log('\n🔗 Integration phase: merging parallel task branches...');
+
+        // 完了したタスクを取得
+        const completedTasks: Task[] = [];
+        for (const rawTaskId of completedTaskIds) {
+          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+          if (taskResult.ok && taskResult.val.state === TaskState.DONE) {
+            completedTasks.push(taskResult.val);
+          }
+        }
+
+        if (completedTasks.length > 1) {
+          // ベースブランチを取得
+          const currentBranchResult = await deps.gitEffects.getCurrentBranch(
+            repoPath(deps.config.appRepoPath),
+          );
+          const baseBranch = currentBranchResult.ok
+            ? currentBranchResult.val
+            : branchName('main');
+
+          // タスクを統合
+          const integrationResult = await integrationOps.integrateTasks(
+            completedTasks,
+            baseBranch,
+          );
+
+          if (integrationResult.ok) {
+            const result = integrationResult.val;
+            if (result.success) {
+              console.log(`  ✅ Successfully integrated ${result.integratedTaskIds.length} tasks`);
+
+              // 統合ブランチの取り込み方法を提示（設定に基づく）
+              const finalResult = await integrationOps.finalizeIntegration(
+                result.integrationBranch,
+                baseBranch,
+                { method: deps.config.integration?.method ?? 'auto' },
+              );
+
+              if (finalResult.ok) {
+                if (finalResult.val.method === 'pr') {
+                  console.log(`  🔀 Pull Request created: ${finalResult.val.prUrl}`);
+                } else {
+                  console.log(`  📋 To merge the integration branch, run:`);
+                  console.log(`     ${finalResult.val.mergeCommand}`);
+                }
+              } else {
+                console.warn(
+                  `  ⚠️  Failed to finalize integration: ${finalResult.err.message}`,
+                );
+              }
+            } else {
+              console.log(`  ⚠️  Integration completed with conflicts`);
+              console.log(`    Integrated: ${result.integratedTaskIds.length} tasks`);
+              console.log(`    Conflicted: ${result.conflictedTaskIds.length} tasks`);
+              if (result.conflictResolutionTaskId) {
+                console.log(`    Resolution task: ${result.conflictResolutionTaskId}`);
+              }
+            }
+          } else {
+            console.warn(`  ⚠️  Integration failed: ${integrationResult.err.message}`);
+          }
+        }
       }
 
       const success = failedTaskIds.length === 0;

@@ -6,13 +6,15 @@
  * Worktree 操作は spawn-git-effects.ts を使用すること。
  */
 
-import { simpleGit, type BranchSummary, type StatusResult } from 'simple-git';
+import { simpleGit, type BranchSummary, type StatusResult, GitResponseError } from 'simple-git';
 import { tryCatchIntoResultAsync } from 'option-t/plain_result/try_catch_async';
 import { mapErrForResult } from 'option-t/plain_result/map_err';
+import { createOk, createErr } from 'option-t/plain_result';
 import type { GitError } from '../../types/errors.ts';
 import { branchName } from '../../types/branded.ts';
 import { gitCommandFailed } from '../../types/errors.ts';
 import type { GitEffects, BranchInfo, GitStatus } from './git-effects.ts';
+import type { MergeResult, ConflictContent, GitConflictInfo } from '../../types/integration.ts';
 
 /**
  * エラーをGitErrorに変換するヘルパー
@@ -168,6 +170,134 @@ export const createSimpleGitEffects = (): Omit<
     return mapErrForResult(result, toGitError('getDiff'));
   };
 
+  // ===== マージ操作 =====
+
+  const merge: GitEffects['merge'] = async (path, sourceBranch, options) => {
+    try {
+      const git = simpleGit(path);
+      const mergeOptions = options || [];
+      await git.merge([sourceBranch, ...mergeOptions]);
+
+      // マージ成功時
+      const mergedFiles: string[] = [];
+      const status = await git.status();
+      // ステージングされたファイルがマージされたファイル
+      mergedFiles.push(...status.staged);
+
+      const result: MergeResult = {
+        success: true,
+        mergedFiles,
+        hasConflicts: false,
+        conflicts: [],
+        status: 'success',
+      };
+
+      return createOk(result);
+    } catch (err) {
+      // GitResponseErrorの場合、コンフリクトの可能性がある
+      if (err instanceof GitResponseError) {
+        try {
+          const git = simpleGit(path);
+          const status = await git.status();
+
+          if (status.conflicted.length > 0) {
+            // コンフリクトが発生している
+            const conflicts: GitConflictInfo[] = status.conflicted.map((filePath) => ({
+              reason: 'merge conflict',
+              filePath,
+              type: 'content' as const,
+            }));
+
+            const result: MergeResult = {
+              success: false,
+              mergedFiles: [],
+              hasConflicts: true,
+              conflicts,
+              status: 'conflicts',
+            };
+
+            return createOk(result);
+          }
+        } catch {
+          // ステータス取得に失敗した場合は通常のエラーとして扱う
+        }
+      }
+
+      // その他のエラー
+      const gitError = toGitError(`merge ${sourceBranch}`)(err);
+      return createErr(gitError);
+    }
+  };
+
+  const abortMerge: GitEffects['abortMerge'] = async (path) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      await git.raw(['merge', '--abort']);
+    });
+    return mapErrForResult(result, toGitError('abortMerge'));
+  };
+
+  const getConflictedFiles: GitEffects['getConflictedFiles'] = async (path) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      const status = await git.status();
+      return status.conflicted;
+    });
+    return mapErrForResult(result, toGitError('getConflictedFiles'));
+  };
+
+  const getConflictContent: GitEffects['getConflictContent'] = async (path, filePath) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+
+      // 現在のブランチ名を取得
+      const status = await git.status();
+      const currentBranch = status.current ? branchName(status.current) : branchName('HEAD');
+
+      // :2: = ours (現在のブランチ), :3: = theirs (マージ元)
+      let oursContent = '';
+      let theirsContent = '';
+      let baseContent: string | null = null;
+
+      try {
+        oursContent = await git.show([`:2:${filePath}`]);
+      } catch {
+        oursContent = '';
+      }
+
+      try {
+        theirsContent = await git.show([`:3:${filePath}`]);
+      } catch {
+        theirsContent = '';
+      }
+
+      try {
+        baseContent = await git.show([`:1:${filePath}`]);
+      } catch {
+        baseContent = null;
+      }
+
+      const conflictContent: ConflictContent = {
+        filePath,
+        oursContent,
+        theirsContent,
+        baseContent,
+        theirBranch: currentBranch, // マージ元のブランチ名は取得が難しいため暫定的に現在のブランチを使用
+      };
+
+      return conflictContent;
+    });
+    return mapErrForResult(result, toGitError('getConflictContent'));
+  };
+
+  const markConflictResolved: GitEffects['markConflictResolved'] = async (path, filePath) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      await git.add(filePath);
+    });
+    return mapErrForResult(result, toGitError('markConflictResolved'));
+  };
+
   return {
     createBranch,
     switchBranch,
@@ -181,5 +311,10 @@ export const createSimpleGitEffects = (): Omit<
     hasRemote,
     getStatus,
     getDiff,
+    merge,
+    abortMerge,
+    getConflictedFiles,
+    getConflictContent,
+    markConflictResolved,
   };
 };

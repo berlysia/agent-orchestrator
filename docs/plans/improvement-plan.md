@@ -25,8 +25,8 @@
 | Phase 5.1: プランナーの品質向上 | 高 | ✅ 完了 | 4-6時間 | 2026-01-19 | ab6fcea, 2a4f003 |
 | Phase 5.2: ジャッジによるタスク品質評価 | 高 | ✅ 完了 | 6-8時間 | 2026-01-19 | 546f55d |
 | Phase 5.3: 並列実行サポート | 高 | ✅ 完了 | 10-12時間 | 2026-01-19 | 5a9870d |
-| Phase 5.4: 直列タスクの変更統合 | 中 | ✅ 完了 | 6-8時間 | 2026-01-19 | - |
-| Phase 5.5: 統合処理とコンフリクト解決 | 中 | 📋 計画中 | 8-10時間 | - | - |
+| Phase 5.4: 直列タスクの変更統合 | 中 | ✅ 完了 | 6-8時間 | 2026-01-19 | 6c19086 |
+| Phase 5.5: 統合処理とコンフリクト解決 | 中 | ✅ 完了 | 11-12時間 | 2026-01-19 | - |
 | Phase 5.6: ジャッジ判定の高度化 | 中 | 📋 計画中 | 4-6時間 | - | - |
 | Phase 5.7: 全体完了判定 | 中 | 📋 計画中 | 4-6時間 | - | - |
 | Phase 5.8: プランナーの継続性 | 低 | 📋 計画中 | 4-6時間 | - | - |
@@ -1198,79 +1198,104 @@ const executeTaskInWorktree = async (
 
 ---
 
-### 5.5 統合処理とコンフリクト解決 【優先度: 中】
+### 5.5 統合処理とコンフリクト解決 【優先度: 中】【ステータス: ✅ 完了】
+
+**完了日**: 2026-01-19
 
 #### 問題点
 - 並列実行されたタスクの結果がそれぞれのworktreeに散らばっている
 - 統合時にコンフリクトが発生する可能性
+- 並列実行後、各タスクの変更は個別ブランチにpushされるが、統合されない
 
-#### 改善内容
+#### 改善内容（実装済み）
 
-**5.5.1 統合タスクの自動生成**
+**5.5.1 型定義の追加**
 
-並列タスク完了後に統合タスクを生成:
+新規ファイル `src/types/integration.ts`:
+- `GitConflictInfo`: コンフリクト情報
+- `ConflictContent`: コンフリクトの詳細内容
+- `MergeResult`: マージ結果（成功/コンフリクト/失敗）
+- `IntegrationResult`: 統合結果（統合済みタスク、コンフリクトタスク、解決タスクID）
+- `IntegrationFinalResult`: 統合ブランチ取り込み方法（discriminated union: 'pr' | 'command'）
+- `ConflictResolutionInfo`: コンフリクト解決情報
+
+`src/types/errors.ts`に`GitMergeConflictError`を追加。
+
+**5.5.2 GitEffectsインターフェース拡張**
+
+`src/adapters/vcs/git-effects.ts`にマージ関連メソッドを追加:
+- `merge`: ブランチをマージ（コンフリクト検出含む）
+- `abortMerge`: 進行中のマージを中止
+- `getConflictedFiles`: コンフリクトファイルのリスト取得
+- `getConflictContent`: コンフリクト内容の詳細取得
+- `markConflictResolved`: コンフリクト解決済みマーク
+
+**5.5.3 simple-git-effectsの実装**
+
+`src/adapters/vcs/simple-git-effects.ts`にマージ操作を実装:
+- `merge`: simple-gitの`merge()`を使用、`GitResponseError`でコンフリクト検出
+- `getConflictedFiles`: `status().conflicted`配列を取得
+- `getConflictContent`: `git show :1:/:2:/:3:`でbase/ours/theirsを取得
+- その他のマージ補助メソッド
+
+**5.5.4 integration-operationsの実装**
+
+新規ファイル `src/core/orchestrator/integration-operations.ts`:
+
+主要関数:
+- `integrateTasks`: 複数タスクブランチを統合ブランチ（`integration/merge-{timestamp}`）にマージ
+- `createConflictResolutionTask`: コンフリクト発生時に解決タスクを自動生成
+- `buildConflictResolutionPrompt`: コンフリクト解決用の詳細プロンプトを構築
+- `collectConflictDetails`: コンフリクト詳細情報を収集
+- `finalizeIntegration`: 統合ブランチの取り込み方法を決定
+
+統合フロー:
+1. 統合ブランチを作成（`integration/merge-{timestamp}`）
+2. 各タスクのブランチを順番にマージ
+3. コンフリクト発生時はアボートして解決タスクを生成
+4. 統合成功時：設定/オプションに基づいて処理
+   - `pr`: GitHub CLIでPR作成（リモート必須、現時点では未実装）
+   - `command`: マージコマンドを出力
+   - `auto`（デフォルト）: リモートがあればPR、なければコマンド（現時点ではコマンド）
+
+**5.5.5 設定の追加**
+
+`src/types/config.ts`に統合設定を追加:
 ```typescript
-const createIntegrationTask = (completedParallelTasks: Task[]): Task => {
-  return createInitialTask({
-    id: taskId(`integration-${randomUUID()}`),
-    repo: repoPath(appRepoPath),
-    branch: branchName('integration/merge-parallel-changes'),
-    scopePaths: mergeScopePaths(completedParallelTasks),
-    acceptance: 'All parallel changes are merged without conflicts',
-  });
-};
+integration: {
+  method: 'pr' | 'command' | 'auto'  // デフォルト: 'auto'
+}
 ```
 
-**5.5.2 コンフリクト検出と解決タスク化**
+**5.5.6 orchestrate.tsへの統合**
 
-統合時にコンフリクトを検出:
-```typescript
-const integrateParallelChanges = async (tasks: Task[]) => {
-  const mergeResult = await attemptMerge(tasks);
+`src/core/orchestrator/orchestrate.ts`の`executeInstruction`に統合フェーズを追加:
+- 完了タスクが複数ある場合のみ統合を実行
+- 統合結果に基づいてユーザーに適切な情報を表示
+- コンフリクト発生時は解決タスクIDを表示
 
-  if (mergeResult.hasConflicts) {
-    // コンフリクト解決タスクを生成
-    const resolutionTask = createConflictResolutionTask(
-      mergeResult.conflicts
-    );
+#### 実装ファイル
+- `src/types/integration.ts`: 統合関連の型定義（新規）
+- `src/types/errors.ts`: GitMergeConflictError追加
+- `src/types/config.ts`: 統合設定追加
+- `src/adapters/vcs/git-effects.ts`: マージ関連メソッド追加
+- `src/adapters/vcs/simple-git-effects.ts`: マージ操作の実装
+- `src/core/orchestrator/integration-operations.ts`: 統合処理ロジック（新規）
+- `src/core/orchestrator/orchestrate.ts`: 統合フェーズ追加
+- `tests/unit/core/orchestrator/integration-operations.test.ts`: 統合処理テスト（新規、12テスト）
+- `tests/unit/adapters/vcs/simple-git-effects-merge.test.ts`: マージ機能テストプレースホルダー（新規）
 
-    // タスクストアに追加して実行
-    await taskStore.createTask(resolutionTask);
-    return { needsResolution: true, resolutionTaskId: resolutionTask.id };
-  }
-
-  return { needsResolution: false };
-};
-```
-
-**5.5.3 コンフリクト解決プロンプト**
-
-```typescript
-const buildConflictResolutionPrompt = (conflicts: GitConflict[]): string => {
-  return `You are tasked with resolving Git merge conflicts.
-
-CONFLICTS:
-${conflicts.map(c => `
-File: ${c.filePath}
-<<<<<<< HEAD
-${c.oursContent}
-=======
-${c.theirsContent}
->>>>>>> ${c.theirBranch}
-`).join('\n\n')}
-
-Your task:
-1. Analyze both versions
-2. Resolve conflicts by choosing the best combination
-3. Ensure the final code is syntactically correct
-4. Preserve functionality from both sides when possible
-
-Output the resolved content for each file.`;
-};
-```
+#### テスト結果
+- ユニットテスト: 59/59 パス ✅
+- ビルド: 成功 ✅
+- Lint: 成功 ✅
 
 #### 推定工数
-8-10時間
+11-12時間（実績: 約11時間）
+
+#### 備考
+- PR作成機能（GitHub CLI統合）は将来の実装予定
+- 現時点では統合ブランチのマージコマンドを出力する形で運用
 
 ---
 

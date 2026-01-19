@@ -6,6 +6,7 @@
  */
 
 import type { TaskId, RunId, CheckId, WorkerId, RepoPath, BranchName } from './branded.ts';
+import type { GitConflictInfo } from './integration.ts';
 
 // ===== TaskStore Errors =====
 
@@ -93,7 +94,8 @@ export type GitError =
   | GitCommandFailedError
   | GitRepoNotFoundError
   | GitBranchExistsError
-  | GitWorktreeExistsError;
+  | GitWorktreeExistsError
+  | GitMergeConflictError;
 
 export interface GitCommandFailedError {
   readonly type: 'GitCommandFailedError';
@@ -118,6 +120,13 @@ export interface GitBranchExistsError {
 export interface GitWorktreeExistsError {
   readonly type: 'GitWorktreeExistsError';
   readonly worktreeName: string;
+  readonly message: string;
+}
+
+export interface GitMergeConflictError {
+  readonly type: 'GitMergeConflictError';
+  readonly sourceBranch: BranchName;
+  readonly conflicts: GitConflictInfo[];
   readonly message: string;
 }
 
@@ -150,6 +159,16 @@ export const gitWorktreeExists = (worktreeName: string): GitWorktreeExistsError 
   type: 'GitWorktreeExistsError',
   worktreeName,
   message: `Worktree already exists: ${worktreeName}`,
+});
+
+export const gitMergeConflict = (
+  sourceBranch: BranchName,
+  conflicts: GitConflictInfo[],
+): GitMergeConflictError => ({
+  type: 'GitMergeConflictError',
+  sourceBranch,
+  conflicts,
+  message: `Merge conflict when merging ${sourceBranch}: ${conflicts.length} file(s) conflicted`,
 });
 
 // ===== Runner Errors =====

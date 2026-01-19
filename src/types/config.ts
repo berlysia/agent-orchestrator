@@ -51,6 +51,16 @@ const ChecksConfigSchema = z
   .default({ enabled: true, failureMode: 'block' });
 
 /**
+ * 統合設定のスキーマ
+ */
+const IntegrationConfigSchema = z
+  .object({
+    /** 統合方法: 'pr' (Pull Request作成), 'command' (コマンド出力), 'auto' (自動判定) */
+    method: z.enum(['pr', 'command', 'auto']).default('auto'),
+  })
+  .default({ method: 'auto' });
+
+/**
  * プロジェクト設定のスキーマ定義（Zod）
  *
  * `.agent/config.json` に保存される設定
@@ -86,6 +96,9 @@ export const ConfigSchema = z.object({
 
   /** チェック設定 */
   checks: ChecksConfigSchema,
+
+  /** 統合設定 */
+  integration: IntegrationConfigSchema,
 });
 
 /**
@@ -112,6 +125,9 @@ export function createDefaultConfig(params: {
     checks: {
       enabled: true,
       failureMode: 'block',
+    },
+    integration: {
+      method: 'auto',
     },
   };
 }
