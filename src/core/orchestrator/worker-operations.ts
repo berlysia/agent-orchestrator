@@ -155,7 +155,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     // 2. RunID生成（タスクIDベース）
     const timestamp = Date.now();
     const theRunId = runId(`run-${task.id}-${timestamp}`);
-    const logPath = `runs/${theRunId}.log`;
+    const logPath = deps.agentCoordPath
+      ? path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`)
+      : `runs/${theRunId}.log`;
 
     // 3. 実行メタデータを初期化
     const run = createInitialRun({
@@ -163,6 +165,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       taskId: task.id,
       agentType: deps.agentType,
       logPath,
+      plannerRunId: task.plannerRunId ?? null,
+      plannerLogPath: task.plannerLogPath ?? null,
+      plannerMetadataPath: task.plannerMetadataPath ?? null,
     });
 
     // メタデータ保存
@@ -351,7 +356,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     // 2. RunID生成（タスクIDベース）
     const timestamp = Date.now();
     const theRunId = runId(`run-${task.id}-${timestamp}`);
-    const logPath = `runs/${theRunId}.log`;
+    const logPath = deps.agentCoordPath
+      ? path.join(deps.agentCoordPath, 'runs', `${theRunId}.log`)
+      : `runs/${theRunId}.log`;
 
     // 3. 実行メタデータを初期化
     const run = createInitialRun({
@@ -359,6 +366,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       taskId: task.id,
       agentType: deps.agentType,
       logPath,
+      plannerRunId: task.plannerRunId ?? null,
+      plannerLogPath: task.plannerLogPath ?? null,
+      plannerMetadataPath: task.plannerMetadataPath ?? null,
     });
 
     // メタデータ保存

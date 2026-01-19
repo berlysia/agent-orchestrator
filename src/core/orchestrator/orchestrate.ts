@@ -73,6 +73,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     taskStore: deps.taskStore,
     runnerEffects: deps.runnerEffects,
     appRepoPath: deps.config.appRepoPath,
+    coordRepoPath: deps.config.agentCoordPath,
     agentType: getAgentType(deps.config, 'planner'),
     model: getModel(deps.config, 'planner'),
     judgeModel: getModel(deps.config, 'judge'),

@@ -11,6 +11,7 @@ import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
 import { z } from 'zod';
 import { createPlannerSession } from '../../types/planner-session.ts';
+import path from 'node:path';
 
 /**
  * Planner依存関係
@@ -20,6 +21,7 @@ export interface PlannerDeps {
   readonly runnerEffects: RunnerEffects;
   readonly sessionEffects?: PlannerSessionEffects;
   readonly appRepoPath: string;
+  readonly coordRepoPath: string;
   readonly agentType: 'claude' | 'codex';
   readonly model?: string;
   readonly judgeModel?: string;
@@ -226,11 +228,14 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     await appendPlanningLog(`=== Planning Start ===\n`);
     await appendPlanningLog(`Instruction: ${userInstruction}\n`);
 
+    const plannerLogPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.log`);
+    const plannerMetadataPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.json`);
+
     const planningRun = createInitialRun({
       id: runId(plannerRunId),
       taskId: taskId(plannerRunId),
       agentType: deps.agentType,
-      logPath: `runs/${plannerRunId}.log`,
+      logPath: plannerLogPath,
     });
 
     const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
@@ -323,7 +328,9 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           };
           await deps.runnerEffects.saveRunMetadata(failedRun);
 
-          return createErr(ioError('planTasks.parseOutput', `${errorMsg} (after ${maxRetries} attempts)`));
+          return createErr(
+            ioError('planTasks.parseOutput', `${errorMsg} (after ${maxRetries} attempts)`),
+          );
         }
 
         // 再試行（パースエラーをフィードバックとして使用）
@@ -678,26 +685,39 @@ Output only the JSON array, no additional text.`;
     const taskIds: string[] = [];
     const errors: string[] = [];
 
+    // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
+    const sessionShort = additionalRunId.substring(18, 26); // "planner-additional-" の後の8文字
+    const makeUniqueTaskId = (rawId: string): string => {
+      const baseId = rawId.replace(/^task-/, '');
+      return `task-${sessionShort}-${baseId}`;
+    };
+
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
+      const uniqueTaskId = makeUniqueTaskId(rawTaskId);
       const task = createInitialTask({
-        id: taskId(rawTaskId),
+        id: taskId(uniqueTaskId),
         repo: repoPath(deps.appRepoPath),
         branch: branchName(breakdown.branch),
         scopePaths: breakdown.scopePaths,
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(depId)),
+        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId))),
+        plannerRunId: additionalRunId,
+        plannerLogPath: additionalPlannerLogPath,
+        plannerMetadataPath: additionalPlannerMetadataPath,
       });
 
       const result = await deps.taskStore.createTask(task);
       if (!result.ok) {
-        errors.push(`Failed to create task ${rawTaskId}: ${result.err.message}`);
+        const errorMsg = `Failed to create task ${uniqueTaskId} (from ${rawTaskId}): ${result.err.message}`;
+        errors.push(errorMsg);
+        await appendPlanningLog(`❌ ${errorMsg}\n`);
         continue;
       }
 
-      taskIds.push(rawTaskId);
+      taskIds.push(uniqueTaskId);
     }
 
     if (taskIds.length > 0) {
