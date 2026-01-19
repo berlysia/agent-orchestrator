@@ -17,8 +17,9 @@ import {
   computeExecutionLevels,
   detectSerialChains,
 } from './dependency-graph.ts';
-import { executeLevelParallel, computeBlockedTasks } from './parallel-executor.ts';
+import { computeBlockedTasks } from './parallel-executor.ts';
 import { executeSerialChain } from './serial-executor.ts';
+import { executeDynamically } from './dynamic-scheduler.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
@@ -323,45 +324,31 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-        const level = levels[levelIndex];
-        if (!level) continue;
+      if (parallelTasks.length > 0) {
+        console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
 
-        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
-
-        const levelResult = await executeLevelParallel(
-          level,
+        const dynamicResult = await executeDynamically(
+          parallelTasks.map((t) => t.id),
+          parallelGraph!,
           schedulerOps,
           workerOps,
           judgeOps,
+          deps.taskStore,
+          deps.maxWorkers ?? 3,
           schedulerState,
           blockedTaskIdsSet,
-          deps.taskStore,
         );
 
         // スケジューラ状態を更新
-        schedulerState = levelResult.updatedSchedulerState;
+        schedulerState = dynamicResult.updatedSchedulerState;
 
         // 結果を集計
-        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
-
-        // 失敗タスクの依存先をブロック
-        if (levelResult.failed.length > 0) {
-          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-          console.log(
-            `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
-          );
-
-          for (const tid of newBlocked) {
-            blockedTaskIdsSet.add(tid);
-            await schedulerOps.blockTask(tid);
-            blockedTaskIds.push(String(tid));
-          }
-        }
+        completedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
+        failedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
+        blockedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
 
         console.log(
-          `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
+          `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
         );
       }
 
@@ -662,7 +649,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       const parallelTasks = allTasks.filter((task) => !serialTaskIds.has(task.id));
       const parallelGraph =
         parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
-      const { levels } = parallelGraph ? computeExecutionLevels(parallelGraph) : { levels: [] };
 
       // 8. 直列チェーンを実行
       const resumeSerialChainFailedTasks: TaskId[] = [];
@@ -706,42 +692,29 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      // 9. 並列レベルを実行
-      for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-        const level = levels[levelIndex];
-        if (!level) continue;
+      // 9. 並列タスクを動的スケジューリングで実行
+      if (parallelTasks.length > 0) {
+        console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
 
-        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
-
-        const levelResult = await executeLevelParallel(
-          level,
+        const dynamicResult = await executeDynamically(
+          parallelTasks.map((t) => t.id),
+          parallelGraph!,
           schedulerOps,
           workerOps,
           judgeOps,
+          deps.taskStore,
+          deps.maxWorkers ?? 3,
           schedulerState,
           blockedTaskIdsSet,
-          deps.taskStore,
         );
 
-        schedulerState = levelResult.updatedSchedulerState;
-        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
-
-        if (levelResult.failed.length > 0) {
-          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-          console.log(
-            `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
-          );
-
-          for (const tid of newBlocked) {
-            blockedTaskIdsSet.add(tid);
-            await schedulerOps.blockTask(tid);
-            blockedTaskIds.push(String(tid));
-          }
-        }
+        schedulerState = dynamicResult.updatedSchedulerState;
+        completedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
+        failedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
+        blockedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
 
         console.log(
-          `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
+          `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
         );
       }
 
@@ -1028,7 +1001,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const parallelTasks = tasks.filter((task) => !serialTaskIds.has(String(task.id)));
         const parallelGraph =
           parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
-        const { levels } = parallelGraph ? computeExecutionLevels(parallelGraph) : { levels: [] };
 
         let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
         const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
@@ -1073,42 +1045,29 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
-        // 並列レベルを実行
-        for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
-          const level = levels[levelIndex];
-          if (!level) continue;
+        // 並列タスクを動的スケジューリングで実行
+        if (parallelTasks.length > 0) {
+          console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
 
-          console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
-
-          const levelResult = await executeLevelParallel(
-            level,
+          const dynamicResult = await executeDynamically(
+            parallelTasks.map((t) => t.id),
+            parallelGraph!,
             schedulerOps,
             workerOps,
             judgeOps,
+            deps.taskStore,
+            deps.maxWorkers ?? 3,
             schedulerState,
             blockedTaskIds,
-            deps.taskStore,
           );
 
-          schedulerState = levelResult.updatedSchedulerState;
-          allCompletedTaskIds.push(...levelResult.completed.map((id) => String(id)));
-          allFailedTaskIds.push(...levelResult.failed.map((id) => String(id)));
-
-          if (levelResult.failed.length > 0) {
-            const newBlocked = computeBlockedTasks(levelResult.failed, graph);
-            console.log(
-              `  ⚠️  Blocking ${newBlocked.length} dependent tasks due to failures: ${newBlocked.map((id) => String(id)).join(', ')}`,
-            );
-
-            for (const tid of newBlocked) {
-              blockedTaskIds.add(tid);
-              await schedulerOps.blockTask(tid);
-              allFailedTaskIds.push(String(tid));
-            }
-          }
+          schedulerState = dynamicResult.updatedSchedulerState;
+          allCompletedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
+          allFailedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
+          allFailedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
 
           console.log(
-            `  ✅ Parallel Level ${levelIndex} completed: ${levelResult.completed.length} succeeded, ${levelResult.failed.length} failed`,
+            `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
           );
         }
 
