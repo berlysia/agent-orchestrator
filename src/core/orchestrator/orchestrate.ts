@@ -358,6 +358,64 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
+      // 10. 最終完了判定フェーズ
+      if (completedTaskIds.length > 0 || failedTaskIds.length > 0) {
+        console.log('\n🎯 Final completion evaluation...');
+
+        // 完了タスクと失敗タスクの詳細を取得
+        const completedTaskDescriptions: string[] = [];
+        const failedTaskDescriptions: string[] = [];
+
+        for (const rawTaskId of completedTaskIds) {
+          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+          if (taskResult.ok) {
+            completedTaskDescriptions.push(
+              `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
+            );
+          }
+        }
+
+        for (const rawTaskId of failedTaskIds) {
+          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+          if (taskResult.ok) {
+            failedTaskDescriptions.push(
+              `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
+            );
+          }
+        }
+
+        // 最終判定を実行
+        const finalJudgement = await plannerOps.judgeFinalCompletion(
+          userInstruction,
+          completedTaskDescriptions,
+          failedTaskDescriptions,
+        );
+
+        if (finalJudgement.completionScore !== undefined) {
+          console.log(`  Completion score: ${finalJudgement.completionScore}%`);
+        }
+
+        if (finalJudgement.isComplete) {
+          console.log('  ✅ Original instruction fully satisfied');
+        } else {
+          console.log('  ⚠️  Original instruction not fully satisfied');
+
+          if (finalJudgement.missingAspects.length > 0) {
+            console.log('  Missing aspects:');
+            finalJudgement.missingAspects.forEach((aspect, idx) => {
+              console.log(`    ${idx + 1}. ${aspect}`);
+            });
+          }
+
+          if (finalJudgement.additionalTaskSuggestions.length > 0) {
+            console.log('  Suggested additional tasks:');
+            finalJudgement.additionalTaskSuggestions.forEach((suggestion, idx) => {
+              console.log(`    ${idx + 1}. ${suggestion}`);
+            });
+          }
+        }
+      }
+
       const success = failedTaskIds.length === 0;
       console.log(
         `\n${success ? '🎉' : '⚠️ '} Orchestration ${success ? 'completed' : 'finished with errors'}`,

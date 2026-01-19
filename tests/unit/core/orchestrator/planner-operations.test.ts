@@ -8,9 +8,12 @@ import {
   buildPlanningPromptWithFeedback,
   parseQualityJudgement,
   formatFeedbackForRetry,
+  buildFinalCompletionPrompt,
+  parseFinalCompletionJudgement,
   TaskTypeEnum,
   type TaskBreakdown,
   type TaskQualityJudgement,
+  type FinalCompletionJudgement,
 } from '../../../../src/core/orchestrator/planner-operations.ts';
 
 describe('Planner Operations', () => {
@@ -457,6 +460,129 @@ This looks good.`;
         assert(prompt.includes(userInstruction));
         assert(prompt.includes(feedback));
         assert(prompt.includes('QUALITY FEEDBACK FROM PREVIOUS ATTEMPT'));
+      });
+    });
+  });
+
+  describe('Final Completion Judgement', () => {
+    describe('buildFinalCompletionPrompt', () => {
+      it('should include user instruction and task lists', () => {
+        const userInstruction = 'Build a TODO app';
+        const completedTasks = ['Implement user authentication', 'Create database schema'];
+        const failedTasks = ['Add email notifications'];
+
+        const prompt = buildFinalCompletionPrompt(userInstruction, completedTasks, failedTasks);
+
+        assert(prompt.includes(userInstruction));
+        assert(prompt.includes('COMPLETED TASKS'));
+        assert(prompt.includes('FAILED TASKS'));
+        assert(prompt.includes('Implement user authentication'));
+        assert(prompt.includes('Add email notifications'));
+      });
+
+      it('should handle empty task lists', () => {
+        const userInstruction = 'Build a TODO app';
+        const completedTasks: string[] = [];
+        const failedTasks: string[] = [];
+
+        const prompt = buildFinalCompletionPrompt(userInstruction, completedTasks, failedTasks);
+
+        assert(prompt.includes('(No tasks completed)'));
+        assert(prompt.includes('(No tasks failed)'));
+      });
+
+      it('should include evaluation criteria', () => {
+        const prompt = buildFinalCompletionPrompt('test', [], []);
+
+        assert(prompt.includes('isComplete'));
+        assert(prompt.includes('missingAspects'));
+        assert(prompt.includes('additionalTaskSuggestions'));
+        assert(prompt.includes('completionScore'));
+      });
+    });
+
+    describe('parseFinalCompletionJudgement', () => {
+      it('should parse valid complete judgement', () => {
+        const output = JSON.stringify({
+          isComplete: true,
+          missingAspects: [],
+          additionalTaskSuggestions: [],
+          completionScore: 100,
+        });
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, true);
+        assert.deepStrictEqual(result.missingAspects, []);
+        assert.deepStrictEqual(result.additionalTaskSuggestions, []);
+        assert.strictEqual(result.completionScore, 100);
+      });
+
+      it('should parse valid incomplete judgement', () => {
+        const output = JSON.stringify({
+          isComplete: false,
+          missingAspects: ['Email notifications not implemented'],
+          additionalTaskSuggestions: ['Implement email notification system'],
+          completionScore: 75,
+        });
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, false);
+        assert.strictEqual(result.missingAspects.length, 1);
+        assert.strictEqual(result.additionalTaskSuggestions.length, 1);
+        assert.strictEqual(result.completionScore, 75);
+      });
+
+      it('should parse judgement in markdown code block', () => {
+        const output = `Here is the evaluation:
+\`\`\`json
+{
+  "isComplete": false,
+  "missingAspects": ["Documentation missing"],
+  "additionalTaskSuggestions": ["Add API documentation"],
+  "completionScore": 80
+}
+\`\`\``;
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, false);
+        assert.strictEqual(result.missingAspects[0], 'Documentation missing');
+      });
+
+      it('should return default (complete) on parse error', () => {
+        const output = 'This is not valid JSON';
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, true);
+        assert.deepStrictEqual(result.missingAspects, []);
+        assert.deepStrictEqual(result.additionalTaskSuggestions, []);
+      });
+
+      it('should return default (complete) on validation error', () => {
+        const output = JSON.stringify({
+          isComplete: 'not a boolean',
+          missingAspects: 'not an array',
+        });
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, true);
+      });
+
+      it('should handle missing optional completionScore', () => {
+        const output = JSON.stringify({
+          isComplete: true,
+          missingAspects: [],
+          additionalTaskSuggestions: [],
+        });
+
+        const result = parseFinalCompletionJudgement(output);
+
+        assert.strictEqual(result.isComplete, true);
+        assert.strictEqual(result.completionScore, undefined);
       });
     });
   });

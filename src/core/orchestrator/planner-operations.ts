@@ -61,6 +61,32 @@ export const TaskQualityJudgementSchema = z.object({
 });
 
 /**
+ * 最終完了判定結果
+ *
+ * WHY: 全タスク完了後に元のユーザー指示が本当に達成されたかを評価
+ */
+export interface FinalCompletionJudgement {
+  /** 元の指示が完全に達成されたか */
+  isComplete: boolean;
+  /** 達成できていない側面のリスト */
+  missingAspects: string[];
+  /** 追加で必要なタスクの提案 */
+  additionalTaskSuggestions: string[];
+  /** 達成度スコア（0-100） */
+  completionScore?: number;
+}
+
+/**
+ * 最終完了判定結果のZodスキーマ
+ */
+export const FinalCompletionJudgementSchema = z.object({
+  isComplete: z.boolean(),
+  missingAspects: z.array(z.string()),
+  additionalTaskSuggestions: z.array(z.string()),
+  completionScore: z.number().min(0).max(100).optional(),
+});
+
+/**
  * TaskBreakdownスキーマバージョン
  *
  * WHY: 将来的なスキーマ変更時のマイグレーション対応のため
@@ -410,8 +436,62 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     });
   };
 
+  /**
+   * 最終完了判定を実行
+   *
+   * 全タスク完了後に元のユーザー指示が本当に達成されたかを評価する。
+   *
+   * WHY: タスクが完了しても、元の指示が完全に達成されていない場合があるため
+   *
+   * @param userInstruction 元のユーザー指示
+   * @param completedTaskDescriptions 完了したタスクの説明リスト
+   * @param failedTaskDescriptions 失敗したタスクの説明リスト
+   * @returns 最終完了判定結果
+   */
+  const judgeFinalCompletion = async (
+    userInstruction: string,
+    completedTaskDescriptions: string[],
+    failedTaskDescriptions: string[],
+  ): Promise<FinalCompletionJudgement> => {
+    // judgeModelが設定されていない場合は常に完了とみなす
+    if (!deps.judgeModel) {
+      return {
+        isComplete: true,
+        missingAspects: [],
+        additionalTaskSuggestions: [],
+      };
+    }
+
+    const finalPrompt = buildFinalCompletionPrompt(
+      userInstruction,
+      completedTaskDescriptions,
+      failedTaskDescriptions,
+    );
+
+    // Judge用エージェントを実行
+    const runResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(finalPrompt, deps.appRepoPath, deps.judgeModel)
+        : await deps.runnerEffects.runCodexAgent(finalPrompt, deps.appRepoPath, deps.judgeModel);
+
+    if (isErr(runResult)) {
+      console.warn(
+        `⚠️  Final completion judge failed: ${runResult.err.message}, assuming complete`,
+      );
+      return {
+        isComplete: true,
+        missingAspects: [],
+        additionalTaskSuggestions: [],
+      };
+    }
+
+    const judgement = parseFinalCompletionJudgement(runResult.val.finalResponse || '');
+    return judgement;
+  };
+
   return {
     planTasks,
+    judgeFinalCompletion,
   };
 };
 
@@ -813,5 +893,124 @@ export const parseAgentOutputWithErrors = (output: string): ParseResult => {
       `Unexpected error during parsing: ${error instanceof Error ? error.message : String(error)}`,
     );
     return { tasks, errors };
+  }
+};
+
+/**
+ * 最終完了判定プロンプトを構築
+ *
+ * WHY: 全タスク完了後に元のユーザー指示が本当に達成されたかを評価
+ *
+ * @param userInstruction 元のユーザー指示
+ * @param completedTaskDescriptions 完了したタスクの説明リスト
+ * @param failedTaskDescriptions 失敗したタスクの説明リスト
+ * @returns 最終完了判定プロンプト
+ */
+export const buildFinalCompletionPrompt = (
+  userInstruction: string,
+  completedTaskDescriptions: string[],
+  failedTaskDescriptions: string[],
+): string => {
+  return `You are evaluating if the original user instruction was fully completed.
+
+ORIGINAL INSTRUCTION:
+${userInstruction}
+
+COMPLETED TASKS:
+${completedTaskDescriptions.length > 0 ? completedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks completed)'}
+
+FAILED TASKS:
+${failedTaskDescriptions.length > 0 ? failedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks failed)'}
+
+Your task:
+1. Determine if the original instruction is fully satisfied based on the completed tasks
+2. Identify any missing aspects or functionality that were requested but not delivered
+3. Suggest additional tasks if needed to fully satisfy the original instruction
+4. Rate the overall completion (0-100%)
+
+Evaluation criteria:
+- Does the completed work cover all aspects mentioned in the original instruction?
+- Are there any implicit requirements that weren't addressed?
+- Do failed tasks affect the completeness of the original instruction?
+- Is the delivered functionality complete and usable?
+
+Output format (JSON):
+{
+  "isComplete": true/false,
+  "missingAspects": ["List of aspects not yet addressed"],
+  "additionalTaskSuggestions": ["List of tasks needed to complete the instruction"],
+  "completionScore": 0-100
+}
+
+If isComplete is true, missingAspects and additionalTaskSuggestions should be empty arrays.
+If isComplete is false, provide specific, actionable items in missingAspects and additionalTaskSuggestions.
+
+Output only the JSON object, no additional text.`;
+};
+
+/**
+ * 最終完了判定結果をパース
+ *
+ * エージェントが返すJSON形式の最終完了判定結果をパースする。
+ * マークダウンコードブロックに囲まれている場合も対応。
+ * パース失敗時はデフォルトで完了（isComplete: true）を返す。
+ *
+ * WHY: 最終判定エージェントの失敗により追加タスクが無限に生成されないよう、
+ *      デフォルトで完了とすることで安全性を優先
+ *
+ * @param output エージェントの出力
+ * @returns 最終完了判定結果
+ */
+export const parseFinalCompletionJudgement = (output: string): FinalCompletionJudgement => {
+  // デフォルト値（判定失敗時は完了とみなす）
+  const defaultJudgement: FinalCompletionJudgement = {
+    isComplete: true,
+    missingAspects: [],
+    additionalTaskSuggestions: [],
+  };
+
+  try {
+    // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
+    const codeBlockMatch = output.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    const objectMatch = output.match(/(\{[\s\S]*\})/);
+
+    const jsonMatch = codeBlockMatch || objectMatch;
+
+    if (!jsonMatch || !jsonMatch[1]) {
+      console.warn('⚠️  Final completion judgement: No JSON found, assuming complete');
+      return defaultJudgement;
+    }
+
+    const jsonStr = jsonMatch[1];
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(jsonStr.trim());
+    } catch (parseError) {
+      console.warn(
+        `⚠️  Final completion judgement: JSON parse failed, assuming complete: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+      );
+      return defaultJudgement;
+    }
+
+    // Zodスキーマでバリデーション
+    const validationResult = FinalCompletionJudgementSchema.safeParse(parsed);
+
+    if (!validationResult.success) {
+      const zodErrors = validationResult.error.issues
+        .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+        .join(', ');
+      console.warn(
+        `⚠️  Final completion judgement: Validation failed, assuming complete: ${zodErrors}`,
+      );
+      return defaultJudgement;
+    }
+
+    return validationResult.data;
+  } catch (error) {
+    console.warn(
+      `⚠️  Final completion judgement: Unexpected error, assuming complete: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return defaultJudgement;
   }
 };
