@@ -450,7 +450,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
 
           // 継続実行の提案
-          console.log(`\n  💡 Tip: Run \`agent continue --session ${sessionId}\` to generate additional tasks`);
+          console.log('\n  💡 Tip: Run the following command to generate additional tasks:');
+          console.log(`\n     agent continue --session ${sessionId}\n`);
         }
 
         // 最終判定結果をセッションに保存
