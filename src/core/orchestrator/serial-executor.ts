@@ -233,15 +233,9 @@ export async function executeSerialChain(
 
   // 最後にpush
   if (completed.length > 0 && worktreePath) {
-    const lastTaskId = completed[completed.length - 1];
-    if (lastTaskId) {
-      const lastTask = await taskStore.readTask(lastTaskId);
-      if (lastTask.ok) {
-        const pushResult = await workerOps.pushChanges(lastTask.val, worktreePath);
-        if (isErr(pushResult)) {
-          console.warn(`  ⚠️  Failed to push changes: ${pushResult.err.message}`);
-        }
-      }
+    const pushResult = await workerOps.pushChanges(worktreePath);
+    if (isErr(pushResult)) {
+      console.warn(`  ⚠️  Failed to push changes: ${pushResult.err.message}`);
     }
   }
 

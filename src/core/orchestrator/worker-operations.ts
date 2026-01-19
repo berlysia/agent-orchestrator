@@ -10,7 +10,7 @@ import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
 import type { TaskId, WorktreePath, RepoPath, BranchName } from '../../types/branded.ts';
-import { branchName, runId } from '../../types/branded.ts';
+import { branchName, runId, repoPath } from '../../types/branded.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
@@ -296,16 +296,23 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   /**
    * リモートにpush
    *
-   * @param task タスク
+   * WHY: worktreeの現在のブランチ名を取得してpushすることで、serial chain実行時の
+   *      ブランチ名の不一致を防ぐ（最初のタスクのブランチ名を使用）
+   *
    * @param worktreePath worktreeのパス
    * @returns Result型
    */
   const pushChanges = async (
-    task: Task,
     worktreePath: WorktreePath,
   ): Promise<Result<void, OrchestratorError>> => {
-    const taskBranchName = getTaskBranchName(task);
-    const pushResult = await deps.gitEffects.push(worktreePath, 'origin', taskBranchName);
+    // worktreeの現在のブランチ名を取得
+    const currentBranchResult = await deps.gitEffects.getCurrentBranch(repoPath(worktreePath));
+    if (isErr(currentBranchResult)) {
+      return createErr(currentBranchResult.err);
+    }
+
+    const currentBranch = currentBranchResult.val;
+    const pushResult = await deps.gitEffects.push(worktreePath, 'origin', currentBranch);
 
     if (isErr(pushResult)) {
       return createErr(pushResult.err);
@@ -513,7 +520,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       }
 
       // 4. リモートにpush
-      const pushResult = await pushChanges(task, worktreePath);
+      const pushResult = await pushChanges(worktreePath);
       if (isErr(pushResult)) {
         return createErr(pushResult.err);
       }
@@ -609,7 +616,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       }
 
       // 5. リモートにpush
-      const pushResult = await pushChanges(task, existingWorktreePath);
+      const pushResult = await pushChanges(existingWorktreePath);
       if (isErr(pushResult)) {
         return createErr(pushResult.err);
       }
