@@ -21,6 +21,7 @@ import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { randomUUID } from 'node:crypto';
+import { getTaskBranchName } from './worker-operations.ts';
 
 /**
  * Integration依存関係
@@ -77,15 +78,17 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }> = [];
 
     // 各タスクのブランチを順番にマージ
+    // WHY: タスク固有のブランチ名を使用する必要がある（task.branchは元のブランチ名）
     for (const task of completedTasks) {
-      const mergeResult = await gitEffects.merge(repo, task.branch);
+      const taskBranchName = getTaskBranchName(task);
+      const mergeResult = await gitEffects.merge(repo, taskBranchName);
 
       if (isErr(mergeResult)) {
         // マージエラー
         conflictedTaskIds.push(task.id);
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: task.branch,
+          sourceBranch: taskBranchName,
           targetBranch: integrationBranch,
           result: {
             success: false,
@@ -105,7 +108,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         conflictedTaskIds.push(task.id);
         failedMerges.push({
           taskId: task.id,
-          sourceBranch: task.branch,
+          sourceBranch: taskBranchName,
           conflicts: merge.conflicts,
         });
 
@@ -114,7 +117,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
 
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: task.branch,
+          sourceBranch: taskBranchName,
           targetBranch: integrationBranch,
           result: merge,
         });
@@ -123,7 +126,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         integratedTaskIds.push(task.id);
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: task.branch,
+          sourceBranch: taskBranchName,
           targetBranch: integrationBranch,
           result: merge,
         });
