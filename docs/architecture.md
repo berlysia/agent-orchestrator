@@ -236,3 +236,12 @@ const taskId: TaskId = workerId; // ❌
 
 - `tests/unit/file-store.test.ts` - TaskStore CRUD/CAS操作テスト
 - `tests/e2e/cli-basic.test.ts` - CLI基本コマンドE2Eテスト
+
+## Planned Architecture
+
+### GitHub Integration (Phase 2)
+
+GitHub統合は**未実装（計画段階）**で、詳細は以下の計画/設計ドキュメントを参照します：
+
+- [docs/plans/github-integration-plan.md](plans/github-integration-plan.md)
+- [docs/plans/github-integration-design.md](plans/github-integration-design.md)
