@@ -402,8 +402,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               console.log(`  ⚠️  Integration completed with conflicts`);
               console.log(`    Integrated: ${result.integratedTaskIds.length} tasks`);
               console.log(`    Conflicted: ${result.conflictedTaskIds.length} tasks`);
+
+              // WHY: デバッグのため、各タスクのマージ結果を詳細表示
+              if (result.mergeDetails && result.mergeDetails.length > 0) {
+                console.log(`\n    Merge details:`);
+                for (const detail of result.mergeDetails) {
+                  const status = detail.result.success ? '✅' : '❌';
+                  const statusText = detail.result.status || 'unknown';
+                  console.log(
+                    `      ${status} ${detail.taskId}: ${statusText} (${detail.sourceBranch})`,
+                  );
+                  if (!detail.result.success && detail.result.hasConflicts) {
+                    console.log(
+                      `         Conflicts in ${detail.result.conflicts?.length || 0} files`,
+                    );
+                  }
+                }
+              }
+
               if (result.conflictResolutionTaskId) {
-                console.log(`    Resolution task: ${result.conflictResolutionTaskId}`);
+                console.log(`\n    Resolution task: ${result.conflictResolutionTaskId}`);
               }
             }
           } else {

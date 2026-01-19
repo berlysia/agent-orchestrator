@@ -57,7 +57,25 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
   ): Promise<Result<IntegrationResult, OrchestratorError>> => {
     const repo = repoPath(appRepoPath);
 
-    // 統合ブランチを作成
+    // WHY: タスク実行中にベースブランチが更新される可能性があるため、
+    // 統合ブランチを作成する前に最新のベースブランチを取得する
+    const switchToBaseResult = await gitEffects.switchBranch(repo, baseBranch);
+    if (isErr(switchToBaseResult)) {
+      return createErr(switchToBaseResult.err);
+    }
+
+    // リモートがあれば最新の変更を取得
+    // WHY: リモートがない場合（ローカルリポジトリのみ）でも動作するようにエラーは無視
+    const hasRemoteResult = await gitEffects.hasRemote(repo, 'origin');
+    if (hasRemoteResult.ok && hasRemoteResult.val) {
+      const pullResult = await gitEffects.pull(repo, 'origin', baseBranch);
+      if (isErr(pullResult)) {
+        // pullに失敗しても続行（例: リモートに変更がない、認証失敗など）
+        console.warn(`  ⚠️  Failed to pull latest changes from origin: ${pullResult.err.message}`);
+      }
+    }
+
+    // 統合ブランチを作成（最新のbaseBranchから）
     const timestamp = Date.now();
     const integrationBranch = branchName(`integration/merge-${timestamp}`);
 
