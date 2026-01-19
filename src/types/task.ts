@@ -92,6 +92,23 @@ export const TaskSchema = z.object({
 
   /** プランナーのメタデータファイルパス（絶対パス、オプショナル） */
   plannerMetadataPath: z.string().nullable().optional(),
+
+  /** Judge判定フィードバック（継続実行用） */
+  judgementFeedback: z
+    .object({
+      /** 現在のリトライ回数（0から開始） */
+      iteration: z.number().int().nonnegative(),
+      /** 最大リトライ回数 */
+      maxIterations: z.number().int().positive(),
+      /** 最後の判定結果 */
+      lastJudgement: z.object({
+        reason: z.string(),
+        missingRequirements: z.array(z.string()),
+        evaluatedAt: z.string().datetime(),
+      }),
+    })
+    .nullable()
+    .optional(),
 });
 
 /**

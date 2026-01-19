@@ -4,6 +4,7 @@ import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
 import type { TaskId } from '../../types/branded.ts';
 import type { TaskStoreError } from '../../types/errors.ts';
+import { validationError } from '../../types/errors.ts';
 import type { AgentType } from '../../types/config.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
@@ -290,10 +291,59 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
     }));
   };
 
+  /**
+   * タスクを継続実行のためにREADY状態に戻し、判定フィードバックを記録
+   *
+   * WHY: Judgeが「未完了だが継続可能」と判定した場合、フィードバックを付けて再実行する
+   *
+   * @param tid タスクID
+   * @param judgement 判定結果
+   * @param maxIterations 最大リトライ回数（デフォルト: 3）
+   * @returns 更新後のタスク（Result型）
+   */
+  const markTaskForContinuation = async (
+    tid: TaskId,
+    judgement: JudgementResult,
+    maxIterations = 3,
+  ): Promise<Result<Task, TaskStoreError>> => {
+    const taskResult = await deps.taskStore.readTask(tid);
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
+    const currentIteration = task.judgementFeedback?.iteration ?? 0;
+    const newIteration = currentIteration + 1;
+
+    // 最大リトライ回数を超えた場合はエラー
+    if (newIteration >= maxIterations) {
+      return createErr(
+        validationError(`Task ${tid} exceeded max iterations (${maxIterations})`),
+      );
+    }
+
+    return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({
+      ...currentTask,
+      state: TaskState.READY,
+      owner: null,
+      updatedAt: new Date().toISOString(),
+      judgementFeedback: {
+        iteration: newIteration,
+        maxIterations,
+        lastJudgement: {
+          reason: judgement.reason,
+          missingRequirements: judgement.missingRequirements ?? [],
+          evaluatedAt: new Date().toISOString(),
+        },
+      },
+    }));
+  };
+
   return {
     judgeTask,
     markTaskAsCompleted,
     markTaskAsBlocked,
+    markTaskForContinuation,
   };
 };
 

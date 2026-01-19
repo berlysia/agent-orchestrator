@@ -211,7 +211,22 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 5. エージェントを実行
     // WHY: 役割ごとに最適なモデルを使用（Config から取得）
-    const agentPrompt = `Execute task: ${task.acceptance}`;
+    let agentPrompt = `Execute task: ${task.acceptance}`;
+
+    // フィードバックがある場合は追加（継続実行のため）
+    // WHY: 前回の判定で指摘された問題を明示することで、エージェントが適切に対処できる
+    if (task.judgementFeedback) {
+      agentPrompt += `\n\n⚠️  Previous attempt (iteration ${task.judgementFeedback.iteration}/${task.judgementFeedback.maxIterations}):`;
+      agentPrompt += `\nReason: ${task.judgementFeedback.lastJudgement.reason}`;
+      if (task.judgementFeedback.lastJudgement.missingRequirements.length > 0) {
+        agentPrompt += `\n\nMissing requirements:`;
+        for (const req of task.judgementFeedback.lastJudgement.missingRequirements) {
+          agentPrompt += `\n  - ${req}`;
+        }
+      }
+      agentPrompt += `\n\nPlease address these issues and complete the task.`;
+    }
+
     const agentResult =
       deps.agentType === 'claude'
         ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!)
@@ -424,6 +439,20 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     if (previousFeedback) {
       agentPrompt += `\n\nPrevious task feedback:\n${previousFeedback}`;
+    }
+
+    // Judge判定フィードバックがある場合は追加（継続実行のため）
+    // WHY: 前回の判定で指摘された問題を明示することで、エージェントが適切に対処できる
+    if (task.judgementFeedback) {
+      agentPrompt += `\n\n⚠️  Previous attempt (iteration ${task.judgementFeedback.iteration}/${task.judgementFeedback.maxIterations}):`;
+      agentPrompt += `\nReason: ${task.judgementFeedback.lastJudgement.reason}`;
+      if (task.judgementFeedback.lastJudgement.missingRequirements.length > 0) {
+        agentPrompt += `\n\nMissing requirements:`;
+        for (const req of task.judgementFeedback.lastJudgement.missingRequirements) {
+          agentPrompt += `\n  - ${req}`;
+        }
+      }
+      agentPrompt += `\n\nPlease address these issues and complete the task.`;
     }
 
     const agentResult =

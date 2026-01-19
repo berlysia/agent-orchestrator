@@ -140,6 +140,27 @@ export async function executeLevelParallel(
         console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
         await judgeOps.markTaskAsCompleted(tid);
         return { taskId: tid, status: 'completed' as const, workerId: wid };
+      } else if (judgement.shouldContinue) {
+        // 継続実行可能な場合、タスクをREADY状態に戻す
+        console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);
+        if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
+          console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
+        }
+
+        const continuationResult = await judgeOps.markTaskForContinuation(tid, judgement);
+        if (isErr(continuationResult)) {
+          // 最大リトライ回数を超えた場合
+          console.log(
+            `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
+          );
+          await judgeOps.markTaskAsBlocked(tid);
+          return { taskId: tid, status: 'failed' as const, workerId: wid };
+        }
+
+        console.log(
+          `  ➡️  [${rawTaskId}] Scheduled for re-execution (iteration ${continuationResult.val.judgementFeedback?.iteration ?? 0})`,
+        );
+        return { taskId: tid, status: 'retry' as const, workerId: wid };
       } else {
         console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
         await judgeOps.markTaskAsBlocked(tid);
@@ -175,9 +196,10 @@ export async function executeLevelParallel(
       const taskResult = result.value;
       if (taskResult.status === 'completed') {
         completed.push(taskResult.taskId);
-      } else {
+      } else if (taskResult.status === 'failed') {
         failed.push(taskResult.taskId);
       }
+      // 'retry' ステータスの場合はどちらにも追加しない（次の実行サイクルで再処理される）
     } else {
       // Promise自体が失敗した場合（通常は発生しない）
       console.error(`  ❌ Task promise rejected: ${result.reason}`);

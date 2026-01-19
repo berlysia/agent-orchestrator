@@ -77,115 +77,153 @@ export async function executeSerialChain(
     const rawTaskId = String(tid);
     const wid = `worker-serial-${rawTaskId}`;
 
-    try {
-      // タスクを取得
-      const taskResult = await taskStore.readTask(tid);
-      if (!taskResult.ok) {
-        console.log(`  ⚠️  [${rawTaskId}] Failed to load task: ${taskResult.err.message}`);
-        failed.push(tid);
-        break; // チェーン実行を中断
-      }
+    // 継続実行のための内部ループ
+    let shouldRetry = true;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
 
-      const task = taskResult.val;
+    while (shouldRetry && retryCount < MAX_RETRIES) {
+      shouldRetry = false; // デフォルトでリトライしない
 
-      // スケジューラにタスクを要求
-      const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
-
-      if (isErr(claimResult)) {
-        console.log(`  ⚠️  [${rawTaskId}] Failed to claim task: ${claimResult.err.message}`);
-        failed.push(tid);
-        break;
-      }
-
-      const { newState } = claimResult.val;
-      schedulerState = newState;
-
-      // 最初のタスク: 新しいworktreeを作成
-      if (i === 0) {
-        console.log(`  🚀 [${rawTaskId}] Creating worktree and executing first task...`);
-        const setupResult = await workerOps.setupWorktree(task);
-        if (isErr(setupResult)) {
-          console.log(`  ❌ [${rawTaskId}] Failed to create worktree: ${setupResult.err.message}`);
-          await schedulerOps.blockTask(tid);
+      try {
+        // タスクを取得
+        const taskResult = await taskStore.readTask(tid);
+        if (!taskResult.ok) {
+          console.log(`  ⚠️  [${rawTaskId}] Failed to load task: ${taskResult.err.message}`);
           failed.push(tid);
-          break;
+          break; // チェーン実行を中断
         }
-        worktreePath = setupResult.val;
 
-        // タスク実行
-        const runResult = await workerOps.executeTask(task, worktreePath);
-        if (isErr(runResult) || !runResult.val.success) {
-          const errorMsg = isErr(runResult)
-            ? runResult.err.message
-            : runResult.val.error ?? 'Unknown error';
-          console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
-          await schedulerOps.blockTask(tid);
+        const task = taskResult.val;
+
+        // スケジューラにタスクを要求
+        const claimResult = await schedulerOps.claimTask(schedulerState, rawTaskId, wid);
+
+        if (isErr(claimResult)) {
+          console.log(`  ⚠️  [${rawTaskId}] Failed to claim task: ${claimResult.err.message}`);
           failed.push(tid);
           break;
         }
 
-        previousFeedback = runResult.val.runId; // 次のタスクに渡す
-      } else {
-        // 後続タスク: 既存のworktreeを再利用
-        console.log(`  🚀 [${rawTaskId}] Executing task in existing worktree...`);
-        const runResult = await workerOps.executeTaskInExistingWorktree(
-          task,
-          worktreePath!,
-          previousFeedback,
-        );
-        if (isErr(runResult) || !runResult.val.success) {
-          const errorMsg = isErr(runResult)
-            ? runResult.err.message
-            : runResult.val.error ?? 'Unknown error';
-          console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
+        const { newState } = claimResult.val;
+        schedulerState = newState;
+
+        // 最初のタスク: 新しいworktreeを作成
+        if (i === 0 && retryCount === 0) {
+          console.log(`  🚀 [${rawTaskId}] Creating worktree and executing first task...`);
+          const setupResult = await workerOps.setupWorktree(task);
+          if (isErr(setupResult)) {
+            console.log(`  ❌ [${rawTaskId}] Failed to create worktree: ${setupResult.err.message}`);
+            await schedulerOps.blockTask(tid);
+            failed.push(tid);
+            break;
+          }
+          worktreePath = setupResult.val;
+
+          // タスク実行
+          const runResult = await workerOps.executeTask(task, worktreePath);
+          if (isErr(runResult) || !runResult.val.success) {
+            const errorMsg = isErr(runResult)
+              ? runResult.err.message
+              : runResult.val.error ?? 'Unknown error';
+            console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
+            await schedulerOps.blockTask(tid);
+            failed.push(tid);
+            break;
+          }
+
+          previousFeedback = runResult.val.runId; // 次のタスクに渡す
+        } else {
+          // 後続タスク or リトライ: 既存のworktreeを再利用
+          console.log(`  🚀 [${rawTaskId}] Executing task in existing worktree...`);
+          const runResult = await workerOps.executeTaskInExistingWorktree(
+            task,
+            worktreePath!,
+            previousFeedback,
+          );
+          if (isErr(runResult) || !runResult.val.success) {
+            const errorMsg = isErr(runResult)
+              ? runResult.err.message
+              : runResult.val.error ?? 'Unknown error';
+            console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
+            await schedulerOps.blockTask(tid);
+            failed.push(tid);
+            break;
+          }
+
+          previousFeedback = runResult.val.runId;
+        }
+
+        // 変更をコミット
+        if (worktreePath) {
+          const commitResult = await workerOps.commitChanges(task, worktreePath);
+          if (isErr(commitResult)) {
+            console.log(`  ❌ [${rawTaskId}] Failed to commit changes: ${commitResult.err.message}`);
+            await schedulerOps.blockTask(tid);
+            failed.push(tid);
+            break;
+          }
+        }
+
+        // Judge判定
+        console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
+        const judgementResult = await judgeOps.judgeTask(tid);
+        if (isErr(judgementResult)) {
+          console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
           await schedulerOps.blockTask(tid);
           failed.push(tid);
           break;
         }
 
-        previousFeedback = runResult.val.runId;
-      }
+        const judgement = judgementResult.val;
+        if (judgement.success) {
+          console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
+          await judgeOps.markTaskAsCompleted(tid);
+          completed.push(tid);
+        } else if (judgement.shouldContinue) {
+          // 継続実行可能な場合
+          console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);
+          if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
+            console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
+          }
 
-      // 変更をコミット
-      if (worktreePath) {
-        const commitResult = await workerOps.commitChanges(task, worktreePath);
-        if (isErr(commitResult)) {
-          console.log(`  ❌ [${rawTaskId}] Failed to commit changes: ${commitResult.err.message}`);
-          await schedulerOps.blockTask(tid);
+          const continuationResult = await judgeOps.markTaskForContinuation(tid, judgement);
+          if (isErr(continuationResult)) {
+            // 最大リトライ回数を超えた場合
+            console.log(
+              `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
+            );
+            await judgeOps.markTaskAsBlocked(tid);
+            failed.push(tid);
+            break; // チェーン実行を中断
+          }
+
+          console.log(
+            `  ➡️  [${rawTaskId}] Re-executing task (iteration ${continuationResult.val.judgementFeedback?.iteration ?? 0})`,
+          );
+          shouldRetry = true;
+          retryCount++;
+          previousFeedback = continuationResult.val.judgementFeedback?.lastJudgement.reason;
+        } else {
+          console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
+          await judgeOps.markTaskAsBlocked(tid);
           failed.push(tid);
-          break;
+          break; // チェーン実行を中断
         }
-      }
 
-      // Judge判定
-      console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-      const judgementResult = await judgeOps.judgeTask(tid);
-      if (isErr(judgementResult)) {
-        console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
+        // Workerスロットを解放
+        schedulerState = removeRunningWorker(schedulerState, workerId(wid));
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`  ❌ [${rawTaskId}] Unexpected error: ${errorMessage}`);
         await schedulerOps.blockTask(tid);
         failed.push(tid);
         break;
       }
+    } // while (shouldRetry)
 
-      const judgement = judgementResult.val;
-      if (judgement.success) {
-        console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
-        await judgeOps.markTaskAsCompleted(tid);
-        completed.push(tid);
-      } else {
-        console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
-        await judgeOps.markTaskAsBlocked(tid);
-        failed.push(tid);
-        break; // チェーン実行を中断
-      }
-
-      // Workerスロットを解放
-      schedulerState = removeRunningWorker(schedulerState, workerId(wid));
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`  ❌ [${rawTaskId}] Unexpected error: ${errorMessage}`);
-      await schedulerOps.blockTask(tid);
-      failed.push(tid);
+    // リトライループを抜けた後、失敗していればチェーンを中断
+    if (failed.includes(tid)) {
       break;
     }
   }
