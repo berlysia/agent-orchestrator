@@ -19,7 +19,7 @@ import path from 'node:path';
 export interface PlannerDeps {
   readonly taskStore: TaskStore;
   readonly runnerEffects: RunnerEffects;
-  readonly sessionEffects?: PlannerSessionEffects;
+  readonly sessionEffects: PlannerSessionEffects;
   readonly appRepoPath: string;
   readonly coordRepoPath: string;
   readonly agentType: 'claude' | 'codex';
@@ -622,8 +622,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           };
     await deps.runnerEffects.saveRunMetadata(completedRun);
 
-    // セッション情報を保存（sessionEffectsが提供されている場合のみ）
-    if (deps.sessionEffects && taskIds.length > 0) {
+    // セッション情報を保存
+    if (taskIds.length > 0) {
       const session = createPlannerSession(plannerRunId, userInstruction);
       session.generatedTasks = taskBreakdowns;
       session.plannerLogPath = plannerLogPath;
@@ -730,16 +730,6 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     sessionId: string,
     missingAspects: string[],
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
-    // sessionEffectsが提供されていない場合はエラー
-    if (!deps.sessionEffects) {
-      return createErr(
-        ioError(
-          'planAdditionalTasks',
-          'Session management is not enabled (sessionEffects not provided)',
-        ),
-      );
-    }
-
     // セッションを読み込み
     const loadResult = await deps.sessionEffects.loadSession(sessionId);
     if (isErr(loadResult)) {
