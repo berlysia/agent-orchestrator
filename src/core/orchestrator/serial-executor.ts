@@ -51,6 +51,7 @@ export interface SerialChainExecutionResult {
  * @param workerOps ワーカー操作
  * @param judgeOps ジャッジ操作
  * @param schedulerState 現在のスケジューラ状態
+ * @param serialChainTaskRetries タスク実行の最大リトライ回数
  * @returns 直列チェーン実行結果
  */
 export async function executeSerialChain(
@@ -60,6 +61,7 @@ export async function executeSerialChain(
   workerOps: WorkerOperations,
   judgeOps: JudgeOperations,
   schedulerState: SchedulerState,
+  serialChainTaskRetries: number,
 ): Promise<SerialChainExecutionResult> {
   const completed: TaskId[] = [];
   const failed: TaskId[] = [];
@@ -80,9 +82,8 @@ export async function executeSerialChain(
     // 継続実行のための内部ループ
     let shouldRetry = true;
     let retryCount = 0;
-    const MAX_RETRIES = 3;
 
-    while (shouldRetry && retryCount < MAX_RETRIES) {
+    while (shouldRetry && retryCount < serialChainTaskRetries) {
       shouldRetry = false; // デフォルトでリトライしない
 
       try {

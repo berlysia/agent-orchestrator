@@ -25,7 +25,7 @@ export interface PlannerDeps {
   readonly agentType: 'claude' | 'codex';
   readonly model?: string;
   readonly judgeModel?: string;
-  readonly maxQualityRetries?: number;
+  readonly plannerQualityRetries?: number;
   readonly qualityThreshold?: number;
   readonly strictContextValidation?: boolean;
 }
@@ -223,7 +223,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
     const plannerRunId = `planner-${randomUUID()}`;
-    const maxRetries = deps.maxQualityRetries ?? 5;
+    const maxRetries = deps.plannerQualityRetries ?? 5;
 
     const appendPlanningLog = async (content: string): Promise<void> => {
       const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);

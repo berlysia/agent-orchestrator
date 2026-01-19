@@ -19,6 +19,7 @@ export interface JudgeDeps {
   readonly appRepoPath: string;
   readonly agentType: AgentType;
   readonly model: string;
+  readonly judgeTaskRetries: number;
 }
 
 /**
@@ -277,13 +278,13 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
    *
    * @param tid タスクID
    * @param judgement 判定結果
-   * @param maxIterations 最大リトライ回数（デフォルト: 3）
+   * @param maxIterations 最大リトライ回数（configから取得）
    * @returns 更新後のタスク（Result型）
    */
   const markTaskForContinuation = async (
     tid: TaskId,
     judgement: JudgementResult,
-    maxIterations = 3,
+    maxIterations: number = deps.judgeTaskRetries,
   ): Promise<Result<Task, TaskStoreError>> => {
     const taskResult = await deps.taskStore.readTask(tid);
     if (!taskResult.ok) {

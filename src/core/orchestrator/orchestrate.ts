@@ -103,7 +103,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     agentType: getAgentType(deps.config, 'planner'),
     model: getModel(deps.config, 'planner'),
     judgeModel: getModel(deps.config, 'judge'),
-    maxQualityRetries: deps.config.planning.maxQualityRetries,
+    plannerQualityRetries: deps.config.iterations.plannerQualityRetries,
     qualityThreshold: deps.config.planning.qualityThreshold,
     strictContextValidation: deps.config.planning.strictContextValidation,
   });
@@ -123,6 +123,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     appRepoPath: deps.config.appRepoPath,
     agentType: getAgentType(deps.config, 'judge'),
     model: getModel(deps.config, 'judge') ?? 'claude-haiku-4-5',
+    judgeTaskRetries: deps.config.iterations.judgeTaskRetries,
   });
   const integrationOps = createIntegrationOperations({
     taskStore: deps.taskStore,
@@ -273,6 +274,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             workerOps,
             judgeOps,
             schedulerState,
+            deps.config.iterations.serialChainTaskRetries,
           );
           schedulerState = result.updatedSchedulerState;
 
@@ -672,6 +674,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             workerOps,
             judgeOps,
             schedulerState,
+            deps.config.iterations.serialChainTaskRetries,
           );
           schedulerState = result.updatedSchedulerState;
 
@@ -1034,6 +1037,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               workerOps,
               judgeOps,
               schedulerState,
+              deps.config.iterations.serialChainTaskRetries,
             );
             schedulerState = result.updatedSchedulerState;
 

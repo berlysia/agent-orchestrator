@@ -68,14 +68,36 @@ const IntegrationConfigSchema = z
  */
 const PlanningConfigSchema = z
   .object({
-    /** 品質評価の最大リトライ回数 */
-    maxQualityRetries: z.number().int().positive().default(5),
     /** 品質許容スコア閾値（0-100） */
     qualityThreshold: z.number().min(0).max(100).default(60),
     /** 厳格なコンテキスト検証を有効化（外部参照禁止、行番号必須など） */
     strictContextValidation: z.boolean().default(false),
   })
-  .default({ maxQualityRetries: 5, qualityThreshold: 60, strictContextValidation: false });
+  .default({ qualityThreshold: 60, strictContextValidation: false });
+
+/**
+ * 反復実行回数設定のスキーマ
+ *
+ * WHY: 各種リトライ・反復処理の最大回数を一元管理し、
+ *      プロジェクトの特性やタスクの複雑度に応じた柔軟な調整を可能にする
+ */
+const IterationsConfigSchema = z
+  .object({
+    /** Planner品質評価の最大リトライ回数 */
+    plannerQualityRetries: z.number().int().positive().default(5),
+    /** Judgeによるタスク判定の最大リトライ回数 */
+    judgeTaskRetries: z.number().int().positive().default(3),
+    /** Orchestrateメインループの最大反復回数 */
+    orchestrateMainLoop: z.number().int().positive().default(3),
+    /** Serial Executorでのタスク実行最大リトライ回数 */
+    serialChainTaskRetries: z.number().int().positive().default(3),
+  })
+  .default({
+    plannerQualityRetries: 5,
+    judgeTaskRetries: 3,
+    orchestrateMainLoop: 3,
+    serialChainTaskRetries: 3,
+  });
 
 /**
  * プロジェクト設定のスキーマ定義（Zod）
@@ -119,6 +141,9 @@ export const ConfigSchema = z.object({
 
   /** タスク計画品質評価設定 */
   planning: PlanningConfigSchema,
+
+  /** 反復実行回数設定 */
+  iterations: IterationsConfigSchema,
 });
 
 /**
@@ -155,9 +180,14 @@ export function createDefaultConfig(params: {
       method: 'auto',
     },
     planning: {
-      maxQualityRetries: 5,
       qualityThreshold: 60,
       strictContextValidation: false,
+    },
+    iterations: {
+      plannerQualityRetries: 5,
+      judgeTaskRetries: 3,
+      orchestrateMainLoop: 3,
+      serialChainTaskRetries: 3,
     },
   };
 }

@@ -17,7 +17,10 @@ export function createContinueCommand(): Command {
   const continueCommand = new Command('continue')
     .description('Continue from incomplete orchestration by generating additional tasks')
     .option('--session <id>', 'Session ID to continue from (default: most recent)')
-    .option('--max-iterations <n>', 'Maximum iteration limit', '3')
+    .option(
+      '--max-iterations <n>',
+      'Maximum iteration limit (overrides config.iterations.orchestrateMainLoop)',
+    )
     .option('--auto', 'Skip confirmation prompts', false)
     .option('--dry-run', 'Show what would be done without executing', false)
     .option('--config <path>', 'Path to configuration file')
@@ -25,7 +28,7 @@ export function createContinueCommand(): Command {
       try {
         await executeContinue({
           sessionId: options.session,
-          maxIterations: parseInt(options.maxIterations, 10),
+          maxIterations: options.maxIterations ? parseInt(options.maxIterations, 10) : undefined,
           autoConfirm: options.auto,
           dryRun: options.dryRun,
           configPath: options.config,
@@ -44,12 +47,12 @@ export function createContinueCommand(): Command {
  */
 async function executeContinue(params: {
   sessionId?: string;
-  maxIterations: number;
+  maxIterations?: number;
   autoConfirm: boolean;
   dryRun: boolean;
   configPath?: string;
 }): Promise<void> {
-  const { sessionId, maxIterations, autoConfirm, dryRun, configPath } = params;
+  const { sessionId, autoConfirm, dryRun, configPath } = params;
 
   // 設定ファイルを読み込み
   const config = await loadConfig(configPath);
@@ -124,6 +127,9 @@ async function executeContinue(params: {
 
   // 継続実行
   console.log(`🚀 Starting continue from session...\n`);
+
+  // maxIterationsはCLIオプション優先、なければconfigから取得
+  const maxIterations = params.maxIterations ?? config.iterations.orchestrateMainLoop;
 
   const resultOrError = await orchestrator.continueFromSession(targetSessionId, {
     maxIterations,
