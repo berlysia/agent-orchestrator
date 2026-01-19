@@ -14,6 +14,17 @@ import { TaskState } from '../../types/task.ts';
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
 /**
+ * タスク実行ステータス
+ *
+ * WHY: タスク実行結果の種類を明示的に定義し、一貫性を保つため
+ */
+const TaskExecutionStatus = {
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  CONTINUE: 'continue',
+} as const;
+
+/**
  * レベル実行結果
  *
  * WHY: 並列実行の結果を追跡し、失敗タスクの依存先をブロックするため
@@ -111,7 +122,7 @@ export async function executeLevelParallel(
 
         if (isErr(claimResult)) {
           console.log(`  ⚠️  [${rawTaskId}] Failed to claim task: ${claimResult.err.message}`);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
         const { task: claimedTask, newState } = claimResult.val;
@@ -145,7 +156,7 @@ export async function executeLevelParallel(
               : String(workerResult.err);
           console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
           await schedulerOps.blockTask(tid);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
         const result = workerResult.val;
@@ -155,7 +166,7 @@ export async function executeLevelParallel(
             `  ❌ [${rawTaskId}] Task execution failed: ${result.error ?? 'Unknown error'}`,
           );
           await schedulerOps.blockTask(tid);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
         // latestRunIdを更新（Judge判定でログを読むため）
@@ -168,7 +179,7 @@ export async function executeLevelParallel(
             `  ❌ [${rawTaskId}] Failed to update latestRunId: ${updateResult.err.message}`,
           );
           await schedulerOps.blockTask(tid);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
         // 3. Judge: 完了判定
@@ -178,7 +189,7 @@ export async function executeLevelParallel(
         if (isErr(judgementResult)) {
           console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
           await schedulerOps.blockTask(tid);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
 
         const judgement = judgementResult.val;
@@ -186,7 +197,7 @@ export async function executeLevelParallel(
         if (judgement.success) {
           console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
           await judgeOps.markTaskAsCompleted(tid);
-          return { taskId: tid, status: 'completed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.COMPLETED, workerId: wid };
         } else if (judgement.shouldContinue) {
           // 継続実行可能な場合、タスクをREADY状態に戻す
           console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);
@@ -201,17 +212,17 @@ export async function executeLevelParallel(
               `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
             );
             await judgeOps.markTaskAsBlocked(tid);
-            return { taskId: tid, status: 'failed' as const, workerId: wid };
+            return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
           }
 
           console.log(
             `  ➡️  [${rawTaskId}] Scheduled for re-execution (iteration ${continuationResult.val.judgementFeedback?.iteration ?? 0})`,
           );
-          return { taskId: tid, status: 'retry' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.CONTINUE, workerId: wid };
         } else {
           console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
           await judgeOps.markTaskAsBlocked(tid);
-          return { taskId: tid, status: 'failed' as const, workerId: wid };
+          return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -243,14 +254,14 @@ export async function executeLevelParallel(
     for (const result of results) {
       if (result.status === 'fulfilled') {
         const { taskId, status } = result.value;
-        if (status === 'completed') {
+        if (status === TaskExecutionStatus.COMPLETED) {
           completed.push(taskId);
           pendingTaskIds.delete(taskId);
-        } else if (status === 'failed') {
+        } else if (status === TaskExecutionStatus.FAILED) {
           failed.push(taskId);
           pendingTaskIds.delete(taskId);
         }
-        // status === 'retry' の場合はpendingに残す → 次のループで再実行
+        // status === TaskExecutionStatus.CONTINUE の場合はpendingに残す → 次のループで再実行
       } else {
         // Promise自体が失敗した場合（通常は発生しない）
         console.error(`  ❌ Task promise rejected: ${result.reason}`);
