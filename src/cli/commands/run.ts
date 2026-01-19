@@ -87,6 +87,9 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   console.log(`  Total tasks: ${result.taskIds.length}`);
   console.log(`  Completed: ${result.completedTaskIds.length}`);
   console.log(`  Failed: ${result.failedTaskIds.length}`);
+  if (result.blockedTaskIds && result.blockedTaskIds.length > 0) {
+    console.log(`  Blocked: ${result.blockedTaskIds.length}`);
+  }
   console.log(`  Status: ${result.success ? '✅ SUCCESS' : '❌ FAILED'}`);
   console.log(`${'='.repeat(60)}\n`);
 

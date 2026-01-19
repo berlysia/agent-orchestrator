@@ -9,6 +9,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tryCatchIntoResultAsync } from 'option-t/plain_result/try_catch_async';
 import { mapErrForResult } from 'option-t/plain_result/map_err';
+import { createErr } from 'option-t/plain_result';
 import type { Result } from 'option-t/plain_result';
 import type { RunnerError } from '../../types/errors.ts';
 import type { Run } from '../../types/run.ts';
@@ -139,10 +140,57 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   // ===== エージェント実行実装 =====
 
   /**
+   * Rate Limit エラーかどうかを判定
+   *
+   * WHY: Anthropic API は Rate Limit 超過時に HTTP 429 を返す
+   * 参考: https://docs.anthropic.com/en/api/rate-limits
+   */
+  const isRateLimited = (err: unknown): boolean => {
+    // RateLimitError インスタンスチェック（最優先）
+    if (err && typeof err === 'object' && err.constructor?.name === 'RateLimitError') {
+      return true;
+    }
+    // status === 429 チェック（次点）
+    if ((err as any)?.status === 429) {
+      return true;
+    }
+    // error.type === "rate_limit_error" チェック（ボディ型）
+    if ((err as any)?.error?.type === 'rate_limit_error') {
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * retry-after ヘッダから待機秒数を取得
+   *
+   * WHY: Rate Limit エラー時、API は retry-after ヘッダで待機時間を指示する
+   * 参考: https://docs.anthropic.com/en/api/rate-limits
+   */
+  const getRetryAfterSeconds = (err: unknown): number | undefined => {
+    const h = (err as any)?.headers;
+    const v =
+      typeof h?.get === 'function'
+        ? h.get('retry-after')
+        : typeof h === 'object' && h
+          ? h['retry-after'] ?? h['Retry-After']
+          : undefined;
+
+    if (v == null) return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  /**
    * Claude エージェントを実行
    *
    * ClaudeRunner の実装を関数型に移植。
    * unstable_v2_prompt を使用してエージェントを実行する。
+   *
+   * WHY: query() の AsyncGenerator では：
+   * - (1) ストリーム中に例外として投げられる
+   * - (2) 最終 result メッセージが success 以外になる
+   * のどちらかで握る必要がある
    */
   const runClaudeAgent = async (
     prompt: string,
@@ -165,11 +213,20 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
       });
 
       // ストリームからresultメッセージを収集
+      // WHY: subtype が success 以外の場合もあるため、明示的にチェック
+      // 参考: https://github.com/anthropics/claude-code/issues/6408
       let finalResult = '';
       for await (const message of responseStream) {
-        if (message.type === 'result' && message.subtype === 'success') {
-          finalResult = message.result;
-          break;
+        if (message.type === 'result') {
+          if (message.subtype === 'success') {
+            finalResult = message.result;
+            break;
+          } else {
+            // success以外（error等）の場合はエラーとして扱う
+            throw new Error(
+              `Agent execution failed: result.subtype = ${message.subtype}, message = ${JSON.stringify(message)}`,
+            );
+          }
         }
       }
 
@@ -178,6 +235,16 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         finalResponse: finalResult,
       } satisfies AgentOutput;
     });
+
+    // Rate Limit エラーの特別処理
+    if (!result.ok && isRateLimited(result.err)) {
+      const retryAfter = getRetryAfterSeconds(result.err);
+      const errorMessage = retryAfter
+        ? `Rate limit exceeded. Retry after ${retryAfter} seconds.`
+        : 'Rate limit exceeded.';
+
+      return createErr(agentExecutionError('claude', new Error(errorMessage)));
+    }
 
     return mapErrForResult(result, (e) => agentExecutionError('claude', e));
   };

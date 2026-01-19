@@ -45,8 +45,10 @@ export interface OrchestrationResult {
   taskIds: string[];
   /** 完了したタスクID配列 */
   completedTaskIds: string[];
-  /** 失敗したタスクID配列 */
+  /** 失敗したタスクID配列（実際に実行して失敗したタスクのみ） */
   failedTaskIds: string[];
+  /** ブロックされたタスクID配列（依存関係により実行されなかったタスク） */
+  blockedTaskIds: string[];
   /** 全体の成功可否 */
   success: boolean;
 }
@@ -144,6 +146,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   ): Promise<Result<OrchestrationResult, OrchestratorError>> => {
     const completedTaskIds: string[] = [];
     const failedTaskIds: string[] = [];
+    const blockedTaskIds: string[] = [];
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
 
     try {
@@ -205,7 +208,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         // 循環依存タスクをBLOCKEDにする
         for (const tid of graph.cyclicDependencies) {
           await schedulerOps.blockTask(tid);
-          failedTaskIds.push(String(tid));
+          blockedTaskIds.push(String(tid));
         }
       }
 
@@ -243,7 +246,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         );
         for (const tid of unschedulable) {
           await schedulerOps.blockTask(tid);
-          failedTaskIds.push(String(tid));
+          blockedTaskIds.push(String(tid));
         }
       }
 
@@ -292,26 +295,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             );
             for (const tid of dependentTasks) {
               await schedulerOps.blockTask(tid);
-              failedTaskIds.push(String(tid));
+              blockedTaskIds.push(String(tid));
             }
           }
         }
       }
 
       // 8. レベルごとに並列実行（直列チェーンを除外）
-      const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
+      const blockedTaskIdsSet = new Set(graph.cyclicDependencies ?? []);
       for (const tid of unschedulable) {
-        blockedTaskIds.add(tid);
+        blockedTaskIdsSet.add(tid);
       }
       // 直列チェーンのタスクもブロック済みとして扱う（並列実行から除外）
       for (const tid of serialTaskIds) {
-        blockedTaskIds.add(tid);
+        blockedTaskIdsSet.add(tid);
       }
       // Serial chainで失敗したタスクの依存先もブロック済みとして扱う
       if (serialChainFailedTasks.length > 0) {
         const dependentTasks = computeBlockedTasks(serialChainFailedTasks, graph);
         for (const tid of dependentTasks) {
-          blockedTaskIds.add(tid);
+          blockedTaskIdsSet.add(tid);
         }
       }
 
@@ -327,7 +330,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           workerOps,
           judgeOps,
           schedulerState,
-          blockedTaskIds,
+          blockedTaskIdsSet,
           deps.taskStore,
         );
 
@@ -346,9 +349,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           );
 
           for (const tid of newBlocked) {
-            blockedTaskIds.add(tid);
+            blockedTaskIdsSet.add(tid);
             await schedulerOps.blockTask(tid);
-            failedTaskIds.push(String(tid));
+            blockedTaskIds.push(String(tid));
           }
         }
 
@@ -504,11 +507,15 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       );
       console.log(`  Completed: ${completedTaskIds.length}`);
       console.log(`  Failed: ${failedTaskIds.length}`);
+      if (blockedTaskIds.length > 0) {
+        console.log(`  Blocked: ${blockedTaskIds.length}`);
+      }
 
       return createOk({
         taskIds,
         completedTaskIds,
         failedTaskIds,
+        blockedTaskIds,
         success,
       });
     } catch (error) {
@@ -538,6 +545,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   ): Promise<Result<OrchestrationResult, OrchestratorError>> => {
     const completedTaskIds: string[] = [];
     const failedTaskIds: string[] = [];
+    const blockedTaskIds: string[] = [];
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
 
     try {
@@ -630,7 +638,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       // 7. 実行（既に完了したタスクはスキップ）
-      const blockedTaskIds = new Set([
+      const blockedTaskIdsSet = new Set([
         ...(graph.cyclicDependencies ?? []),
         ...failedTaskIds.map((id) => taskId(id)),
       ]);
@@ -683,9 +691,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
             );
             for (const tid of dependentTasks) {
-              blockedTaskIds.add(tid);
+              blockedTaskIdsSet.add(tid);
               await schedulerOps.blockTask(tid);
-              failedTaskIds.push(String(tid));
+              blockedTaskIds.push(String(tid));
             }
           }
         }
@@ -704,7 +712,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           workerOps,
           judgeOps,
           schedulerState,
-          blockedTaskIds,
+          blockedTaskIdsSet,
           deps.taskStore,
         );
 
@@ -715,9 +723,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         if (levelResult.failed.length > 0) {
           const newBlocked = computeBlockedTasks(levelResult.failed, graph);
           for (const tid of newBlocked) {
-            blockedTaskIds.add(tid);
+            blockedTaskIdsSet.add(tid);
             await schedulerOps.blockTask(tid);
-            failedTaskIds.push(String(tid));
+            blockedTaskIds.push(String(tid));
           }
         }
       }
@@ -728,11 +736,15 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       );
       console.log(`  Completed: ${completedTaskIds.length}`);
       console.log(`  Failed: ${failedTaskIds.length}`);
+      if (blockedTaskIds.length > 0) {
+        console.log(`  Blocked: ${blockedTaskIds.length}`);
+      }
 
       return createOk({
         taskIds,
         completedTaskIds,
         failedTaskIds,
+        blockedTaskIds,
         success,
       });
     } catch (error) {
