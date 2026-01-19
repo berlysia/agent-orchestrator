@@ -216,7 +216,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
     const plannerRunId = `planner-${randomUUID()}`;
-    const maxRetries = deps.maxQualityRetries ?? 3;
+    const maxRetries = deps.maxQualityRetries ?? 5;
 
     const appendPlanningLog = async (content: string): Promise<void> => {
       const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);
@@ -256,6 +256,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     // 品質評価ループ
     let taskBreakdowns: TaskBreakdown[] = [];
     let accumulatedFeedback: string | undefined = undefined;
+    let consecutiveJsonErrors = 0;
+    const maxConsecutiveJsonErrors = 3;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       await appendPlanningLog(`\n--- Attempt ${attempt}/${maxRetries} ---\n`);
@@ -324,6 +326,41 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
         await appendPlanningLog(`\n❌ ${errorMsg}\n`);
 
+        // JSON構文エラーかどうかを判定
+        const isJsonParseError = parseResult.errors.some((err) => err.includes('JSON parse failed'));
+
+        if (isJsonParseError) {
+          consecutiveJsonErrors++;
+          await appendPlanningLog(
+            `⚠️  JSON parse error count: ${consecutiveJsonErrors}/${maxConsecutiveJsonErrors}\n`,
+          );
+
+          if (consecutiveJsonErrors >= maxConsecutiveJsonErrors) {
+            const failedRun = {
+              ...planningRun,
+              status: RunStatus.FAILURE,
+              finishedAt: new Date().toISOString(),
+              errorMessage: `${errorMsg} (${consecutiveJsonErrors} consecutive JSON parse errors)`,
+            };
+            await deps.runnerEffects.saveRunMetadata(failedRun);
+
+            return createErr(
+              ioError(
+                'planTasks.parseOutput',
+                `${errorMsg} (${consecutiveJsonErrors} consecutive JSON parse errors)`,
+              ),
+            );
+          }
+
+          // JSON構文エラーはattemptカウントを消費しない（再試行）
+          attempt--;
+          accumulatedFeedback = `${errorMsg}\n\nIMPORTANT: Previous output had JSON syntax errors. Ensure you output ONLY valid JSON without any extra text or malformed strings.`;
+          continue;
+        } else {
+          // JSON構文エラーではない検証エラーの場合はカウントをリセット
+          consecutiveJsonErrors = 0;
+        }
+
         if (attempt === maxRetries) {
           const failedRun = {
             ...planningRun,
@@ -343,7 +380,40 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         continue;
       }
 
+      // JSON構文エラーカウントをリセット（成功したので）
+      consecutiveJsonErrors = 0;
+
       taskBreakdowns = parseResult.tasks;
+
+      // 3. 依存関係の検証（段階的チェック）
+      // タスクが1つ以上あるが、依存関係エラーがある場合はクオリティチェックをスキップ
+      const hasDependencyErrors = parseResult.errors.some(
+        (err) =>
+          err.includes('Circular dependencies') || err.includes('depends on non-existent task'),
+      );
+
+      if (hasDependencyErrors) {
+        const errorMsg = `Dependency validation failed: ${parseResult.errors.join('; ')}`;
+        await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+
+        if (attempt === maxRetries) {
+          const failedRun = {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: `${errorMsg} (after ${maxRetries} attempts)`,
+          };
+          await deps.runnerEffects.saveRunMetadata(failedRun);
+
+          return createErr(
+            ioError('planTasks.dependencyValidation', `${errorMsg} (after ${maxRetries} attempts)`),
+          );
+        }
+
+        // 依存関係エラーをフィードバックとして再試行
+        accumulatedFeedback = errorMsg;
+        continue;
+      }
 
       // 4. 品質評価
       await appendPlanningLog(`\n=== Quality Evaluation ===\n`);
@@ -393,7 +463,9 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         return createErr(ioError('planTasks.qualityCheck', errorMsg));
       }
 
-      accumulatedFeedback = formatFeedbackForRetry(judgement);
+      // 前回の出力とフィードバックを含める（状態を引き継ぐ）
+      const previousOutput = JSON.stringify(taskBreakdowns, null, 2);
+      accumulatedFeedback = formatFeedbackForRetry(judgement, previousOutput);
     }
 
     // タスクをTaskStoreに保存
@@ -891,16 +963,26 @@ For each task, provide:
    - If a task exceeds 4 hours, consider breaking it down further
 8. context: COMPLETE implementation context (REQUIRED)
    This field must contain ALL information needed to execute the task WITHOUT referring to external sources.
+
+   CRITICAL REQUIREMENTS:
+   - NO external references (e.g., "see docs/plans/xxx.md", "refer to design document")
+   - Include EXACT file paths WITH line numbers (e.g., "src/types/errors.ts lines 20-89")
+   - List ALL required package installations (e.g., "Install: pnpm add option-t @octokit/rest")
+   - Provide CODE EXAMPLES for complex patterns (inline TypeScript/JavaScript snippets)
+   - Specify EXACT import statements and module paths
+
    Include the following:
    - Technical approach: Specific libraries, patterns, or techniques to use
-   - Dependencies: What must exist or be completed first
+   - Package dependencies: Exact package names and installation commands
    - Constraints: Technical limitations, compatibility requirements, performance targets
-   - Existing patterns: Reference similar implementations in the codebase with file paths
-   - Data models: Expected input/output formats, schema definitions
-   - Error handling: How to handle failures and edge cases
+   - Existing patterns: Reference similar implementations with EXACT file paths and line numbers
+   - Code examples: Inline code snippets for complex logic or patterns
+   - Data models: Complete type definitions, schema definitions with examples
+   - Error handling: How to handle failures and edge cases with code examples
    - Security: Authentication, authorization, validation requirements
    - Testing: What types of tests are needed and what they should cover
-   Example: "Implement JWT authentication using jsonwebtoken library. Use bcrypt for password hashing (cost factor 10). Store user credentials in existing users table (src/db/schema.sql). Follow existing auth pattern in src/auth/oauth.ts. Tokens expire in 24h, store in HTTP-only cookies. Handle login failures with exponential backoff. Validate email format before lookup. Add unit tests for token generation/validation, integration tests for login flow. Must pass OWASP security review."
+
+   Example: "Implement JWT authentication using jsonwebtoken library. Install: pnpm add jsonwebtoken bcrypt. Use bcrypt with cost factor 10 for password hashing. Store user credentials in existing users table (src/db/schema.sql lines 15-22). Follow existing auth pattern in src/auth/oauth.ts lines 45-89 for middleware structure. JWT payload structure: { userId: string, email: string, exp: number }. Store token in HTTP-only cookie named 'auth_token'. Implement rate limiting using existing RateLimiter class in src/middleware/rate-limit.ts lines 10-35 (5 attempts per minute per IP). Handle errors: validation errors (400), authentication failures (401), server errors (500). Code example for token generation: const token = jwt.sign({ userId, email }, SECRET, { expiresIn: '24h' }). Add unit tests in tests/auth/jwt.test.ts for token generation, validation, expiry. Add integration tests in tests/auth/login.test.ts for full login flow with database. Security: validate email format with regex /^[^@]+@[^@]+\\.[^@]+$/, sanitize inputs, use constant-time comparison for passwords. Must pass existing security linter rules in .eslintrc.json."
 9. dependencies: Array of task IDs this task depends on (REQUIRED)
    - Empty array [] if the task has no dependencies
    - List task IDs that must be completed BEFORE this task can start
@@ -1003,11 +1085,17 @@ Evaluation criteria:
 2. **Clarity**: Are descriptions clear and actionable?
 3. **Acceptance criteria**: Are acceptance criteria specific, testable, and verifiable?
 4. **Context sufficiency**: Does the context field contain ALL information needed to execute the task WITHOUT external references?
+   CRITICAL CHECKS:
+   - NO external references (e.g., "see docs/...", "refer to design doc") - REJECT if found
+   - File paths must include line numbers (e.g., "src/file.ts lines 10-20") - REJECT if missing
+   - Package dependencies must include installation commands (e.g., "Install: pnpm add package") - REJECT if missing
+   - Complex patterns must include code examples - REJECT if missing for non-trivial logic
+   - Import statements and module paths must be specified exactly
    - Technical approach, dependencies, constraints specified?
-   - Existing patterns referenced with file paths?
    - Data models, error handling, security, testing requirements included?
 5. **Granularity**: Are tasks appropriately sized (1-4 hours each)?
-6. **Independence**: Can each task be implemented independently?
+6. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
+7. **Dependency validity**: Are all task dependencies valid (no circular dependencies, no references to non-existent tasks)?
 
 Output format (JSON):
 {
@@ -1113,11 +1201,16 @@ export const parseQualityJudgement = (output: string): TaskQualityJudgement => {
  * フィードバックを再試行用に整形
  *
  * 品質評価結果を読みやすいフィードバック文字列に変換する。
+ * 前回の出力を含めることで、エージェントが状態を引き継いで修正できる。
  *
  * @param judgement 品質評価結果
+ * @param previousOutput 前回の出力（JSON文字列）
  * @returns 整形されたフィードバック
  */
-export const formatFeedbackForRetry = (judgement: TaskQualityJudgement): string => {
+export const formatFeedbackForRetry = (
+  judgement: TaskQualityJudgement,
+  previousOutput?: string,
+): string => {
   const lines: string[] = [];
 
   if (judgement.overallScore !== undefined) {
@@ -1138,6 +1231,13 @@ export const formatFeedbackForRetry = (judgement: TaskQualityJudgement): string 
     });
   }
 
+  if (previousOutput) {
+    lines.push('\nPrevious Output (for reference and modification):');
+    lines.push('```json');
+    lines.push(previousOutput);
+    lines.push('```');
+  }
+
   return lines.join('\n');
 };
 
@@ -1152,6 +1252,96 @@ export interface ParseResult {
   /** バリデーションエラーメッセージの配列 */
   errors: string[];
 }
+
+/**
+ * タスク依存関係の循環を検出
+ *
+ * DFS（深さ優先探索）を使用して循環依存を検出する。
+ *
+ * @param tasks タスク配列
+ * @returns 循環依存のパス配列（例: ["task-1 -> task-2 -> task-1"]）
+ */
+export const detectCircularDependencies = (tasks: TaskBreakdown[]): string[] => {
+  const taskMap = new Map<string, TaskBreakdown>();
+  tasks.forEach((task) => taskMap.set(task.id, task));
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const cycles: string[] = [];
+
+  const dfs = (taskId: string, path: string[]): void => {
+    if (visiting.has(taskId)) {
+      // 循環検出
+      const cycleStart = path.indexOf(taskId);
+      const cyclePath = [...path.slice(cycleStart), taskId].join(' -> ');
+      cycles.push(cyclePath);
+      return;
+    }
+
+    if (visited.has(taskId)) {
+      return;
+    }
+
+    visiting.add(taskId);
+    path.push(taskId);
+
+    const task = taskMap.get(taskId);
+    if (task && task.dependencies) {
+      for (const depId of task.dependencies) {
+        if (!taskMap.has(depId)) {
+          // 存在しない依存先（別途エラーとして報告される）
+          continue;
+        }
+        dfs(depId, path);
+      }
+    }
+
+    visiting.delete(taskId);
+    visited.add(taskId);
+    path.pop();
+  };
+
+  for (const task of tasks) {
+    if (!visited.has(task.id)) {
+      dfs(task.id, []);
+    }
+  }
+
+  return cycles;
+};
+
+/**
+ * タスクの依存関係を検証
+ *
+ * - 循環依存の検出
+ * - 存在しない依存先の検出
+ *
+ * @param tasks タスク配列
+ * @returns 検証エラーメッセージの配列
+ */
+export const validateTaskDependencies = (tasks: TaskBreakdown[]): string[] => {
+  const errors: string[] = [];
+  const taskIds = new Set(tasks.map((t) => t.id));
+
+  // 循環依存のチェック
+  const cycles = detectCircularDependencies(tasks);
+  if (cycles.length > 0) {
+    errors.push(`Circular dependencies detected: ${cycles.join('; ')}`);
+  }
+
+  // 存在しない依存先のチェック
+  for (const task of tasks) {
+    if (task.dependencies) {
+      for (const depId of task.dependencies) {
+        if (!taskIds.has(depId)) {
+          errors.push(`Task "${task.id}" depends on non-existent task "${depId}"`);
+        }
+      }
+    }
+  }
+
+  return errors;
+};
 
 /**
  * エージェント出力をパース（Zodスキーマによる厳格なバリデーション）
@@ -1233,6 +1423,12 @@ export const parseAgentOutputWithErrors = (output: string): ParseResult => {
         errors.push(`Task ${index + 1} validation failed: ${zodErrors}`);
       }
     });
+
+    // 依存関係の検証（タスクが1つ以上ある場合のみ）
+    if (tasks.length > 0) {
+      const depErrors = validateTaskDependencies(tasks);
+      errors.push(...depErrors);
+    }
 
     return { tasks, errors };
   } catch (error) {

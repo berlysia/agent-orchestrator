@@ -10,6 +10,8 @@ import {
   formatFeedbackForRetry,
   buildFinalCompletionPrompt,
   parseFinalCompletionJudgement,
+  detectCircularDependencies,
+  validateTaskDependencies,
   TaskTypeEnum,
   type TaskBreakdown,
   type TaskQualityJudgement,
@@ -583,6 +585,212 @@ This looks good.`;
 
         assert.strictEqual(result.isComplete, true);
         assert.strictEqual(result.completionScore, undefined);
+      });
+    });
+  });
+
+  describe('Dependency Validation', () => {
+    describe('detectCircularDependencies', () => {
+      it('should detect simple circular dependency', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-2'],
+          },
+          {
+            id: 'task-2',
+            description: 'Task 2',
+            branch: 'feature/2',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1'],
+          },
+        ];
+
+        const cycles = detectCircularDependencies(tasks);
+        assert.strictEqual(cycles.length, 1);
+        assert(cycles[0].includes('task-1'));
+        assert(cycles[0].includes('task-2'));
+      });
+
+      it('should detect three-way circular dependency', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-2'],
+          },
+          {
+            id: 'task-2',
+            description: 'Task 2',
+            branch: 'feature/2',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-3'],
+          },
+          {
+            id: 'task-3',
+            description: 'Task 3',
+            branch: 'feature/3',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1'],
+          },
+        ];
+
+        const cycles = detectCircularDependencies(tasks);
+        assert.strictEqual(cycles.length, 1);
+        assert(cycles[0].includes('task-1'));
+        assert(cycles[0].includes('task-2'));
+        assert(cycles[0].includes('task-3'));
+      });
+
+      it('should not detect cycles in valid dependencies', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: [],
+          },
+          {
+            id: 'task-2',
+            description: 'Task 2',
+            branch: 'feature/2',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1'],
+          },
+          {
+            id: 'task-3',
+            description: 'Task 3',
+            branch: 'feature/3',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1', 'task-2'],
+          },
+        ];
+
+        const cycles = detectCircularDependencies(tasks);
+        assert.strictEqual(cycles.length, 0);
+      });
+    });
+
+    describe('validateTaskDependencies', () => {
+      it('should detect non-existent dependency', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-999'],
+          },
+        ];
+
+        const errors = validateTaskDependencies(tasks);
+        assert.strictEqual(errors.length, 1);
+        assert(errors[0].includes('non-existent task'));
+        assert(errors[0].includes('task-999'));
+      });
+
+      it('should detect both circular and non-existent dependencies', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-2', 'task-999'],
+          },
+          {
+            id: 'task-2',
+            description: 'Task 2',
+            branch: 'feature/2',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1'],
+          },
+        ];
+
+        const errors = validateTaskDependencies(tasks);
+        assert.strictEqual(errors.length, 2);
+        assert(errors.some((e) => e.includes('Circular dependencies')));
+        assert(errors.some((e) => e.includes('non-existent task')));
+      });
+
+      it('should return empty array for valid dependencies', () => {
+        const tasks: TaskBreakdown[] = [
+          {
+            id: 'task-1',
+            description: 'Task 1',
+            branch: 'feature/1',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: [],
+          },
+          {
+            id: 'task-2',
+            description: 'Task 2',
+            branch: 'feature/2',
+            scopePaths: ['src/'],
+            acceptance: 'Done',
+            type: TaskTypeEnum.IMPLEMENTATION,
+            estimatedDuration: 1,
+            context: 'Context',
+            dependencies: ['task-1'],
+          },
+        ];
+
+        const errors = validateTaskDependencies(tasks);
+        assert.strictEqual(errors.length, 0);
       });
     });
   });
