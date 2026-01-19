@@ -6,7 +6,6 @@ import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
-import { createIntegrationOperations } from './integration-operations.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
 import { taskId, repoPath, branchName, type TaskId } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
@@ -129,12 +128,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     model: getModel(deps.config, 'judge'),
     judgeTaskRetries: deps.config.iterations.judgeTaskRetries,
   });
-  const integrationOps = createIntegrationOperations({
-    taskStore: deps.taskStore,
-    gitEffects: deps.gitEffects,
-    appRepoPath: deps.config.appRepoPath,
-  });
-
   /**
    * ユーザー指示を実行
    *
@@ -356,7 +349,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       // 9. 統合フェーズ（並列実行されたタスクが複数ある場合のみ）
       if (completedTaskIds.length > 1) {
-        console.log('\n🔗 Integration phase: merging parallel task branches...');
+        console.log('\n🔗 Integration phase: command-only (manual).');
 
         // 完了したタスクを取得
         const completedTasks: Task[] = [];
@@ -368,95 +361,17 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
 
         if (completedTasks.length > 1) {
-          // ベースブランチを取得
-          const currentBranchResult = await deps.gitEffects.getCurrentBranch(
-            repoPath(deps.config.appRepoPath),
-          );
+          // ベースブランチを取得（main worktree を壊さないため、統合は実行しない）
+          const repo = repoPath(deps.config.appRepoPath);
+          const currentBranchResult = await deps.gitEffects.getCurrentBranch(repo);
           const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
 
-          // タスクを統合
-          const integrationResult = await integrationOps.integrateTasks(completedTasks, baseBranch);
+          const taskIds = completedTasks.map((task) => String(task.id));
+          const taskIdArgs = taskIds.length > 0 ? ` --tasks ${taskIds.join(' ')}` : '';
 
-          if (integrationResult.ok) {
-            const result = integrationResult.val;
-
-            // WHY: 統合処理の透明性を高めるため、成功/失敗に関わらず詳細なログを出力
-            console.log(`\n  📊 Integration results:`);
-            console.log(`    Integration branch: ${result.integrationBranch}`);
-            console.log(`    Base branch: ${baseBranch}`);
-            console.log(
-              `    Successfully integrated: ${result.integratedTaskIds.length} tasks`,
-            );
-            console.log(`    Failed to integrate: ${result.conflictedTaskIds.length} tasks`);
-
-            // 各タスクのマージ結果を詳細表示
-            if (result.mergeDetails && result.mergeDetails.length > 0) {
-              console.log(`\n    Detailed merge results:`);
-              for (const detail of result.mergeDetails) {
-                const taskShortId = detail.taskId.substring(0, 16);
-                if (detail.result.success) {
-                  // 成功時
-                  console.log(`      ✅ ${taskShortId}: merged successfully`);
-                  console.log(`         Source: ${detail.sourceBranch}`);
-                  if (detail.result.mergedFiles && detail.result.mergedFiles.length > 0) {
-                    console.log(`         Files: ${detail.result.mergedFiles.length} files merged`);
-                  }
-                } else {
-                  // 失敗時
-                  const statusText = detail.result.status || 'unknown';
-                  console.log(`      ❌ ${taskShortId}: ${statusText}`);
-                  console.log(`         Source: ${detail.sourceBranch}`);
-
-                  if (detail.result.hasConflicts && detail.result.conflicts) {
-                    console.log(`         Conflicts in ${detail.result.conflicts.length} files:`);
-                    detail.result.conflicts.slice(0, 3).forEach((conflict) => {
-                      console.log(`           - ${conflict.filePath}`);
-                    });
-                    if (detail.result.conflicts.length > 3) {
-                      console.log(
-                        `           ... and ${detail.result.conflicts.length - 3} more`,
-                      );
-                    }
-                  } else if (statusText === 'failed') {
-                    console.log(
-                      `         Reason: Merge failed (possibly branch not found or git error)`,
-                    );
-                  }
-                }
-              }
-            }
-
-            if (result.success) {
-              // 全タスク統合成功
-              console.log(`\n  ✅ All tasks integrated successfully`);
-
-              // 統合ブランチの取り込み方法を提示（設定に基づく）
-              const finalResult = await integrationOps.finalizeIntegration(
-                result.integrationBranch,
-                baseBranch,
-                { method: deps.config.integration?.method ?? 'auto' },
-              );
-
-              if (finalResult.ok) {
-                if (finalResult.val.method === 'pr') {
-                  console.log(`  🔀 Pull Request created: ${finalResult.val.prUrl}`);
-                } else {
-                  console.log(`  📋 To merge the integration branch, run:`);
-                  console.log(`     ${finalResult.val.mergeCommand}`);
-                }
-              } else {
-                console.warn(`  ⚠️  Failed to finalize integration: ${finalResult.err.message}`);
-              }
-            } else {
-              // 一部統合失敗
-              console.log(`\n  ⚠️  Integration completed with ${result.conflictedTaskIds.length} failures`);
-              if (result.conflictResolutionTaskId) {
-                console.log(`  📝 Conflict resolution task created: ${result.conflictResolutionTaskId}`);
-              }
-            }
-          } else {
-            console.error(`  ❌ Integration failed: ${integrationResult.err.message}`);
-          }
+          console.log(`⚠️  Integration is not executed automatically to protect the main worktree.`);
+          console.log(`\n📋 Run this subcommand in the worktree you want to merge into:`);
+          console.log(`agent integrate --base ${baseBranch}${taskIdArgs}`);
         }
       }
 
