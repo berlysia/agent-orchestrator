@@ -34,7 +34,7 @@ export const RunSchema = z.object({
   /** 使用したエージェント種別 ("claude" | "codex") */
   agentType: z.enum(['claude', 'codex']),
 
-  /** 実行ログファイルパス（相対パスまたは絶対パス） */
+  /** 実行ログファイルパス（絶対パス） */
   logPath: z.string(),
 
   /** 実行開始日時 */
@@ -45,6 +45,15 @@ export const RunSchema = z.object({
 
   /** エラーメッセージ（失敗時のみ） */
   errorMessage: z.string().nullable(),
+
+  /** このタスクを生成したプランナーのID（オプショナル） */
+  plannerRunId: z.string().nullable().optional(),
+
+  /** プランナーのログファイルパス（絶対パス、オプショナル） */
+  plannerLogPath: z.string().nullable().optional(),
+
+  /** プランナーのメタデータファイルパス（絶対パス、オプショナル） */
+  plannerMetadataPath: z.string().nullable().optional(),
 });
 
 /**
@@ -60,6 +69,9 @@ export function createInitialRun(params: {
   taskId: TaskId;
   agentType: 'claude' | 'codex';
   logPath: string;
+  plannerRunId?: string | null;
+  plannerLogPath?: string | null;
+  plannerMetadataPath?: string | null;
 }): Run {
   return {
     id: params.id,
@@ -70,5 +82,8 @@ export function createInitialRun(params: {
     startedAt: new Date().toISOString(),
     finishedAt: null,
     errorMessage: null,
+    plannerRunId: params.plannerRunId ?? null,
+    plannerLogPath: params.plannerLogPath ?? null,
+    plannerMetadataPath: params.plannerMetadataPath ?? null,
   };
 }
