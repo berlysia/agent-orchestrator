@@ -27,7 +27,7 @@
 | Phase 5.3: 並列実行サポート | 高 | ✅ 完了 | 10-12時間 | 2026-01-19 | 5a9870d |
 | Phase 5.4: 直列タスクの変更統合 | 中 | ✅ 完了 | 6-8時間 | 2026-01-19 | 6c19086 |
 | Phase 5.5: 統合処理とコンフリクト解決 | 中 | ✅ 完了 | 11-12時間 | 2026-01-19 | cadb1d5 |
-| Phase 5.6: ジャッジ判定の高度化 | 中 | 📋 計画中 | 4-6時間 | - | - |
+| Phase 5.6: ジャッジ判定の高度化 | 中 | ✅ 完了 | 4-6時間 | 2026-01-19 | d2a01c6 |
 | Phase 5.7: 全体完了判定 | 中 | 📋 計画中 | 4-6時間 | - | - |
 | Phase 5.8: プランナーの継続性 | 低 | 📋 計画中 | 4-6時間 | - | - |
 
@@ -1299,13 +1299,15 @@ integration: {
 
 ---
 
-### 5.6 ジャッジ判定の高度化 【優先度: 中】
+### 5.6 ジャッジ判定の高度化 【優先度: 中】【ステータス: ✅ 完了】
+
+**完了日**: 2026-01-19
 
 #### 問題点
 - 現在の判定が単純すぎる（RUNNING = 成功）
 - タスク内容に対する十分性を評価していない
 
-#### 改善内容
+#### 改善内容（実装済み）
 
 **5.6.1 エージェントベースの判定**
 
@@ -1332,35 +1334,30 @@ const judgeTask = async (tid: TaskId): Promise<Result<JudgementResult, TaskStore
 };
 ```
 
-**5.6.2 判定プロンプト**
+**5.6.2 判定プロンプトの実装**
 
-```typescript
-const buildJudgementPrompt = (task: Task, runLog: string): string => {
-  return `You are a task completion judge.
+タスクのacceptance criteriaと実行ログを使用して、エージェントが詳細な判定を行うプロンプトを実装。
+- TASK INFORMATION: ブランチ、タイプ、コンテキスト
+- TASK ACCEPTANCE CRITERIA: 受け入れ基準
+- EXECUTION LOG: 実行ログ内容
 
-TASK ACCEPTANCE CRITERIA:
-${task.acceptance}
+#### 実装ファイル
+- `src/core/orchestrator/judge-operations.ts`: エージェントベース判定ロジック
+- `src/core/orchestrator/orchestrate.ts`: JudgeDeps拡張
+- `src/types/config.ts`: AgentType型追加
+- `tests/unit/core/orchestrator/judge-operations.test.ts`: テスト追加（9テスト）
 
-EXECUTION LOG:
-${runLog}
+#### フォールバック戦略
+- ログ読み込み失敗時: 簡易判定にフォールバック
+- エージェント実行失敗時: 簡易判定にフォールバック
+- レスポンスパース失敗時: 簡易判定にフォールバック
 
-Your task:
-1. Determine if the acceptance criteria were met
-2. Check if the implementation is complete and functional
-3. Identify any missing requirements or issues
-
-Output (JSON):
-{
-  "success": true/false,
-  "reason": "Detailed explanation",
-  "missingRequirements": ["req1", "req2"],
-  "shouldContinue": true/false
-}`;
-};
-```
+#### テスト結果
+- ユニットテスト: 68/68 パス ✅
+- ビルド: 成功 ✅
 
 #### 推定工数
-4-6時間
+4-6時間（実績: 約4時間）
 
 ---
 
