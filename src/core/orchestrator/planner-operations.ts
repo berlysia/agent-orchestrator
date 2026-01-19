@@ -23,8 +23,8 @@ export interface PlannerDeps {
   readonly appRepoPath: string;
   readonly coordRepoPath: string;
   readonly agentType: 'claude' | 'codex';
-  readonly model?: string;
-  readonly judgeModel?: string;
+  readonly model: string;
+  readonly judgeModel: string;
   readonly plannerQualityRetries?: number;
   readonly qualityThreshold?: number;
   readonly strictContextValidation?: boolean;
@@ -224,15 +224,6 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     tasks: TaskBreakdown[],
     previousFeedback?: string,
   ): Promise<TaskQualityJudgement> => {
-    // judgeModelが設定されていない場合は常に許容
-    if (!deps.judgeModel) {
-      return {
-        isAcceptable: true,
-        issues: [],
-        suggestions: [],
-      };
-    }
-
     const qualityPrompt = buildTaskQualityPrompt(
       userInstruction,
       tasks,
@@ -678,15 +669,6 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     completedTaskDescriptions: string[],
     failedTaskDescriptions: string[],
   ): Promise<FinalCompletionJudgement> => {
-    // judgeModelが設定されていない場合は常に完了とみなす
-    if (!deps.judgeModel) {
-      return {
-        isComplete: true,
-        missingAspects: [],
-        additionalTaskSuggestions: [],
-      };
-    }
-
     const finalPrompt = buildFinalCompletionPrompt(
       userInstruction,
       completedTaskDescriptions,

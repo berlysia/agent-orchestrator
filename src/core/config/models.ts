@@ -23,6 +23,6 @@ export const getAgentType = (config: Config, role: AgentRole): 'claude' | 'codex
  * @param role エージェントの役割
  * @returns モデル名
  */
-export const getModel = (config: Config, role: AgentRole): string | undefined => {
+export const getModel = (config: Config, role: AgentRole): string => {
   return config.agents[role].model;
 };

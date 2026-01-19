@@ -126,7 +126,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     runnerEffects: deps.runnerEffects,
     appRepoPath: deps.config.appRepoPath,
     agentType: getAgentType(deps.config, 'judge'),
-    model: getModel(deps.config, 'judge') ?? 'claude-haiku-4-5',
+    model: getModel(deps.config, 'judge'),
     judgeTaskRetries: deps.config.iterations.judgeTaskRetries,
   });
   const integrationOps = createIntegrationOperations({

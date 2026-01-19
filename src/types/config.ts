@@ -24,7 +24,7 @@ const AgentConfigSchema = z.discriminatedUnion('type', [
      * 既知のモデルには補完が効き、任意の文字列も受け付ける。
      * JSON Schemaでは anyOf として出力され、エディタで補完が効く。
      */
-    model: z.union([z.enum(KnownClaudeModels), z.string()]).optional(),
+    model: z.union([z.enum(KnownClaudeModels), z.string()]),
   }),
   z.object({
     type: z.literal('codex'),
@@ -34,7 +34,7 @@ const AgentConfigSchema = z.discriminatedUnion('type', [
      * 既知のモデルには補完が効き、任意の文字列も受け付ける。
      * JSON Schemaでは anyOf として出力され、エディタで補完が効く。
      */
-    model: z.union([z.enum(KnownCodexModels), z.string()]).optional(),
+    model: z.union([z.enum(KnownCodexModels), z.string()]),
   }),
 ]);
 
@@ -127,20 +127,14 @@ export const ConfigSchema = z.object({
   maxWorkers: z.number().int().positive().default(3),
 
   /** 役割別エージェント設定 */
-  agents: z
-    .object({
-      /** Planner設定（デフォルト: claude + opus-4-5） */
-      planner: AgentConfigSchema.default({ type: 'claude', model: 'claude-opus-4-5' }),
-      /** Worker設定（デフォルト: claude + sonnet-4-5） */
-      worker: AgentConfigSchema.default({ type: 'claude', model: 'claude-sonnet-4-5' }),
-      /** Judge設定（デフォルト: claude + haiku-4-5） */
-      judge: AgentConfigSchema.default({ type: 'claude', model: 'claude-haiku-4-5' }),
-    })
-    .default({
-      planner: { type: 'claude', model: 'claude-opus-4-5' },
-      worker: { type: 'claude', model: 'claude-sonnet-4-5' },
-      judge: { type: 'claude', model: 'claude-haiku-4-5' },
-    }),
+  agents: z.object({
+    /** Planner設定 */
+    planner: AgentConfigSchema,
+    /** Worker設定 */
+    worker: AgentConfigSchema,
+    /** Judge設定 */
+    judge: AgentConfigSchema,
+  }),
 
   /** チェック設定 */
   checks: ChecksConfigSchema,
