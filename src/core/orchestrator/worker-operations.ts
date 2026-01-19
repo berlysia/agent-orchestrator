@@ -9,7 +9,7 @@ import path from 'node:path';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
-import type { TaskId, WorktreePath, RepoPath } from '../../types/branded.ts';
+import type { TaskId, WorktreePath, RepoPath, BranchName } from '../../types/branded.ts';
 import { branchName, runId } from '../../types/branded.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
@@ -107,9 +107,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * ブランチが存在しない場合は新規作成します。
    *
    * @param task タスク
+   * @param baseBranch 起点となるブランチ（新規ブランチ作成時のみ使用）
    * @returns worktreeのパス（Result型）
    */
-  const setupWorktree = async (task: Task): Promise<Result<WorktreePath, OrchestratorError>> => {
+  const setupWorktree = async (
+    task: Task,
+    baseBranch?: BranchName,
+  ): Promise<Result<WorktreePath, OrchestratorError>> => {
     // ブランチが存在するか確認
     const branchesResult = await deps.gitEffects.listBranches(deps.appRepoPath);
     if (isErr(branchesResult)) {
@@ -121,11 +125,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const branchExists = branches.some((b) => b.name === taskBranchName);
 
     // Worktreeを作成（createBranchフラグでブランチも同時作成）
+    // WHY: baseBranch指定時は、そのブランチから分岐（依存関係を反映）
     const worktreeResult = await deps.gitEffects.createWorktree(
       deps.appRepoPath,
       task.id,
       taskBranchName,
       !branchExists,
+      baseBranch,
     );
 
     return worktreeResult;
@@ -496,14 +502,16 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * 4. リモートにpush
    *
    * @param task 実行するタスク
+   * @param baseBranch 起点となるブランチ（新規ブランチ作成時のみ使用）
    * @returns 実行結果
    */
   const executeTaskWithWorktree = async (
     task: Task,
+    baseBranch?: BranchName,
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
     try {
       // 1. Worktreeを作成
-      const worktreeResult = await setupWorktree(task);
+      const worktreeResult = await setupWorktree(task, baseBranch);
       if (isErr(worktreeResult)) {
         return createErr(worktreeResult.err);
       }

@@ -1,4 +1,4 @@
-import type { TaskId } from '../../types/branded.ts';
+import type { TaskId, BranchName } from '../../types/branded.ts';
 import type { DependencyGraph } from './dependency-graph.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
 import type { JudgeOperations } from './judge-operations.ts';
@@ -7,6 +7,8 @@ import { workerId } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
+import type { TaskStore } from '../task-store/interface.ts';
+import { branchName } from '../../types/branded.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -37,6 +39,7 @@ export interface LevelExecutionResult {
  * @param judgeOps ジャッジ操作
  * @param schedulerState 現在のスケジューラ状態
  * @param blockedTaskIds ブロック済みタスクIDのセット
+ * @param taskStore タスクストア（依存関係解決に使用）
  * @returns レベル実行結果
  */
 export async function executeLevelParallel(
@@ -46,6 +49,7 @@ export async function executeLevelParallel(
   judgeOps: JudgeOperations,
   schedulerState: SchedulerState,
   blockedTaskIds: Set<TaskId>,
+  taskStore: TaskStore,
 ): Promise<LevelExecutionResult> {
   const completed: TaskId[] = [];
   const failed: TaskId[] = [];
@@ -86,8 +90,21 @@ export async function executeLevelParallel(
       schedulerState = newState;
 
       // 2. Worker: タスク実行
+      // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
+      let baseBranch: BranchName | undefined;
+      if (claimedTask.dependencies.length === 1) {
+        const depId = claimedTask.dependencies[0];
+        if (depId) {
+          const depTaskResult = await taskStore.readTask(depId);
+          if (depTaskResult.ok) {
+            baseBranch = branchName(depTaskResult.val.branch);
+          }
+        }
+      }
+      // 複数依存の場合は将来実装（マージベース作成）
+
       console.log(`  🚀 [${rawTaskId}] Executing task...`);
-      const workerResult = await workerOps.executeTaskWithWorktree(claimedTask);
+      const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
 
       if (isErr(workerResult)) {
         const errorMsg =
