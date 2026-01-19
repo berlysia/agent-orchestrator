@@ -341,7 +341,7 @@ This is the recommended approach.`;
           },
         ];
 
-        const prompt = buildTaskQualityPrompt(userInstruction, tasks);
+        const prompt = buildTaskQualityPrompt(userInstruction, tasks, false);
 
         assert(prompt.includes(userInstruction));
         assert(prompt.includes('Implement task list'));
@@ -363,7 +363,7 @@ This is the recommended approach.`;
         ];
         const feedback = 'Acceptance criteria are too vague';
 
-        const prompt = buildTaskQualityPrompt(userInstruction, tasks, feedback);
+        const prompt = buildTaskQualityPrompt(userInstruction, tasks, false, feedback);
 
         assert(prompt.includes(feedback));
         assert(prompt.includes('PREVIOUS FEEDBACK'));

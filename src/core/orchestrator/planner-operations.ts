@@ -26,6 +26,8 @@ export interface PlannerDeps {
   readonly model?: string;
   readonly judgeModel?: string;
   readonly maxQualityRetries?: number;
+  readonly qualityThreshold?: number;
+  readonly strictContextValidation?: boolean;
 }
 
 /**
@@ -184,7 +186,12 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       };
     }
 
-    const qualityPrompt = buildTaskQualityPrompt(userInstruction, tasks, previousFeedback);
+    const qualityPrompt = buildTaskQualityPrompt(
+      userInstruction,
+      tasks,
+      deps.strictContextValidation ?? false,
+      previousFeedback,
+    );
 
     // Judge用エージェントを実行
     // WHY: Plannerとは別のモデル（軽量なHaikuなど）を使用してコスト削減
@@ -444,7 +451,19 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         );
       }
 
-      if (judgement.isAcceptable) {
+      // 品質判定: isAcceptableまたはスコアが閾値以上
+      const threshold = deps.qualityThreshold ?? 60;
+      const passesScoreThreshold =
+        judgement.overallScore !== undefined && judgement.overallScore >= threshold;
+      const isQualityAcceptable = judgement.isAcceptable || passesScoreThreshold;
+
+      if (passesScoreThreshold && !judgement.isAcceptable) {
+        await appendPlanningLog(
+          `\n⚠️  Judge marked as not acceptable, but score ${judgement.overallScore} >= threshold ${threshold}, accepting\n`,
+        );
+      }
+
+      if (isQualityAcceptable) {
         // 品質OK → タスク保存へ進む
         await appendPlanningLog(`\n✅ Quality check passed\n`);
         break;
@@ -1063,15 +1082,37 @@ Output only the JSON array, no additional text.`;
  *
  * @param userInstruction 元のユーザー指示
  * @param tasks 生成されたタスクの配列
+ * @param strictContextValidation 厳格なコンテキスト検証を有効化するか
  * @param previousFeedback 前回の評価フィードバック（再試行時）
  * @returns 品質評価プロンプト
  */
 export const buildTaskQualityPrompt = (
   userInstruction: string,
   tasks: TaskBreakdown[],
+  strictContextValidation: boolean,
   previousFeedback?: string,
 ): string => {
   const tasksJson = JSON.stringify(tasks, null, 2);
+
+  const contextCriteria = strictContextValidation
+    ? `   CRITICAL CHECKS (STRICT MODE):
+   - NO external references (e.g., "see docs/...", "refer to design doc") - REJECT if found
+   - File paths MUST include line numbers (e.g., "src/file.ts lines 10-20") - REJECT if missing
+   - Package dependencies MUST include installation commands (e.g., "Install: pnpm add package") - REJECT if missing
+   - Complex patterns MUST include code examples - REJECT if missing for non-trivial logic
+   - Import statements and module paths must be specified exactly
+   NICE TO HAVE:
+   - Technical approach, dependencies, constraints specified
+   - Data models, error handling, security, testing requirements included`
+    : `   CRITICAL CHECKS (RELAXED MODE):
+   - Context provides sufficient information to understand what needs to be done
+   - Technical approach is described at a high level
+   - Major dependencies are mentioned
+   NICE TO HAVE (not required, but improves quality):
+   - Specific file paths with line numbers
+   - Installation commands for packages
+   - Code examples for complex patterns
+   - Detailed error handling, security, testing requirements`;
 
   return `You are a quality evaluator for task planning in a multi-agent development system.
 
@@ -1090,22 +1131,29 @@ ${previousFeedback}
     : ''
 }Your task is to evaluate whether these tasks meet quality standards for execution.
 
-Evaluation criteria:
+Evaluation criteria (prioritized):
+
+CRITICAL (must pass - weight: 70%):
 1. **Completeness**: Does each task have all required fields (description, branch, scopePaths, acceptance, type, estimatedDuration, context)?
 2. **Clarity**: Are descriptions clear and actionable?
 3. **Acceptance criteria**: Are acceptance criteria specific, testable, and verifiable?
-4. **Context sufficiency**: Does the context field contain ALL information needed to execute the task WITHOUT external references?
-   CRITICAL CHECKS:
-   - NO external references (e.g., "see docs/...", "refer to design doc") - REJECT if found
-   - File paths must include line numbers (e.g., "src/file.ts lines 10-20") - REJECT if missing
-   - Package dependencies must include installation commands (e.g., "Install: pnpm add package") - REJECT if missing
-   - Complex patterns must include code examples - REJECT if missing for non-trivial logic
-   - Import statements and module paths must be specified exactly
-   - Technical approach, dependencies, constraints specified?
-   - Data models, error handling, security, testing requirements included?
-5. **Granularity**: Are tasks appropriately sized (1-4 hours each)?
-6. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
-7. **Dependency validity**: Are all task dependencies valid (no circular dependencies, no references to non-existent tasks)?
+4. **Dependency validity**: Are all task dependencies valid (no circular dependencies, no references to non-existent tasks)?
+
+IMPORTANT (should pass - weight: 20%):
+5. **Context sufficiency**: Does the context field contain information needed to execute the task?
+${contextCriteria}
+6. **Granularity**: Are tasks appropriately sized (1-4 hours each)?
+
+NICE TO HAVE (improves quality - weight: 10%):
+7. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
+8. **Best practices**: Does the task follow coding best practices and patterns?
+
+Scoring guide:
+- 90-100: Excellent quality, all criteria met including nice-to-haves
+- 70-89: Good quality, all critical and most important criteria met
+- 60-69: Acceptable quality, critical criteria met, some important criteria may be missing
+- 40-59: Below standard, missing some critical criteria
+- 0-39: Poor quality, multiple critical issues
 
 Output format (JSON):
 {

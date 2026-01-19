@@ -61,6 +61,23 @@ const IntegrationConfigSchema = z
   .default({ method: 'auto' });
 
 /**
+ * タスク計画品質評価設定のスキーマ
+ *
+ * WHY: Plannerが生成したタスクの品質評価基準を設定可能にすることで、
+ *      プロジェクトの特性に応じた柔軟な品質管理を実現
+ */
+const PlanningConfigSchema = z
+  .object({
+    /** 品質評価の最大リトライ回数 */
+    maxQualityRetries: z.number().int().positive().default(5),
+    /** 品質許容スコア閾値（0-100） */
+    qualityThreshold: z.number().min(0).max(100).default(60),
+    /** 厳格なコンテキスト検証を有効化（外部参照禁止、行番号必須など） */
+    strictContextValidation: z.boolean().default(false),
+  })
+  .default({ maxQualityRetries: 5, qualityThreshold: 60, strictContextValidation: false });
+
+/**
  * プロジェクト設定のスキーマ定義（Zod）
  *
  * `.agent/config.json` に保存される設定
@@ -99,6 +116,9 @@ export const ConfigSchema = z.object({
 
   /** 統合設定 */
   integration: IntegrationConfigSchema,
+
+  /** タスク計画品質評価設定 */
+  planning: PlanningConfigSchema,
 });
 
 /**
@@ -133,6 +153,11 @@ export function createDefaultConfig(params: {
     },
     integration: {
       method: 'auto',
+    },
+    planning: {
+      maxQualityRetries: 5,
+      qualityThreshold: 60,
+      strictContextValidation: false,
     },
   };
 }
