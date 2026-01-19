@@ -225,11 +225,13 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       }
     };
 
-    await appendPlanningLog(`=== Planning Start ===\n`);
-    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
-
     const plannerLogPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.log`);
     const plannerMetadataPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.json`);
+
+    console.log(`📝 Starting task planning for instruction: "${userInstruction}"`);
+    console.log(`🆔 Planner Run ID: ${plannerRunId}`);
+    console.log(`📄 Planner Log Path: ${plannerLogPath}`);
+    console.log(`🗂️  Planner Metadata Path: ${plannerMetadataPath}`);
 
     const planningRun = createInitialRun({
       id: runId(plannerRunId),
@@ -237,6 +239,9 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       agentType: deps.agentType,
       logPath: plannerLogPath,
     });
+
+    await appendPlanningLog(`=== Planning Start ===\n`);
+    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
 
     const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
     if (isErr(ensureRunsResult)) {

@@ -70,7 +70,6 @@ async function executeRun(params: { instruction: string; configPath?: string }):
 
   // タスクを実行
   console.log(`🚀 Starting orchestration...\n`);
-  console.log(`📝 Instruction: "${instruction}"\n`);
 
   const resultOrError = await orchestrator.executeInstruction(instruction);
 
