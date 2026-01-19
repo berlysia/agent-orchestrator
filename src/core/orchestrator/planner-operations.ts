@@ -342,16 +342,20 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
       // 4. 品質評価
       await appendPlanningLog(`\n=== Quality Evaluation ===\n`);
-      const judgement = await judgeTaskQuality(userInstruction, taskBreakdowns, accumulatedFeedback);
-
-      await appendPlanningLog(
-        `Quality acceptable: ${judgement.isAcceptable ? 'YES' : 'NO'}\n`,
+      const judgement = await judgeTaskQuality(
+        userInstruction,
+        taskBreakdowns,
+        accumulatedFeedback,
       );
+
+      await appendPlanningLog(`Quality acceptable: ${judgement.isAcceptable ? 'YES' : 'NO'}\n`);
       if (judgement.overallScore !== undefined) {
         await appendPlanningLog(`Overall score: ${judgement.overallScore}/100\n`);
       }
       if (judgement.issues.length > 0) {
-        await appendPlanningLog(`Issues:\n${judgement.issues.map((i, idx) => `  ${idx + 1}. ${i}`).join('\n')}\n`);
+        await appendPlanningLog(
+          `Issues:\n${judgement.issues.map((i, idx) => `  ${idx + 1}. ${i}`).join('\n')}\n`,
+        );
       }
       if (judgement.suggestions.length > 0) {
         await appendPlanningLog(
@@ -391,26 +395,39 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const taskIds: string[] = [];
     const errors: string[] = [];
 
+    // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
+    const sessionShort = plannerRunId.substring(8, 16); // "planner-" の後の8文字
+    const makeUniqueTaskId = (rawId: string): string => {
+      const baseId = rawId.replace(/^task-/, '');
+      return `task-${sessionShort}-${baseId}`;
+    };
+
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
+      const uniqueTaskId = makeUniqueTaskId(rawTaskId);
       const task = createInitialTask({
-        id: taskId(rawTaskId),
+        id: taskId(uniqueTaskId),
         repo: repoPath(deps.appRepoPath),
         branch: branchName(breakdown.branch),
         scopePaths: breakdown.scopePaths,
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) => taskId(depId)),
+        dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId))),
+        plannerRunId: plannerRunId,
+        plannerLogPath: plannerLogPath,
+        plannerMetadataPath: plannerMetadataPath,
       });
 
       const result = await deps.taskStore.createTask(task);
       if (!result.ok) {
-        errors.push(`Failed to create task ${rawTaskId}: ${result.err.message}`);
+        const errorMsg = `Failed to create task ${uniqueTaskId} (from ${rawTaskId}): ${result.err.message}`;
+        errors.push(errorMsg);
+        await appendPlanningLog(`❌ ${errorMsg}\n`);
         continue;
       }
 
-      taskIds.push(rawTaskId);
+      taskIds.push(uniqueTaskId);
     }
 
     if (taskIds.length > 0) {
@@ -420,12 +437,20 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       }
     }
 
+    if (errors.length > 0) {
+      await appendPlanningLog(`\n⚠️  Some tasks failed to create:\n`);
+      for (const error of errors) {
+        await appendPlanningLog(`  - ${error}\n`);
+      }
+    }
+
     const completedRun =
       taskIds.length > 0
         ? {
             ...planningRun,
             status: RunStatus.SUCCESS,
             finishedAt: new Date().toISOString(),
+            errorMessage: errors.length > 0 ? `Partial success: ${errors.join(', ')}` : null,
           }
         : {
             ...planningRun,
@@ -571,13 +596,26 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     await appendPlanningLog(`=== Additional Task Planning Start ===\n`);
     await appendPlanningLog(`Session ID: ${sessionId}\n`);
     await appendPlanningLog(`Original Instruction: ${session.instruction}\n`);
-    await appendPlanningLog(`Missing Aspects:\n${missingAspects.map((a, i) => `  ${i + 1}. ${a}`).join('\n')}\n`);
+    await appendPlanningLog(
+      `Missing Aspects:\n${missingAspects.map((a, i) => `  ${i + 1}. ${a}`).join('\n')}\n`,
+    );
+
+    const additionalPlannerLogPath = path.join(
+      deps.coordRepoPath,
+      'runs',
+      `${additionalRunId}.log`,
+    );
+    const additionalPlannerMetadataPath = path.join(
+      deps.coordRepoPath,
+      'runs',
+      `${additionalRunId}.json`,
+    );
 
     const planningRun = createInitialRun({
       id: runId(additionalRunId),
       taskId: taskId(additionalRunId),
       agentType: deps.agentType,
-      logPath: `runs/${additionalRunId}.log`,
+      logPath: additionalPlannerLogPath,
     });
 
     const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
