@@ -99,6 +99,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   const plannerOps = createPlannerOperations({
     taskStore: deps.taskStore,
     runnerEffects: deps.runnerEffects,
+    sessionEffects: deps.sessionEffects,
     appRepoPath: deps.config.appRepoPath,
     coordRepoPath: deps.config.agentCoordPath,
     agentType: getAgentType(deps.config, 'planner'),
