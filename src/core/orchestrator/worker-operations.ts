@@ -48,26 +48,13 @@ export interface WorkerResult {
 export type AgentType = 'claude' | 'codex';
 
 /**
- * タスクのブランチ名を取得（純粋関数）
- *
- * WHY: Plannerがタスク生成時に既に`task.branch`にタスクIDを含めているため、
- * そのまま返すだけで良い。以前はここで`-${task.id}`を追加していたが、
- * それによりタスクIDが2重に含まれる問題が発生していた。
- *
- * 例: task.branch = "feature/auth-task-2b8c0253-1" (Plannerが生成)
- */
-export const getTaskBranchName = (task: Task): BranchName => {
-  return task.branch;
-};
-
-/**
  * コミットメッセージを生成（純粋関数）
  */
 export const generateCommitMessage = (task: Task): string => {
   return `feat: ${task.acceptance}
 
 Task ID: ${task.id}
-Branch: ${getTaskBranchName(task)}
+Branch: ${task.branch}
 
 🤖 Generated with Agent Orchestrator
 
@@ -104,8 +91,8 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     task: Task,
     baseBranch?: BranchName,
   ): Promise<Result<WorktreePath, OrchestratorError>> => {
-    // タスク固有のブランチ名を生成
-    const taskBranchName = getTaskBranchName(task);
+    // タスクのブランチ名を取得（Plannerが既にタスクIDを含めている）
+    const taskBranchName = task.branch;
 
     // ブランチが存在するか確認
     const branchesResult = await deps.gitEffects.listBranches(deps.appRepoPath);

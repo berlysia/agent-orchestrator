@@ -6,7 +6,6 @@ import type { JudgeOperations } from './judge-operations.ts';
 import type { SchedulerState } from './scheduler-state.ts';
 import { removeRunningWorker, getAvailableSlots } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
-import { getTaskBranchName } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import { isErr } from 'option-t/plain_result';
 import { computeBlockedTasks } from './parallel-executor.ts';
@@ -149,7 +148,7 @@ async function executeTaskAsync(
       if (depId) {
         const depTaskResult = await taskStore.readTask(depId);
         if (depTaskResult.ok) {
-          baseBranch = getTaskBranchName(depTaskResult.val);
+          baseBranch = depTaskResult.val.branch;
         }
       }
     }

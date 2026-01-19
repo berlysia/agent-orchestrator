@@ -7,7 +7,6 @@ import { workerId } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
-import { getTaskBranchName } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import { TaskState } from '../../types/task.ts';
 
@@ -130,15 +129,13 @@ export async function executeLevelParallel(
 
         // 2. Worker: タスク実行
         // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
-        // NOTE: serial chainでは実際のブランチ名がtask.branchと異なるため、
-        //       getTaskBranchName()を使って実際に作成されたブランチ名を取得する
         let baseBranch: BranchName | undefined;
         if (claimedTask.dependencies.length === 1) {
           const depId = claimedTask.dependencies[0];
           if (depId) {
             const depTaskResult = await taskStore.readTask(depId);
             if (depTaskResult.ok) {
-              baseBranch = getTaskBranchName(depTaskResult.val);
+              baseBranch = depTaskResult.val.branch;
             }
           }
         }

@@ -21,7 +21,6 @@ import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { randomUUID } from 'node:crypto';
-import { getTaskBranchName } from './worker-operations.ts';
 
 /**
  * Integration依存関係
@@ -96,18 +95,15 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }> = [];
 
     // 各タスクのブランチを順番にマージ
-    // WHY: getTaskBranchName()を使用してタスクのブランチ名を取得
-    // （現在はtask.branchをそのまま返すが、将来的な変更に備えて関数経由でアクセス）
     for (const task of completedTasks) {
-      const taskBranchName = getTaskBranchName(task);
-      const mergeResult = await gitEffects.merge(repo, taskBranchName);
+      const mergeResult = await gitEffects.merge(repo, task.branch);
 
       if (isErr(mergeResult)) {
         // マージエラー
         conflictedTaskIds.push(task.id);
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: taskBranchName,
+          sourceBranch: task.branch,
           targetBranch: integrationBranch,
           result: {
             success: false,
@@ -127,7 +123,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         conflictedTaskIds.push(task.id);
         failedMerges.push({
           taskId: task.id,
-          sourceBranch: taskBranchName,
+          sourceBranch: task.branch,
           conflicts: merge.conflicts,
         });
 
@@ -136,7 +132,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
 
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: taskBranchName,
+          sourceBranch: task.branch,
           targetBranch: integrationBranch,
           result: merge,
         });
@@ -145,7 +141,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         integratedTaskIds.push(task.id);
         mergeDetails.push({
           taskId: task.id,
-          sourceBranch: taskBranchName,
+          sourceBranch: task.branch,
           targetBranch: integrationBranch,
           result: merge,
         });
