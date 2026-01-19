@@ -3,6 +3,7 @@ import { createFileStore } from '../../core/task-store/file-store.ts';
 import { createRunnerEffects } from '../../core/runner/runner-effects-impl.ts';
 import { createGitEffects } from '../../adapters/vcs/index.ts';
 import { createOrchestrator } from '../../core/orchestrator/orchestrate.ts';
+import { PlannerSessionEffectsImpl } from '../../core/orchestrator/planner-session-effects-impl.ts';
 import { isErr } from 'option-t/plain_result';
 import { loadConfig } from '../utils/load-config.ts';
 
@@ -59,11 +60,15 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   // GitEffectsを初期化
   const gitEffects = createGitEffects();
 
+  // SessionEffectsを初期化
+  const sessionEffects = new PlannerSessionEffectsImpl(config.agentCoordPath);
+
   // Orchestratorを初期化（新しい関数型実装）
   const orchestrator = createOrchestrator({
     taskStore,
     runnerEffects,
     gitEffects,
+    sessionEffects,
     config,
     maxWorkers: config.maxWorkers,
   });
