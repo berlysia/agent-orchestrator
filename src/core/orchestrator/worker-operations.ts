@@ -42,15 +42,25 @@ export interface WorkerResult {
   readonly error?: string;
 }
 
+/**
+ * Rate limit エラーを検出
+ *
+ * WHY: Agent実行時の rate limit エラーを検出し、適切にハンドリングするため
+ *
+ * NOTE: 型名や変数名などのコード内容ではなく、実際のエラーメッセージを検出する
+ * - `GitHubRateLimitedError` のような型名は除外
+ * - `rate limit exceeded` などの実際のエラーメッセージのみマッチ
+ */
 const detectRateLimitReason = (text: string): string | null => {
   if (!text) {
     return null;
   }
 
   const patterns: Array<{ pattern: RegExp; reason: string }> = [
+    // 具体的なエラーメッセージパターン（型名などを除外）
     { pattern: /hit your limit/i, reason: 'hit your limit' },
-    { pattern: /rate limit/i, reason: 'rate limit' },
-    { pattern: /rate[- ]?limited/i, reason: 'rate limited' },
+    { pattern: /rate limit (exceeded|reached|hit)/i, reason: 'rate limit exceeded' },
+    { pattern: /you(?:'re| are) being rate[- ]?limited/i, reason: 'rate limited' },
     { pattern: /too many requests/i, reason: 'too many requests' },
     { pattern: /\b429\b/, reason: 'http 429' },
   ];

@@ -8,7 +8,7 @@ import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts'
 import { createJudgeOperations } from './judge-operations.ts';
 import { createIntegrationOperations } from './integration-operations.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
-import { taskId, repoPath, branchName } from '../../types/branded.ts';
+import { taskId, repoPath, branchName, type TaskId } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
@@ -258,6 +258,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       // 7. 直列チェーンを順番に実行
+      const serialChainFailedTasks: TaskId[] = [];
       if (serialChains.length > 0) {
         console.log('\n🔗 Executing serial chains...');
         for (const chain of serialChains) {
@@ -273,11 +274,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           completedTaskIds.push(...result.completed.map((id) => String(id)));
           failedTaskIds.push(...result.failed.map((id) => String(id)));
+          serialChainFailedTasks.push(...result.failed);
 
           // Worktreeをクリーンアップ
           if (result.worktreePath && chain[0]) {
             const firstTaskId = chain[0];
             await workerOps.cleanupWorktree(firstTaskId);
+          }
+        }
+
+        // Serial chainで失敗したタスクの依存先を自動的にブロック
+        if (serialChainFailedTasks.length > 0) {
+          const dependentTasks = computeBlockedTasks(serialChainFailedTasks, graph);
+          if (dependentTasks.length > 0) {
+            console.log(
+              `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
+            );
+            for (const tid of dependentTasks) {
+              await schedulerOps.blockTask(tid);
+              failedTaskIds.push(String(tid));
+            }
           }
         }
       }
@@ -290,6 +306,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       // 直列チェーンのタスクもブロック済みとして扱う（並列実行から除外）
       for (const tid of serialTaskIds) {
         blockedTaskIds.add(tid);
+      }
+      // Serial chainで失敗したタスクの依存先もブロック済みとして扱う
+      if (serialChainFailedTasks.length > 0) {
+        const dependentTasks = computeBlockedTasks(serialChainFailedTasks, graph);
+        for (const tid of dependentTasks) {
+          blockedTaskIds.add(tid);
+        }
       }
 
       for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
@@ -628,6 +651,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         : { levels: [] };
 
       // 8. 直列チェーンを実行
+      const resumeSerialChainFailedTasks: TaskId[] = [];
       if (serialChains.length > 0) {
         console.log('\n🔗 Executing serial chains...');
         for (const chain of serialChains) {
@@ -643,10 +667,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           completedTaskIds.push(...result.completed.map((id) => String(id)));
           failedTaskIds.push(...result.failed.map((id) => String(id)));
+          resumeSerialChainFailedTasks.push(...result.failed);
 
           if (result.worktreePath && chain[0]) {
             const firstTaskId = chain[0];
             await workerOps.cleanupWorktree(firstTaskId);
+          }
+        }
+
+        // Serial chainで失敗したタスクの依存先を自動的にブロック
+        if (resumeSerialChainFailedTasks.length > 0) {
+          const dependentTasks = computeBlockedTasks(resumeSerialChainFailedTasks, graph);
+          if (dependentTasks.length > 0) {
+            console.log(
+              `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
+            );
+            for (const tid of dependentTasks) {
+              blockedTaskIds.add(tid);
+              await schedulerOps.blockTask(tid);
+              failedTaskIds.push(String(tid));
+            }
           }
         }
       }
@@ -969,6 +1009,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
 
         // 直列チェーンを実行
+        const continueSerialChainFailedTasks: TaskId[] = [];
         if (serialChains.length > 0) {
           for (const chain of serialChains) {
             const result = await executeSerialChain(
@@ -983,9 +1024,25 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
             allCompletedTaskIds.push(...result.completed.map((id) => String(id)));
             allFailedTaskIds.push(...result.failed.map((id) => String(id)));
+            continueSerialChainFailedTasks.push(...result.failed);
 
             if (result.worktreePath && chain[0]) {
               await workerOps.cleanupWorktree(chain[0]);
+            }
+          }
+
+          // Serial chainで失敗したタスクの依存先を自動的にブロック
+          if (continueSerialChainFailedTasks.length > 0) {
+            const dependentTasks = computeBlockedTasks(continueSerialChainFailedTasks, graph);
+            if (dependentTasks.length > 0) {
+              console.log(
+                `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
+              );
+              for (const tid of dependentTasks) {
+                blockedTaskIds.add(tid);
+                await schedulerOps.blockTask(tid);
+                allFailedTaskIds.push(String(tid));
+              }
             }
           }
         }
