@@ -6,6 +6,7 @@ import { createRunCommand } from './commands/run.ts';
 import { createStatusCommand } from './commands/status.ts';
 import { createStopCommand } from './commands/stop.ts';
 import { createResumeCommand } from './commands/resume.ts';
+import { createInfoCommand } from './commands/info.ts';
 import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
@@ -21,5 +22,6 @@ program.addCommand(createRunCommand());
 program.addCommand(createStatusCommand());
 program.addCommand(createStopCommand());
 program.addCommand(createResumeCommand());
+program.addCommand(createInfoCommand());
 
 program.parse(process.argv);

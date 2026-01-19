@@ -247,9 +247,6 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       logPath: plannerLogPath,
     });
 
-    await appendPlanningLog(`=== Planning Start ===\n`);
-    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
-
     const ensureRunsResult = await deps.runnerEffects.ensureRunsDir();
     if (isErr(ensureRunsResult)) {
       return createErr(ioError('planTasks.ensureRunsDir', ensureRunsResult.err));
@@ -259,6 +256,14 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     if (isErr(saveRunResult)) {
       return createErr(ioError('planTasks.saveRunMetadata', saveRunResult.err));
     }
+
+    const initLogResult = await deps.runnerEffects.initializeLogFile(planningRun);
+    if (isErr(initLogResult)) {
+      return createErr(ioError('planTasks.initializeLogFile', initLogResult.err));
+    }
+
+    await appendPlanningLog(`=== Planning Start ===\n`);
+    await appendPlanningLog(`Instruction: ${userInstruction}\n`);
 
     // 品質評価ループ
     let taskBreakdowns: TaskBreakdown[] = [];
@@ -570,6 +575,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     if (deps.sessionEffects && taskIds.length > 0) {
       const session = createPlannerSession(plannerRunId, userInstruction);
       session.generatedTasks = taskBreakdowns;
+      session.plannerLogPath = plannerLogPath;
+      session.plannerMetadataPath = plannerMetadataPath;
       // 会話履歴を記録（簡易版: プロンプトと応答のみ）
       session.conversationHistory.push({
         role: 'user',
@@ -738,6 +745,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const saveRunResult = await deps.runnerEffects.saveRunMetadata(planningRun);
     if (isErr(saveRunResult)) {
       return createErr(ioError('planAdditionalTasks.saveRunMetadata', saveRunResult.err));
+    }
+
+    const initLogResult = await deps.runnerEffects.initializeLogFile(planningRun);
+    if (isErr(initLogResult)) {
+      return createErr(ioError('planAdditionalTasks.initializeLogFile', initLogResult.err));
     }
 
     // 会話履歴を含めたプロンプトを構築

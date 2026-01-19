@@ -54,6 +54,33 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
     return mapErrForResult(result, toRunnerError('ensureRunsDir'));
   };
 
+  /**
+   * ログファイルのヘッダーを初期化
+   *
+   * ログファイルの冒頭にIDとメタデータへのパスを記録する
+   */
+  const initializeLogFile = async (run: Run): Promise<Result<void, RunnerError>> => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const logPath = getLogFilePath(run.id);
+      const metadataPath = getRunMetadataPath(run.id);
+
+      const header = [
+        '# Agent Execution Log',
+        `# Run ID: ${run.id}`,
+        `# Task ID: ${run.taskId}`,
+        `# Metadata: ${metadataPath}`,
+        run.plannerRunId ? `# Planner Run ID: ${run.plannerRunId}` : null,
+        run.plannerMetadataPath ? `# Planner Metadata: ${run.plannerMetadataPath}` : null,
+        `# Started At: ${run.startedAt}`,
+        '#',
+        '',
+      ].filter(line => line !== null).join('\n');
+
+      await fs.writeFile(logPath, header, 'utf-8');
+    });
+    return mapErrForResult(result, toRunnerError('initializeLogFile'));
+  };
+
   const appendLog = async (
     theRunId: string,
     content: string,
@@ -195,6 +222,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
 
   return {
     ensureRunsDir,
+    initializeLogFile,
     appendLog,
     saveRunMetadata,
     loadRunMetadata,

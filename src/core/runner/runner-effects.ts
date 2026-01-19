@@ -63,6 +63,14 @@ export interface RunnerEffects {
   ensureRunsDir(): Promise<Result<void, RunnerError>>;
 
   /**
+   * ログファイルのヘッダーを初期化
+   *
+   * ログファイルの冒頭にRun ID、メタデータパス、Task ID、Planner情報などを記録する
+   * @param run Run オブジェクト
+   */
+  initializeLogFile(run: Run): Promise<Result<void, RunnerError>>;
+
+  /**
    * ログにコンテンツを追記
    * @param runId Run ID（文字列形式）
    * @param content 追記するコンテンツ

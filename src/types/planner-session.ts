@@ -26,6 +26,10 @@ export const PlannerSessionSchema = z.object({
   generatedTasks: z.array(z.any()),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** プランナー実行ログのパス（絶対パス、オプショナル） */
+  plannerLogPath: z.string().nullable().optional(),
+  /** プランナー実行メタデータのパス（絶対パス、オプショナル） */
+  plannerMetadataPath: z.string().nullable().optional(),
 });
 
 export type PlannerSession = z.infer<typeof PlannerSessionSchema>;

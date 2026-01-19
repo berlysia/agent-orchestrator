@@ -176,6 +176,12 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       return createErr(saveMetaResult.err);
     }
 
+    // ログファイルのヘッダーを初期化
+    const initLogResult = await deps.runnerEffects.initializeLogFile(run);
+    if (isErr(initLogResult)) {
+      return createErr(initLogResult.err);
+    }
+
     console.log(`  📝 Execution log: ${getRunDisplayPath(theRunId, 'log')}`);
     console.log(`  📊 Metadata: ${getRunDisplayPath(theRunId, 'json')}`);
 
@@ -371,6 +377,12 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const saveMetaResult = await deps.runnerEffects.saveRunMetadata(run);
     if (isErr(saveMetaResult)) {
       return createErr(saveMetaResult.err);
+    }
+
+    // ログファイルのヘッダーを初期化
+    const initLogResult = await deps.runnerEffects.initializeLogFile(run);
+    if (isErr(initLogResult)) {
+      return createErr(initLogResult.err);
     }
 
     console.log(`  📝 Execution log: ${getRunDisplayPath(theRunId, 'log')}`);
