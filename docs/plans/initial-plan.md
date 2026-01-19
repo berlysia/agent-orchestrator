@@ -796,6 +796,7 @@ Phase 1が完了しました。次のフェーズでは以下の機能追加を�
    - GitHub PR自動作成
    - PR管理とマージ機能
    - GitHub Actions統合
+   - **未実装（計画段階）**: [github-integration-plan.md](github-integration-plan.md), [github-integration-design.md](github-integration-design.md)
 
 2. **GUI実装** (Phase 3候補)
    - Webベースのダッシュボード
