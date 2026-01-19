@@ -21,6 +21,7 @@ import { executeLevelParallel, computeBlockedTasks } from './parallel-executor.t
 import { executeSerialChain } from './serial-executor.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
+import type { PlannerSessionEffects } from './planner-session-effects.ts';
 
 /**
  * Orchestrator依存関係
@@ -29,6 +30,7 @@ export interface OrchestrateDeps {
   readonly taskStore: TaskStore;
   readonly gitEffects: GitEffects;
   readonly runnerEffects: RunnerEffects;
+  readonly sessionEffects?: PlannerSessionEffects;
   readonly config: Config;
   readonly maxWorkers?: number;
 }
@@ -451,8 +453,215 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     }
   };
 
+  /**
+   * 既存セッションからタスクを再開
+   *
+   * WHY: 失敗・停止したタスクを含むセッションから、実行を再開する
+   *
+   * @param sessionId セッションID
+   * @param failedTaskHandling 失敗タスクの処理方法（retry/continue/skip）
+   * @returns 実行結果（Result型）
+   */
+  const resumeFromSession = async (
+    sessionId: string,
+    failedTaskHandling: Map<string, 'retry' | 'continue' | 'skip'>,
+  ): Promise<Result<OrchestrationResult, OrchestratorError>> => {
+    const completedTaskIds: string[] = [];
+    const failedTaskIds: string[] = [];
+    let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
+
+    try {
+      // 1. セッションEffectsが提供されていない場合はエラー
+      if (!deps.sessionEffects) {
+        return createErr({
+          type: 'UNKNOWN_ERROR',
+          message: 'PlannerSessionEffects not provided to Orchestrator',
+        });
+      }
+
+      // 2. セッションを読み込み
+      console.log(`📂 Loading session: ${sessionId}`);
+      const sessionResult = await deps.sessionEffects.loadSession(sessionId);
+      if (isErr(sessionResult)) {
+        return createErr({
+          type: 'PLANNING_ERROR',
+          message: `Failed to load session: ${sessionResult.err.message}`,
+          cause: sessionResult.err,
+        });
+      }
+
+      const session = sessionResult.val;
+      console.log(`📋 Session instruction: ${session.instruction}`);
+      console.log(`📋 Tasks in session: ${session.generatedTasks.length}`);
+
+      // 3. セッションのタスクIDを抽出
+      const taskIds: string[] = session.generatedTasks.map((t: { id: string }) => t.id);
+
+      // 4. すべてのタスクを取得して状態を確認
+      console.log('\n🔍 Checking task states...');
+      const tasks: Task[] = [];
+      for (const rawTaskId of taskIds) {
+        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+        if (!taskResult.ok) {
+          console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
+          failedTaskIds.push(rawTaskId);
+          continue;
+        }
+        tasks.push(taskResult.val);
+      }
+
+      // 5. 失敗/停止タスクの処理を適用
+      for (const task of tasks) {
+        const handling = failedTaskHandling.get(String(task.id));
+
+        if (task.state === TaskState.BLOCKED || task.state === TaskState.CANCELLED) {
+          if (handling === 'retry') {
+            console.log(`  🔄 Resetting task ${task.id} for retry`);
+            // Worktreeをクリーンアップ
+            await workerOps.cleanupWorktree(task.id);
+            // タスクをREADY状態にリセット
+            await schedulerOps.resetTaskToReady(task.id);
+          } else if (handling === 'continue') {
+            console.log(`  ➡️  Task ${task.id} will continue from existing state`);
+            // タスクをREADY状態にリセット（worktreeはそのまま）
+            await schedulerOps.resetTaskToReady(task.id);
+          } else if (handling === 'skip') {
+            console.log(`  ⏭️  Skipping task ${task.id}`);
+            failedTaskIds.push(String(task.id));
+          }
+        } else if (task.state === TaskState.DONE) {
+          completedTaskIds.push(String(task.id));
+        }
+      }
+
+      // 6. 依存関係グラフを構築して実行（executeInstructionと同じロジック）
+      console.log('\n🔗 Building dependency graph...');
+      const allTasks: Task[] = [];
+      for (const rawTaskId of taskIds) {
+        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+        if (taskResult.ok) {
+          allTasks.push(taskResult.val);
+        }
+      }
+
+      const graph = buildDependencyGraph(allTasks);
+
+      // 依存関係を表示
+      console.log('\n📊 Task dependencies:');
+      for (const task of allTasks) {
+        const deps = task.dependencies;
+        if (deps.length === 0) {
+          console.log(`  ${String(task.id)}: no dependencies`);
+        } else {
+          console.log(
+            `  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`,
+          );
+        }
+      }
+
+      // 7. 実行（既に完了したタスクはスキップ）
+      const blockedTaskIds = new Set([
+        ...(graph.cyclicDependencies ?? []),
+        ...failedTaskIds.map((id) => taskId(id)),
+      ]);
+
+      // 直列チェーンを検出
+      const serialChains = detectSerialChains(graph);
+      const serialTaskIds = new Set(graph.cyclicDependencies ?? []);
+      for (const chain of serialChains) {
+        for (const tid of chain) {
+          serialTaskIds.add(tid);
+        }
+      }
+
+      const parallelTasks = allTasks.filter((task) => !serialTaskIds.has(task.id));
+      const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+      const { levels } = parallelGraph
+        ? computeExecutionLevels(parallelGraph)
+        : { levels: [] };
+
+      // 8. 直列チェーンを実行
+      if (serialChains.length > 0) {
+        console.log('\n🔗 Executing serial chains...');
+        for (const chain of serialChains) {
+          const result = await executeSerialChain(
+            chain,
+            deps.taskStore,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            schedulerState,
+          );
+          schedulerState = result.updatedSchedulerState;
+
+          completedTaskIds.push(...result.completed.map((id) => String(id)));
+          failedTaskIds.push(...result.failed.map((id) => String(id)));
+
+          if (result.worktreePath && chain[0]) {
+            const firstTaskId = chain[0];
+            await workerOps.cleanupWorktree(firstTaskId);
+          }
+        }
+      }
+
+      // 9. 並列レベルを実行
+      for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+        const level = levels[levelIndex];
+        if (!level) continue;
+
+        console.log(`\n📍 Executing Parallel Level ${levelIndex}...`);
+
+        const levelResult = await executeLevelParallel(
+          level,
+          schedulerOps,
+          workerOps,
+          judgeOps,
+          schedulerState,
+          blockedTaskIds,
+        );
+
+        schedulerState = levelResult.updatedSchedulerState;
+        completedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+        failedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+
+        if (levelResult.failed.length > 0) {
+          const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+          for (const tid of newBlocked) {
+            blockedTaskIds.add(tid);
+            await schedulerOps.blockTask(tid);
+            failedTaskIds.push(String(tid));
+          }
+        }
+      }
+
+      const success = failedTaskIds.length === 0;
+      console.log(
+        `\n${success ? '🎉' : '⚠️ '} Session resumption ${success ? 'completed' : 'finished with errors'}`,
+      );
+      console.log(`  Completed: ${completedTaskIds.length}`);
+      console.log(`  Failed: ${failedTaskIds.length}`);
+
+      return createOk({
+        taskIds,
+        completedTaskIds,
+        failedTaskIds,
+        success,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Session resumption error: ${errorMessage}`);
+
+      return createErr({
+        type: 'UNKNOWN_ERROR',
+        message: errorMessage,
+        cause: error,
+      });
+    }
+  };
+
   return {
     executeInstruction,
+    resumeFromSession,
   };
 };
 

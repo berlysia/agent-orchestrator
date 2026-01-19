@@ -153,11 +153,36 @@ export const createSchedulerOperations = (deps: SchedulerDeps) => {
     }));
   };
 
+  /**
+   * タスクをREADY状態にリセット
+   *
+   * WHY: 失敗タスクをリトライする際、BLOCKED/CANCELLED状態からREADYに戻す必要がある
+   *
+   * @param tid タスクID
+   * @returns 更新後のタスク（Result型）
+   */
+  const resetTaskToReady = async (tid: TaskId): Promise<Result<Task, TaskStoreError>> => {
+    const taskResult = await deps.taskStore.readTask(tid);
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
+
+    return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({
+      ...currentTask,
+      state: TaskState.READY,
+      owner: null,
+      updatedAt: new Date().toISOString(),
+    }));
+  };
+
   return {
     getReadyTasks,
     claimTask,
     completeTask,
     blockTask,
+    resetTaskToReady,
   };
 };
 

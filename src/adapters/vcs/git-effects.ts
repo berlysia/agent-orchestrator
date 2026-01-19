@@ -139,6 +139,14 @@ export interface GitEffects {
    */
   pruneWorktrees(repo: RepoPath): Promise<Result<void, GitError>>;
 
+  /**
+   * 指定された名前のWorktreeのパスを取得
+   * @param repo リポジトリパス
+   * @param name Worktree 名
+   * @returns Worktreeのパス（存在しない場合はエラー）
+   */
+  getWorktreePath(repo: RepoPath, name: string): Promise<Result<WorktreePath, GitError>>;
+
   // ===== コミット/プッシュ操作 =====
 
   /**

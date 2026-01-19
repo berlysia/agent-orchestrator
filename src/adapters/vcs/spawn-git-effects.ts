@@ -136,7 +136,7 @@ const parseWorktreeList = (output: string): WorktreeInfo[] => {
  */
 export const createSpawnGitEffects = (): Pick<
   import('./git-effects.ts').GitEffects,
-  'createWorktree' | 'removeWorktree' | 'listWorktrees' | 'pruneWorktrees'
+  'createWorktree' | 'removeWorktree' | 'listWorktrees' | 'pruneWorktrees' | 'getWorktreePath'
 > => {
   const createWorktree = async (
     repo: RepoPath,
@@ -226,10 +226,34 @@ export const createSpawnGitEffects = (): Pick<
     return createOk(undefined);
   };
 
+  const getWorktreePath = async (
+    repo: RepoPath,
+    name: string,
+  ): Promise<Result<WorktreePath, GitError>> => {
+    const worktreesResult = await listWorktrees(repo);
+
+    if (!worktreesResult.ok) {
+      return worktreesResult;
+    }
+
+    const worktrees = worktreesResult.val;
+    const targetWorktree = worktrees.find((wt) => {
+      // Worktreeのパスに name が含まれているかチェック
+      return String(wt.path).includes(name);
+    });
+
+    if (!targetWorktree) {
+      return createErr(gitCommandFailed('getWorktreePath', `Worktree not found: ${name}`, -1));
+    }
+
+    return createOk(targetWorktree.path);
+  };
+
   return {
     createWorktree,
     removeWorktree,
     listWorktrees,
     pruneWorktrees,
+    getWorktreePath,
   };
 };

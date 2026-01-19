@@ -94,6 +94,21 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
     return mapErrForResult(result, toRunnerError('readLog'));
   };
 
+  const listRunLogs = async (): Promise<Result<string[], RunnerError>> => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      // runsディレクトリが存在しない場合は空配列を返す
+      try {
+        await fs.access(runsDir);
+      } catch {
+        return [];
+      }
+
+      const files = await fs.readdir(runsDir);
+      return files.filter((file) => file.endsWith('.log'));
+    });
+    return mapErrForResult(result, toRunnerError('listRunLogs'));
+  };
+
   // ===== エージェント実行実装 =====
 
   /**
@@ -184,6 +199,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
     saveRunMetadata,
     loadRunMetadata,
     readLog,
+    listRunLogs,
     runClaudeAgent,
     runCodexAgent,
   };

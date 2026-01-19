@@ -534,6 +534,102 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     }
   };
 
+  /**
+   * 既存worktreeの状態を維持してタスクを続行
+   *
+   * WHY: 失敗したタスクを「続きから引き継ぐ」際、既存のworktreeとログを利用して続行する
+   *
+   * @param task 実行するタスク
+   * @returns 実行結果
+   */
+  const continueTask = async (task: Task): Promise<Result<WorkerResult, OrchestratorError>> => {
+    try {
+      // 1. 既存worktreeの存在を確認（listWorktreesを使用）
+      const worktreesResult = await deps.gitEffects.listWorktrees(deps.appRepoPath);
+      if (isErr(worktreesResult)) {
+        console.log(
+          `  ⚠️  Failed to list worktrees, falling back to normal execution`,
+        );
+        return await executeTaskWithWorktree(task);
+      }
+
+      const worktrees = worktreesResult.val;
+      const taskWorktree = worktrees.find((wt) => {
+        // Worktreeのパスに task.id が含まれているかチェック
+        return String(wt.path).includes(String(task.id));
+      });
+
+      if (!taskWorktree) {
+        console.log(
+          `  ⚠️  Worktree for task ${task.id} not found, falling back to normal execution`,
+        );
+        return await executeTaskWithWorktree(task);
+      }
+
+      const existingWorktreePath = taskWorktree.path;
+
+      // 2. 前回の実行ログを読み込む（存在する場合）
+      let previousLog: string | undefined;
+      if (deps.agentCoordPath) {
+        const logFilesResult = await deps.runnerEffects.listRunLogs();
+        const logFiles = logFilesResult.ok ? logFilesResult.val : [];
+
+        // タスクIDに関連するログファイルを検索
+        const taskLogs = logFiles.filter((logFile) => logFile.includes(String(task.id)));
+
+        if (taskLogs.length > 0) {
+          // 最新のログを取得（ファイル名から.logを除去してrunIdとして使用）
+          const latestLogFile = taskLogs[taskLogs.length - 1];
+          const runIdStr = latestLogFile?.replace('.log', '') ?? '';
+
+          const logContentResult = await deps.runnerEffects.readLog(runIdStr);
+          if (logContentResult.ok) {
+            previousLog = logContentResult.val;
+            console.log(`  📋 Loaded previous execution log: ${latestLogFile}`);
+          }
+        }
+      }
+
+      // 3. エージェントを実行（previousLogをフィードバックとして渡す）
+      const runResult = await executeTaskInExistingWorktree(
+        task,
+        existingWorktreePath,
+        previousLog,
+      );
+
+      if (isErr(runResult)) {
+        return createErr(runResult.err);
+      }
+
+      const result = runResult.val;
+
+      if (!result.success) {
+        return createOk(result);
+      }
+
+      // 4. 変更をコミット
+      const commitResult = await commitChanges(task, existingWorktreePath);
+      if (isErr(commitResult)) {
+        return createErr(commitResult.err);
+      }
+
+      // 5. リモートにpush
+      const pushResult = await pushChanges(task, existingWorktreePath);
+      if (isErr(pushResult)) {
+        return createErr(pushResult.err);
+      }
+
+      return createOk(result);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return createOk({
+        runId: `error-${task.id}`,
+        success: false,
+        error: errorMessage,
+      });
+    }
+  };
+
   return {
     setupWorktree,
     executeTask,
@@ -542,5 +638,6 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     pushChanges,
     cleanupWorktree,
     executeTaskWithWorktree,
+    continueTask,
   };
 };

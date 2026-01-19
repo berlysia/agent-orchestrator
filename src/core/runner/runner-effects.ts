@@ -88,4 +88,10 @@ export interface RunnerEffects {
    * @returns ログ内容（存在しない場合はエラー）
    */
   readLog(runId: string): Promise<Result<string, RunnerError>>;
+
+  /**
+   * すべてのログファイル名を一覧取得
+   * @returns ログファイル名の配列（拡張子.logを含む）
+   */
+  listRunLogs(): Promise<Result<string[], RunnerError>>;
 }

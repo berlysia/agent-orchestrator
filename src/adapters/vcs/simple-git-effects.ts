@@ -34,7 +34,7 @@ const toGitError =
  */
 export const createSimpleGitEffects = (): Omit<
   GitEffects,
-  'createWorktree' | 'removeWorktree' | 'listWorktrees' | 'pruneWorktrees'
+  'createWorktree' | 'removeWorktree' | 'listWorktrees' | 'pruneWorktrees' | 'getWorktreePath'
 > => {
   // ===== ブランチ操作 =====
 
