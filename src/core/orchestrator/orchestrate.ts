@@ -155,6 +155,17 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       const graph = buildDependencyGraph(tasks);
 
+      // 依存関係を表示
+      console.log('\n📊 Task dependencies:');
+      for (const task of tasks) {
+        const deps = task.dependencies;
+        if (deps.length === 0) {
+          console.log(`  ${String(task.id)}: no dependencies`);
+        } else {
+          console.log(`  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`);
+        }
+      }
+
       // 3. 循環依存をチェック
       if (graph.cyclicDependencies && graph.cyclicDependencies.length > 0) {
         console.warn(
