@@ -10,7 +10,7 @@ import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
 import type { TaskId, WorktreePath, RepoPath, BranchName } from '../../types/branded.ts';
-import { branchName, runId, repoPath } from '../../types/branded.ts';
+import { runId, repoPath } from '../../types/branded.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
@@ -48,13 +48,16 @@ export interface WorkerResult {
 export type AgentType = 'claude' | 'codex';
 
 /**
- * タスク固有のブランチ名を生成（純粋関数）
+ * タスクのブランチ名を取得（純粋関数）
  *
- * WHY: ブランチ名にタスクIDを含めることで、並列実行時の衝突を防ぐ
- * 例: feature/auth → feature/auth-task-2b8c0253-1
+ * WHY: Plannerがタスク生成時に既に`task.branch`にタスクIDを含めているため、
+ * そのまま返すだけで良い。以前はここで`-${task.id}`を追加していたが、
+ * それによりタスクIDが2重に含まれる問題が発生していた。
+ *
+ * 例: task.branch = "feature/auth-task-2b8c0253-1" (Plannerが生成)
  */
 export const getTaskBranchName = (task: Task): BranchName => {
-  return branchName(`${task.branch}-${task.id}`);
+  return task.branch;
 };
 
 /**

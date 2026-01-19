@@ -96,7 +96,8 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }> = [];
 
     // 各タスクのブランチを順番にマージ
-    // WHY: タスク固有のブランチ名を使用する必要がある（task.branchは元のブランチ名）
+    // WHY: getTaskBranchName()を使用してタスクのブランチ名を取得
+    // （現在はtask.branchをそのまま返すが、将来的な変更に備えて関数経由でアクセス）
     for (const task of completedTasks) {
       const taskBranchName = getTaskBranchName(task);
       const mergeResult = await gitEffects.merge(repo, taskBranchName);
