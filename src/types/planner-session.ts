@@ -30,6 +30,23 @@ export const PlannerSessionSchema = z.object({
   plannerLogPath: z.string().nullable().optional(),
   /** プランナー実行メタデータのパス（絶対パス、オプショナル） */
   plannerMetadataPath: z.string().nullable().optional(),
+  /**
+   * 最終完了判定の結果
+   * WHY: オーケストレーション終了時に自動生成される判定情報を保存し、
+   *      continue コマンドで未完了の判定から再実行できるようにする
+   */
+  finalJudgement: z.object({
+    isComplete: z.boolean(),
+    missingAspects: z.array(z.string()),
+    additionalTaskSuggestions: z.array(z.string()),
+    completionScore: z.number().min(0).max(100).optional(),
+    evaluatedAt: z.string(),
+  }).nullable().optional(),
+  /**
+   * continue コマンドでの反復実行回数
+   * WHY: 無限ループを防ぐため、反復回数を追跡する
+   */
+  continueIterationCount: z.number().int().min(0).default(0),
 });
 
 export type PlannerSession = z.infer<typeof PlannerSessionSchema>;
@@ -49,5 +66,7 @@ export const createPlannerSession = (
     generatedTasks: [],
     createdAt: now,
     updatedAt: now,
+    finalJudgement: null,
+    continueIterationCount: 0,
   };
 };

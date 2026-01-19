@@ -52,6 +52,28 @@ export interface OrchestrationResult {
 }
 
 /**
+ * Continue実行結果
+ *
+ * WHY: agent continue コマンドの実行結果を返すための型定義
+ */
+export interface ContinueResult {
+  /** 完了したかどうか */
+  isComplete: boolean;
+  /** 実行した反復回数 */
+  iterationsPerformed: number;
+  /** 完了スコア（0-100） */
+  completionScore?: number;
+  /** 残っている未完了の側面 */
+  remainingMissingAspects: string[];
+  /** 全タスクID（累積） */
+  allTaskIds: string[];
+  /** 完了タスクID（累積） */
+  completedTaskIds: string[];
+  /** 失敗タスクID（累積） */
+  failedTaskIds: string[];
+}
+
+/**
  * Orchestratorエラー型
  */
 export interface OrchestratorError {
@@ -137,7 +159,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         });
       }
 
-      const { taskIds } = planningResult.val;
+      const { taskIds, runId: sessionId } = planningResult.val;
       console.log(`📋 Generated ${taskIds.length} tasks`);
       if (taskIds.length > 0) {
         for (const createdTaskId of taskIds) {
@@ -427,6 +449,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             });
           }
         }
+
+        // 最終判定結果をセッションに保存
+        if (deps.sessionEffects) {
+          const sessionResult = await deps.sessionEffects.loadSession(sessionId);
+          if (!isErr(sessionResult)) {
+            const session = sessionResult.val;
+            session.finalJudgement = {
+              isComplete: finalJudgement.isComplete,
+              missingAspects: finalJudgement.missingAspects,
+              additionalTaskSuggestions: finalJudgement.additionalTaskSuggestions,
+              completionScore: finalJudgement.completionScore,
+              evaluatedAt: new Date().toISOString(),
+            };
+
+            const saveResult = await deps.sessionEffects.saveSession(session);
+            if (isErr(saveResult)) {
+              console.warn(`⚠️  Failed to save final judgement to session: ${saveResult.err.message}`);
+            }
+          }
+        }
       }
 
       const success = failedTaskIds.length === 0;
@@ -661,9 +703,372 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     }
   };
 
+  /**
+   * 失敗/未完了セッションから継続実行
+   *
+   * WHY: 最終判定で未完了と判定されたセッションから、追加タスクを生成して実行を続ける
+   *
+   * @param sessionId セッションID
+   * @param options 実行オプション
+   * @returns 継続実行結果（Result型）
+   */
+  const continueFromSession = async (
+    sessionId: string,
+    options: {
+      maxIterations: number;
+      autoConfirm: boolean;
+      dryRun: boolean;
+    },
+  ): Promise<Result<ContinueResult, OrchestratorError>> => {
+    const allTaskIds: string[] = [];
+    const allCompletedTaskIds: string[] = [];
+    const allFailedTaskIds: string[] = [];
+    let iterationsPerformed = 0;
+
+    const HARD_CAP_ITERATIONS = 10;
+    const maxIterations = Math.min(options.maxIterations, HARD_CAP_ITERATIONS);
+
+    try {
+      // 1. セッションEffectsが提供されていない場合はエラー
+      if (!deps.sessionEffects) {
+        return createErr({
+          type: 'UNKNOWN_ERROR',
+          message: 'PlannerSessionEffects not provided to Orchestrator',
+        });
+      }
+
+      console.log(`🔄 Continue from session: ${sessionId}`);
+      console.log(`   Max iterations: ${maxIterations}`);
+
+      // 反復ループ
+      while (iterationsPerformed < maxIterations) {
+        // 2. セッションを読み込み
+        const sessionResult = await deps.sessionEffects.loadSession(sessionId);
+        if (isErr(sessionResult)) {
+          return createErr({
+            type: 'PLANNING_ERROR',
+            message: `Failed to load session: ${sessionResult.err.message}`,
+            cause: sessionResult.err,
+          });
+        }
+
+        const session = sessionResult.val;
+        const currentIteration = session.continueIterationCount ?? 0;
+
+        console.log(`\n📊 Iteration ${currentIteration + 1}/${maxIterations}`);
+
+        // 既存のタスクを収集
+        const existingTaskIds = session.generatedTasks.map((t: { id: string }) => t.id);
+        allTaskIds.push(...existingTaskIds);
+
+        // 3. 既に完了している場合はチェック
+        if (session.finalJudgement?.isComplete) {
+          console.log('✅ Session already complete');
+          return createOk({
+            isComplete: true,
+            iterationsPerformed,
+            completionScore: session.finalJudgement.completionScore,
+            remainingMissingAspects: [],
+            allTaskIds,
+            completedTaskIds: allCompletedTaskIds,
+            failedTaskIds: allFailedTaskIds,
+          });
+        }
+
+        // 4. 最終判定を実行して現在の状態を確認
+        console.log('🎯 Evaluating current completion status...');
+
+        const completedTaskDescriptions: string[] = [];
+        const failedTaskDescriptions: string[] = [];
+
+        for (const rawTaskId of existingTaskIds) {
+          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+          if (taskResult.ok) {
+            const task = taskResult.val;
+            const description = `[${rawTaskId}] ${task.acceptance || task.branch}`;
+
+            if (task.state === TaskState.DONE) {
+              completedTaskDescriptions.push(description);
+              if (!allCompletedTaskIds.includes(rawTaskId)) {
+                allCompletedTaskIds.push(rawTaskId);
+              }
+            } else if (
+              task.state === TaskState.BLOCKED ||
+              task.state === TaskState.CANCELLED
+            ) {
+              failedTaskDescriptions.push(description);
+              if (!allFailedTaskIds.includes(rawTaskId)) {
+                allFailedTaskIds.push(rawTaskId);
+              }
+            }
+          }
+        }
+
+        const currentJudgement = await plannerOps.judgeFinalCompletion(
+          session.instruction,
+          completedTaskDescriptions,
+          failedTaskDescriptions,
+        );
+
+        console.log(`   Completion score: ${currentJudgement.completionScore ?? 'N/A'}%`);
+        console.log(`   Complete: ${currentJudgement.isComplete ? 'Yes' : 'No'}`);
+
+        if (currentJudgement.isComplete) {
+          console.log('✅ Current tasks satisfy the original instruction');
+
+          // セッションを更新
+          session.finalJudgement = {
+            isComplete: true,
+            missingAspects: [],
+            additionalTaskSuggestions: [],
+            completionScore: currentJudgement.completionScore,
+            evaluatedAt: new Date().toISOString(),
+          };
+          await deps.sessionEffects.saveSession(session);
+
+          return createOk({
+            isComplete: true,
+            iterationsPerformed,
+            completionScore: currentJudgement.completionScore,
+            remainingMissingAspects: [],
+            allTaskIds,
+            completedTaskIds: allCompletedTaskIds,
+            failedTaskIds: allFailedTaskIds,
+          });
+        }
+
+        // 5. 未完了の側面を表示
+        if (currentJudgement.missingAspects.length > 0) {
+          console.log('   Missing aspects:');
+          currentJudgement.missingAspects.forEach((aspect, idx) => {
+            console.log(`     ${idx + 1}. ${aspect}`);
+          });
+        }
+
+        if (currentJudgement.additionalTaskSuggestions.length > 0) {
+          console.log('   Suggested additional tasks:');
+          currentJudgement.additionalTaskSuggestions.forEach((suggestion, idx) => {
+            console.log(`     ${idx + 1}. ${suggestion}`);
+          });
+        }
+
+        // 6. ドライランの場合はここで終了
+        if (options.dryRun) {
+          console.log('\n🔍 Dry-run mode: stopping before generating additional tasks');
+          return createOk({
+            isComplete: false,
+            iterationsPerformed,
+            completionScore: currentJudgement.completionScore,
+            remainingMissingAspects: currentJudgement.missingAspects,
+            allTaskIds,
+            completedTaskIds: allCompletedTaskIds,
+            failedTaskIds: allFailedTaskIds,
+          });
+        }
+
+        // 7. ユーザー確認（autoConfirm=falseの場合）
+        if (!options.autoConfirm) {
+          // TODO: 実際の確認プロンプトを実装
+          // 今は自動的に続行
+          console.log('   [Auto-proceeding without confirmation]');
+        }
+
+        // 8. 追加タスクを生成
+        console.log('\n🔍 Generating additional tasks...');
+        const additionalPlanningResult = await plannerOps.planAdditionalTasks(
+          sessionId,
+          currentJudgement.missingAspects,
+        );
+
+        if (isErr(additionalPlanningResult)) {
+          console.warn(`⚠️  Failed to generate additional tasks: ${additionalPlanningResult.err.message}`);
+
+          // セッションを更新（判定結果のみ）
+          session.finalJudgement = {
+            isComplete: false,
+            missingAspects: currentJudgement.missingAspects,
+            additionalTaskSuggestions: currentJudgement.additionalTaskSuggestions,
+            completionScore: currentJudgement.completionScore,
+            evaluatedAt: new Date().toISOString(),
+          };
+          session.continueIterationCount = currentIteration + 1;
+          await deps.sessionEffects.saveSession(session);
+
+          return createErr({
+            type: 'PLANNING_ERROR',
+            message: `Failed to generate additional tasks: ${additionalPlanningResult.err.message}`,
+            cause: additionalPlanningResult.err,
+          });
+        }
+
+        const { taskIds: newTaskIds } = additionalPlanningResult.val;
+        console.log(`📋 Generated ${newTaskIds.length} additional tasks`);
+
+        if (newTaskIds.length === 0) {
+          console.log('⚠️  No additional tasks generated, stopping');
+
+          // セッションを更新
+          session.finalJudgement = {
+            isComplete: false,
+            missingAspects: currentJudgement.missingAspects,
+            additionalTaskSuggestions: currentJudgement.additionalTaskSuggestions,
+            completionScore: currentJudgement.completionScore,
+            evaluatedAt: new Date().toISOString(),
+          };
+          session.continueIterationCount = currentIteration + 1;
+          await deps.sessionEffects.saveSession(session);
+
+          return createOk({
+            isComplete: false,
+            iterationsPerformed: currentIteration + 1,
+            completionScore: currentJudgement.completionScore,
+            remainingMissingAspects: currentJudgement.missingAspects,
+            allTaskIds,
+            completedTaskIds: allCompletedTaskIds,
+            failedTaskIds: allFailedTaskIds,
+          });
+        }
+
+        allTaskIds.push(...newTaskIds);
+
+        // 9. 新しいタスクを実行（既存の実行ロジックを再利用）
+        console.log('\n🚀 Executing additional tasks...');
+
+        const tasks: Task[] = [];
+        for (const rawTaskId of newTaskIds) {
+          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+          if (!taskResult.ok) {
+            console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
+            allFailedTaskIds.push(rawTaskId);
+            continue;
+          }
+          tasks.push(taskResult.val);
+        }
+
+        // 依存関係グラフを構築して実行
+        const graph = buildDependencyGraph(tasks);
+        const serialChains = detectSerialChains(graph);
+        const serialTaskIds = new Set<string>();
+        for (const chain of serialChains) {
+          for (const tid of chain) {
+            serialTaskIds.add(String(tid));
+          }
+        }
+
+        const parallelTasks = tasks.filter((task) => !serialTaskIds.has(String(task.id)));
+        const parallelGraph = parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks) : null;
+        const { levels } = parallelGraph
+          ? computeExecutionLevels(parallelGraph)
+          : { levels: [] };
+
+        let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
+        const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
+
+        // 直列チェーンを実行
+        if (serialChains.length > 0) {
+          for (const chain of serialChains) {
+            const result = await executeSerialChain(
+              chain,
+              deps.taskStore,
+              schedulerOps,
+              workerOps,
+              judgeOps,
+              schedulerState,
+            );
+            schedulerState = result.updatedSchedulerState;
+
+            allCompletedTaskIds.push(...result.completed.map((id) => String(id)));
+            allFailedTaskIds.push(...result.failed.map((id) => String(id)));
+
+            if (result.worktreePath && chain[0]) {
+              await workerOps.cleanupWorktree(chain[0]);
+            }
+          }
+        }
+
+        // 並列レベルを実行
+        for (let levelIndex = 0; levelIndex < levels.length; levelIndex++) {
+          const level = levels[levelIndex];
+          if (!level) continue;
+
+          const levelResult = await executeLevelParallel(
+            level,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            schedulerState,
+            blockedTaskIds,
+            deps.taskStore,
+          );
+
+          schedulerState = levelResult.updatedSchedulerState;
+          allCompletedTaskIds.push(...levelResult.completed.map((id) => String(id)));
+          allFailedTaskIds.push(...levelResult.failed.map((id) => String(id)));
+
+          if (levelResult.failed.length > 0) {
+            const newBlocked = computeBlockedTasks(levelResult.failed, graph);
+            for (const tid of newBlocked) {
+              blockedTaskIds.add(tid);
+              await schedulerOps.blockTask(tid);
+              allFailedTaskIds.push(String(tid));
+            }
+          }
+        }
+
+        console.log(
+          `✅ Additional tasks executed: ${allCompletedTaskIds.length} completed, ${allFailedTaskIds.length} failed`,
+        );
+
+        // 10. セッションを更新（反復カウント、判定結果）
+        session.continueIterationCount = currentIteration + 1;
+        await deps.sessionEffects.saveSession(session);
+
+        iterationsPerformed = currentIteration + 1;
+      }
+
+      // 反復上限に達した
+      console.log(`\n⚠️  Reached maximum iteration limit (${maxIterations})`);
+
+      // 最終状態を再評価
+      const sessionResult = await deps.sessionEffects.loadSession(sessionId);
+      if (!isErr(sessionResult)) {
+        const session = sessionResult.val;
+
+        return createOk({
+          isComplete: session.finalJudgement?.isComplete ?? false,
+          iterationsPerformed,
+          completionScore: session.finalJudgement?.completionScore,
+          remainingMissingAspects: session.finalJudgement?.missingAspects ?? [],
+          allTaskIds,
+          completedTaskIds: allCompletedTaskIds,
+          failedTaskIds: allFailedTaskIds,
+        });
+      }
+
+      return createOk({
+        isComplete: false,
+        iterationsPerformed,
+        remainingMissingAspects: [],
+        allTaskIds,
+        completedTaskIds: allCompletedTaskIds,
+        failedTaskIds: allFailedTaskIds,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Continue from session error: ${errorMessage}`);
+
+      return createErr({
+        type: 'UNKNOWN_ERROR',
+        message: errorMessage,
+        cause: error,
+      });
+    }
+  };
+
   return {
     executeInstruction,
     resumeFromSession,
+    continueFromSession,
   };
 };
 
