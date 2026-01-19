@@ -44,6 +44,8 @@ interface DynamicSchedulerState {
   pendingTasks: Set<TaskId>;
   /** 実行中タスク（タスクID → WorkerId） */
   runningTasks: Map<TaskId, WorkerId>;
+  /** 実行中タスクのPromise（タスクID → Promise） */
+  runningPromises: Map<TaskId, Promise<TaskExecutionResult>>;
   /** 完了タスク */
   completedTasks: Set<TaskId>;
   /** 失敗タスク */
@@ -260,6 +262,17 @@ async function executeTaskAsync(
  * WHY: レベルベースの静的スケジューリングから、依存関係ベースの動的スケジューリングに変更
  * タスクの依存関係が満たされ次第、ワーカーが空いていればすぐに実行開始
  *
+ * 実装の特徴:
+ * 1. Promise.raceによるイベント駆動型スケジューリング
+ *    - どれか1つのタスクが完了した瞬間に次のアクションを取る
+ *    - Promise.allSettledと異なり、全タスク完了を待たない
+ * 2. 空きスロットの即座活用
+ *    - タスクが完了してスロットが空いたら、即座に次のタスクを起動
+ *    - 常に最大並列度を維持することで実行時間を最小化
+ * 3. 実行中タスクの追跡
+ *    - runningPromises Mapで実行中のPromiseを管理
+ *    - 完了したタスクを特定して結果を処理
+ *
  * @param tasks 実行対象タスク配列
  * @param graph 依存関係グラフ
  * @param schedulerOps スケジューラ操作
@@ -284,6 +297,7 @@ export async function executeDynamically(
   const dynamicState: DynamicSchedulerState = {
     pendingTasks: new Set(tasks.filter((tid) => !initialBlockedTasks.has(tid))),
     runningTasks: new Map(),
+    runningPromises: new Map(),
     completedTasks: new Set(),
     failedTasks: new Set(),
     blockedTasks: new Set(initialBlockedTasks),
@@ -299,7 +313,7 @@ export async function executeDynamically(
   // メインループ: pendingまたはrunningまたはcontinuationにタスクがある間ループ
   while (
     dynamicState.pendingTasks.size > 0 ||
-    dynamicState.runningTasks.size > 0 ||
+    dynamicState.runningPromises.size > 0 ||
     dynamicState.continuationTasks.size > 0
   ) {
     // 1. 継続タスクをpendingに戻す
@@ -314,92 +328,93 @@ export async function executeDynamically(
     // 3. 空きスロット数を計算
     const availableSlots = getAvailableSlots(schedulerState);
 
-    // 4. 実行可能なタスクがない、または空きスロットがない場合
-    if (executableTasks.length === 0 || availableSlots === 0) {
-      // 実行中タスクがある場合は待機
-      if (dynamicState.runningTasks.size > 0) {
-        // 実行中のタスクが完了するのを待つ
-        // （実際にはPromise.raceで最初に完了したタスクを処理）
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        continue;
+    // 4. 空きスロット分のタスクを新規起動
+    if (executableTasks.length > 0 && availableSlots > 0) {
+      const tasksToExecute = executableTasks.slice(0, availableSlots);
+
+      console.log(`\n🔨 Starting ${tasksToExecute.length} tasks (${availableSlots} slots available)`);
+      for (const tid of tasksToExecute) {
+        console.log(`  - ${tid}`);
       }
 
-      // 実行中タスクもなく、実行可能タスクもない場合
-      if (dynamicState.pendingTasks.size > 0) {
-        // デッドロック検出
-        console.warn(
-          `⚠️  Deadlock detected: ${dynamicState.pendingTasks.size} pending tasks but none are executable`,
+      // タスクを実行中に追加し、Promiseを保存
+      for (const tid of tasksToExecute) {
+        dynamicState.runningTasks.set(tid, workerId(`worker-${String(tid)}`));
+        dynamicState.pendingTasks.delete(tid);
+
+        // タスク実行をPromiseとして保存
+        const taskPromise = executeTaskAsync(
+          tid,
+          schedulerOps,
+          workerOps,
+          judgeOps,
+          schedulerState,
+          taskStore,
         );
-        console.warn(`   Pending tasks: ${Array.from(dynamicState.pendingTasks).join(', ')}`);
-
-        // 残りのタスクをブロック
-        for (const tid of dynamicState.pendingTasks) {
-          dynamicState.blockedTasks.add(tid);
-          await schedulerOps.blockTask(tid);
-        }
-        dynamicState.pendingTasks.clear();
+        dynamicState.runningPromises.set(tid, taskPromise);
       }
-
-      break;
     }
 
-    // 5. 空きスロット分のタスクを並列起動
-    const tasksToExecute = executableTasks.slice(0, availableSlots);
+    // 5. 実行中タスクがあれば、いずれか1つが完了するまで待つ
+    if (dynamicState.runningPromises.size > 0) {
+      // Promise.raceでどれか1つ完了するまで待つ
+      // どのタスクが完了したか識別するため、taskIdを一緒に返す
+      const promiseEntries = Array.from(dynamicState.runningPromises.entries()).map(
+        ([tid, promise]) =>
+          promise.then((result) => ({ taskId: tid, result })),
+      );
 
-    console.log(`\n🔨 Starting ${tasksToExecute.length} tasks (${availableSlots} slots available)`);
-    for (const tid of tasksToExecute) {
-      console.log(`  - ${tid}`);
-    }
+      const { taskId, result } = await Promise.race(promiseEntries);
 
-    // タスクを実行中に追加
-    for (const tid of tasksToExecute) {
-      dynamicState.runningTasks.set(tid, workerId(`worker-${String(tid)}`));
-      dynamicState.pendingTasks.delete(tid);
-    }
+      // 完了したタスクをrunningから削除
+      dynamicState.runningPromises.delete(taskId);
+      dynamicState.runningTasks.delete(taskId);
+      schedulerState = removeRunningWorker(schedulerState, workerId(`worker-${String(taskId)}`));
 
-    // 並列実行
-    const taskPromises = tasksToExecute.map((tid) =>
-      executeTaskAsync(tid, schedulerOps, workerOps, judgeOps, schedulerState, taskStore),
-    );
+      // 6. 結果を処理
+      if (result.status === TaskExecutionStatus.COMPLETED) {
+        dynamicState.completedTasks.add(taskId);
+      } else if (result.status === TaskExecutionStatus.FAILED) {
+        dynamicState.failedTasks.add(taskId);
 
-    // 6. いずれかのタスクが完了するのを待つ
-    const results = await Promise.allSettled(taskPromises);
-
-    // 7. 完了タスクの結果を処理
-    for (const result of results) {
-      if (result.status === 'fulfilled') {
-        const { taskId, status } = result.value;
-
-        // runningTasksから削除
-        dynamicState.runningTasks.delete(taskId);
-        schedulerState = removeRunningWorker(schedulerState, workerId(`worker-${String(taskId)}`));
-
-        if (status === TaskExecutionStatus.COMPLETED) {
-          dynamicState.completedTasks.add(taskId);
-        } else if (status === TaskExecutionStatus.FAILED) {
-          dynamicState.failedTasks.add(taskId);
-
-          // 失敗タスクの依存先をブロック
-          const blockedTasks = computeBlockedTasks([taskId], graph);
-          if (blockedTasks.length > 0) {
-            console.log(
-              `  ⚠️  Blocking ${blockedTasks.length} dependent tasks due to failure: ${blockedTasks.map((id) => String(id)).join(', ')}`,
-            );
-            for (const tid of blockedTasks) {
-              dynamicState.blockedTasks.add(tid);
-              dynamicState.pendingTasks.delete(tid);
-              await schedulerOps.blockTask(tid);
-            }
+        // 失敗タスクの依存先をブロック
+        const blockedTasks = computeBlockedTasks([taskId], graph);
+        if (blockedTasks.length > 0) {
+          console.log(
+            `  ⚠️  Blocking ${blockedTasks.length} dependent tasks due to failure: ${blockedTasks.map((id) => String(id)).join(', ')}`,
+          );
+          for (const tid of blockedTasks) {
+            dynamicState.blockedTasks.add(tid);
+            dynamicState.pendingTasks.delete(tid);
+            await schedulerOps.blockTask(tid);
           }
-        } else if (status === TaskExecutionStatus.CONTINUE) {
-          // 継続タスクとして記録（次のループでpendingに戻る）
-          dynamicState.continuationTasks.add(taskId);
         }
-      } else {
-        // Promise自体が失敗した場合
-        console.error(`  ❌ Task promise rejected: ${result.reason}`);
+      } else if (result.status === TaskExecutionStatus.CONTINUE) {
+        // 継続タスクとして記録（次のループでpendingに戻る）
+        dynamicState.continuationTasks.add(taskId);
       }
+
+      // すぐに次のループに戻る（空きができたので次のタスクを起動できる）
+      continue;
     }
+
+    // 7. 実行中タスクもなく、実行可能タスクもない場合（デッドロック検出）
+    if (dynamicState.pendingTasks.size > 0) {
+      console.warn(
+        `⚠️  Deadlock detected: ${dynamicState.pendingTasks.size} pending tasks but none are executable`,
+      );
+      console.warn(`   Pending tasks: ${Array.from(dynamicState.pendingTasks).join(', ')}`);
+
+      // 残りのタスクをブロック
+      for (const tid of dynamicState.pendingTasks) {
+        dynamicState.blockedTasks.add(tid);
+        await schedulerOps.blockTask(tid);
+      }
+      dynamicState.pendingTasks.clear();
+    }
+
+    // 実行中タスクもなく、pendingも空になったら終了
+    break;
   }
 
   console.log(
