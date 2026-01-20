@@ -115,6 +115,17 @@ export const TaskSchema = z.object({
     })
     .nullable()
     .optional(),
+
+  /** コンフリクト解消待ちの情報（BLOCKED状態時のみ） */
+  pendingConflictResolution: z
+    .object({
+      /** コンフリクト解消タスクID */
+      conflictTaskId: z.string().transform(taskId),
+      /** 一時マージブランチ名 */
+      tempBranch: z.string().transform(branchName),
+    })
+    .nullable()
+    .optional(),
 });
 
 /**

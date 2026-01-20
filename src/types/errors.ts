@@ -225,7 +225,8 @@ export type OrchestratorError =
   | GitError
   | RunnerError
   | WorkerCapacityError
-  | TaskClaimError;
+  | TaskClaimError
+  | ConflictResolutionRequiredError;
 
 export interface WorkerCapacityError {
   readonly type: 'WorkerCapacityError';
@@ -239,6 +240,14 @@ export interface TaskClaimError {
   readonly taskId: TaskId;
   readonly workerId: WorkerId;
   readonly reason: string;
+  readonly message: string;
+}
+
+export interface ConflictResolutionRequiredError {
+  readonly type: 'ConflictResolutionRequiredError';
+  readonly parentTaskId: TaskId;
+  readonly conflictTaskId: TaskId;
+  readonly tempBranch: BranchName;
   readonly message: string;
 }
 
@@ -263,4 +272,16 @@ export const taskClaimError = (
   workerId,
   reason,
   message: `Failed to claim task ${taskId} for worker ${workerId}: ${reason}`,
+});
+
+export const conflictResolutionRequired = (
+  parentTaskId: TaskId,
+  conflictTaskId: TaskId,
+  tempBranch: BranchName,
+): ConflictResolutionRequiredError => ({
+  type: 'ConflictResolutionRequiredError',
+  parentTaskId,
+  conflictTaskId,
+  tempBranch,
+  message: `Conflict resolution required for task ${parentTaskId}: created resolution task ${conflictTaskId} on ${tempBranch}`,
 });

@@ -1,4 +1,4 @@
-import type { TaskId, WorkerId, BranchName } from '../../types/branded.ts';
+import type { TaskId, WorkerId } from '../../types/branded.ts';
 import { workerId } from '../../types/branded.ts';
 import type { DependencyGraph } from './dependency-graph.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
@@ -9,8 +9,11 @@ import type { createWorkerOperations } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import { isErr } from 'option-t/plain_result';
 import { computeBlockedTasks } from './parallel-executor.ts';
+import type { createBaseBranchResolver } from './base-branch-resolver.ts';
+import { TaskState } from '../../types/task.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
+type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
 
 /**
  * タスク実行ステータス
@@ -117,7 +120,7 @@ function getExecutableTasks(state: DynamicSchedulerState): TaskId[] {
  * @param judgeOps ジャッジ操作
  * @param schedulerState スケジューラ状態
  * @param taskStore タスクストア
- * @param dynamicState 動的スケジューラ状態（ベースブランチ解決に使用）
+ * @param baseBranchResolver ベースブランチ解決器
  * @returns タスク実行結果
  */
 async function executeTaskAsync(
@@ -127,6 +130,7 @@ async function executeTaskAsync(
   judgeOps: JudgeOperations,
   schedulerState: SchedulerState,
   taskStore: TaskStore,
+  baseBranchResolver: BaseBranchResolver,
 ): Promise<TaskExecutionResult> {
   const rawTaskId = String(tid);
   const wid = `worker-${rawTaskId}`;
@@ -142,20 +146,53 @@ async function executeTaskAsync(
 
     const { task: claimedTask } = claimResult.val;
 
-    // 2. Worker: タスク実行
+    // 2. BaseBranchResolver: ベースブランチ解決
     // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
-    let baseBranch: BranchName | undefined;
-    if (claimedTask.dependencies.length === 1) {
-      const depId = claimedTask.dependencies[0];
-      if (depId) {
-        const depTaskResult = await taskStore.readTask(depId);
-        if (depTaskResult.ok) {
-          baseBranch = depTaskResult.val.branch;
-        }
-      }
-    }
-    // 複数依存の場合は将来実装（マージベース作成）
+    // 複数依存の場合は一時マージブランチを作成（コンフリクト時はエラー）
+    const baseBranchResolution = await baseBranchResolver.resolveBaseBranch(claimedTask);
 
+    if (isErr(baseBranchResolution)) {
+      // ConflictResolutionRequiredエラーの場合は特別処理
+      if (baseBranchResolution.err.type === 'ConflictResolutionRequiredError') {
+        const { conflictTaskId, tempBranch } = baseBranchResolution.err;
+
+        console.log(
+          `  ⚠️  [${rawTaskId}] Conflict detected, scheduling resolution task: ${conflictTaskId}`,
+        );
+
+        // 元タスクを一時停止（BLOCKED with reason）
+        const updateResult = await taskStore.updateTaskCAS(tid, claimedTask.version, (t) => ({
+          ...t,
+          state: TaskState.BLOCKED,
+          owner: null, // ワーカーを解放
+          pendingConflictResolution: {
+            conflictTaskId,
+            tempBranch,
+          },
+          updatedAt: new Date().toISOString(),
+        }));
+
+        if (isErr(updateResult)) {
+          console.warn(
+            `  ⚠️  [${rawTaskId}] Failed to update task state: ${updateResult.err.message}`,
+          );
+        }
+
+        // ConflictResolutionRequiredエラーを返す（呼び出し元でpendingTasksに追加）
+        return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+      }
+
+      // その他のエラー
+      console.log(
+        `  ❌ [${rawTaskId}] Failed to resolve base branch: ${baseBranchResolution.err.message}`,
+      );
+      await schedulerOps.blockTask(tid);
+      return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+    }
+
+    const { baseBranch } = baseBranchResolution.val;
+
+    // 3. Worker: タスク実行
     console.log(`  🚀 [${rawTaskId}] Executing task...`);
     const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
 
@@ -179,7 +216,7 @@ async function executeTaskAsync(
       return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
     }
 
-    // 3. Judge: 完了判定
+    // 4. Judge: 完了判定
     console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
     const judgementResult = await judgeOps.judgeTask(tid, result.runId);
 
@@ -267,6 +304,7 @@ async function executeTaskAsync(
  * @param judgeOps ジャッジ操作
  * @param taskStore タスクストア
  * @param maxWorkers 最大Worker数
+ * @param baseBranchResolver ベースブランチ解決器
  * @returns 動的実行結果
  */
 export async function executeDynamically(
@@ -279,6 +317,7 @@ export async function executeDynamically(
   maxWorkers: number,
   initialSchedulerState: SchedulerState,
   initialBlockedTasks: Set<TaskId>,
+  baseBranchResolver: BaseBranchResolver,
 ): Promise<DynamicExecutionResult> {
   // 動的スケジューラ状態を初期化
   const dynamicState: DynamicSchedulerState = {
@@ -337,6 +376,7 @@ export async function executeDynamically(
           judgeOps,
           schedulerState,
           taskStore,
+          baseBranchResolver,
         );
         dynamicState.runningPromises.set(tid, taskPromise);
       }
@@ -362,18 +402,32 @@ export async function executeDynamically(
       if (result.status === TaskExecutionStatus.COMPLETED) {
         dynamicState.completedTasks.add(taskId);
       } else if (result.status === TaskExecutionStatus.FAILED) {
-        dynamicState.failedTasks.add(taskId);
-
-        // 失敗タスクの依存先をブロック
-        const blockedTasks = computeBlockedTasks([taskId], graph);
-        if (blockedTasks.length > 0) {
+        // タスクがBLOCKED状態でpendingConflictResolutionを持つ場合、
+        // コンフリクト解消タスクをpendingTasksに追加
+        const taskResult = await taskStore.readTask(taskId);
+        if (taskResult.ok && taskResult.val.pendingConflictResolution) {
+          const conflictTaskId = taskResult.val.pendingConflictResolution.conflictTaskId;
           console.log(
-            `  ⚠️  Blocking ${blockedTasks.length} dependent tasks due to failure: ${blockedTasks.map((id) => String(id)).join(', ')}`,
+            `  🔄 [${String(taskId)}] Added conflict resolution task to pending: ${conflictTaskId}`,
           );
-          for (const tid of blockedTasks) {
-            dynamicState.blockedTasks.add(tid);
-            dynamicState.pendingTasks.delete(tid);
-            await schedulerOps.blockTask(tid);
+          dynamicState.pendingTasks.add(conflictTaskId);
+          // 元タスクはブロック済みなのでfailedには追加しない
+          dynamicState.blockedTasks.add(taskId);
+        } else {
+          // 通常の失敗
+          dynamicState.failedTasks.add(taskId);
+
+          // 失敗タスクの依存先をブロック
+          const blockedTasks = computeBlockedTasks([taskId], graph);
+          if (blockedTasks.length > 0) {
+            console.log(
+              `  ⚠️  Blocking ${blockedTasks.length} dependent tasks due to failure: ${blockedTasks.map((id) => String(id)).join(', ')}`,
+            );
+            for (const tid of blockedTasks) {
+              dynamicState.blockedTasks.add(tid);
+              dynamicState.pendingTasks.delete(tid);
+              await schedulerOps.blockTask(tid);
+            }
           }
         }
       } else if (result.status === TaskExecutionStatus.CONTINUE) {

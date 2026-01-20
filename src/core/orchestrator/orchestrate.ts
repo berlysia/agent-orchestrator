@@ -6,6 +6,7 @@ import { createSchedulerOperations } from './scheduler-operations.ts';
 import { createPlannerOperations } from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
+import { createBaseBranchResolver } from './base-branch-resolver.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
 import { taskId, repoPath, branchName, type TaskId } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
@@ -128,6 +129,11 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     agentType: getAgentType(deps.config, 'judge'),
     model: getModel(deps.config, 'judge'),
     judgeTaskRetries: deps.config.iterations.judgeTaskRetries,
+  });
+  const baseBranchResolver = createBaseBranchResolver({
+    gitEffects: deps.gitEffects,
+    taskStore: deps.taskStore,
+    appRepoPath: repoPath(deps.config.appRepoPath),
   });
   /**
    * ユーザー指示を実行
@@ -333,6 +339,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           deps.maxWorkers ?? 3,
           schedulerState,
           blockedTaskIdsSet,
+          baseBranchResolver,
         );
 
         // スケジューラ状態を更新
@@ -662,6 +669,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           deps.maxWorkers ?? 3,
           schedulerState,
           blockedTaskIdsSet,
+          baseBranchResolver,
         );
 
         schedulerState = dynamicResult.updatedSchedulerState;
@@ -1008,6 +1016,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             deps.maxWorkers ?? 3,
             schedulerState,
             blockedTaskIds,
+            baseBranchResolver,
           );
 
           schedulerState = dynamicResult.updatedSchedulerState;
