@@ -118,6 +118,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     agentCoordPath: deps.config.agentCoordPath,
     agentType: getAgentType(deps.config, 'worker'),
     model: getModel(deps.config, 'worker'),
+    config: deps.config,
   };
   const workerOps = createWorkerOperations(workerDeps);
   const judgeOps = createJudgeOperations({

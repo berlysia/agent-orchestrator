@@ -16,6 +16,7 @@ import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
+import type { Config } from '../../types/config.ts';
 
 /**
  * Worker依存関係
@@ -28,6 +29,7 @@ export interface WorkerDeps {
   readonly agentCoordPath: string;
   readonly agentType: 'claude' | 'codex';
   readonly model: string;
+  readonly config: Config;
 }
 
 /**
@@ -250,6 +252,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   /**
    * 変更をコミット
    *
+   * WHY: config.commit.autoSignatureで自動コミット時の署名を制御。
+   *      Worker実行時の各タスクコミットはデフォルトで署名なし（開発効率重視）。
+   *
    * @param task タスク
    * @param worktreePath worktreeのパス
    * @returns Result型
@@ -267,8 +272,11 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     // コミットメッセージを生成
     const commitMessage = generateCommitMessage(task);
 
+    // コミットオプション設定（署名制御）
+    const noGpgSign = !deps.config.commit.autoSignature;
+
     // コミット
-    const commitResult = await deps.gitEffects.commit(worktreePath, commitMessage);
+    const commitResult = await deps.gitEffects.commit(worktreePath, commitMessage, { noGpgSign });
     if (isErr(commitResult)) {
       return createErr(commitResult.err);
     }

@@ -61,6 +61,21 @@ const IntegrationConfigSchema = z
   .default({ method: 'auto' });
 
 /**
+ * コミット設定のスキーマ
+ *
+ * WHY: Worker実行時の各タスクコミットとIntegration時の最終コミットで
+ *      署名の有無を制御可能にすることで、開発効率と検証可能性の両立を実現
+ */
+const CommitConfigSchema = z
+  .object({
+    /** Worker実行時の自動コミットでGPG署名を有効化 */
+    autoSignature: z.boolean().default(false),
+    /** Integration時の最終コミットでGPG署名を有効化 */
+    integrationSignature: z.boolean().default(true),
+  })
+  .default({ autoSignature: false, integrationSignature: true });
+
+/**
  * タスク計画品質評価設定のスキーマ
  *
  * WHY: Plannerが生成したタスクの品質評価基準を設定可能にすることで、
@@ -139,6 +154,9 @@ export const ConfigSchema = z.object({
   /** チェック設定 */
   checks: ChecksConfigSchema,
 
+  /** コミット設定 */
+  commit: CommitConfigSchema,
+
   /** 統合設定 */
   integration: IntegrationConfigSchema,
 
@@ -178,6 +196,10 @@ export function createDefaultConfig(params: {
     checks: {
       enabled: true,
       failureMode: 'block',
+    },
+    commit: {
+      autoSignature: false,
+      integrationSignature: true,
     },
     integration: {
       method: 'auto',

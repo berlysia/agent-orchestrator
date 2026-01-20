@@ -21,6 +21,7 @@ import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { randomUUID } from 'node:crypto';
+import type { Config } from '../../types/config.ts';
 
 /**
  * Integration依存関係
@@ -29,6 +30,7 @@ export interface IntegrationDeps {
   readonly taskStore: TaskStore;
   readonly gitEffects: GitEffects;
   readonly appRepoPath: string;
+  readonly config: Config;
 }
 
 /**
@@ -339,7 +341,8 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
   /**
    * 統合ブランチの取り込み方法を決定し、結果を返す
    *
-   * WHY: リモートの有無と設定に基づいて、PR作成またはコマンド出力を選択
+   * WHY: 統合ブランチ全体に署名を付けてベースブランチにマージする。
+   *      config.commit.integrationSignatureで署名の有無を制御。
    */
   const finalizeIntegration = async (
     integrationBranch: BranchName,
@@ -373,29 +376,52 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         ioError('finalizeIntegration', new Error('PR creation is not yet implemented')),
       );
     } else if (config.method === 'command') {
-      // コマンド出力
+      // コマンド出力（手動マージ）
       const mergeCommand = `git checkout ${baseBranch} && git merge ${integrationBranch}`;
       return createOk({
         method: 'command',
         mergeCommand,
       });
     } else {
-      // auto: リモートがあればPR、なければコマンド
-      if (hasRemote) {
-        // PRを作成（TODO: GitHub CLI統合）
-        // 現時点では未実装のため、コマンド出力にフォールバック
-        const mergeCommand = `git checkout ${baseBranch} && git merge ${integrationBranch}`;
-        return createOk({
-          method: 'command',
-          mergeCommand,
-        });
-      } else {
-        const mergeCommand = `git checkout ${baseBranch} && git merge ${integrationBranch}`;
-        return createOk({
-          method: 'command',
-          mergeCommand,
-        });
+      // auto: 自動統合を実行
+      // WHY: 統合ブランチをrebase --gpg-signでベースブランチに対してrebaseし、
+      //      全コミットに署名を付けた後、fast-forward mergeでベースブランチに統合
+
+      // 統合ブランチに切り替え
+      const switchToIntegrationResult = await gitEffects.switchBranch(repo, integrationBranch);
+      if (isErr(switchToIntegrationResult)) {
+        return createErr(switchToIntegrationResult.err);
       }
+
+      // 統合ブランチをベースブランチに対してrebase（署名付き）
+      const gpgSign = deps.config.commit.integrationSignature;
+      const rebaseResult = await gitEffects.rebase(repo, baseBranch, { gpgSign });
+      if (isErr(rebaseResult)) {
+        return createErr(rebaseResult.err);
+      }
+
+      // ベースブランチに切り替え
+      const switchToBaseResult = await gitEffects.switchBranch(repo, baseBranch);
+      if (isErr(switchToBaseResult)) {
+        return createErr(switchToBaseResult.err);
+      }
+
+      // Fast-forward merge
+      const mergeResult = await gitEffects.merge(repo, integrationBranch, ['--ff-only']);
+      if (isErr(mergeResult)) {
+        return createErr(mergeResult.err);
+      }
+
+      if (!mergeResult.val.success) {
+        return createErr(
+          ioError('finalizeIntegration', new Error('Fast-forward merge failed')),
+        );
+      }
+
+      return createOk({
+        method: 'auto',
+        merged: true,
+      });
     }
   };
 

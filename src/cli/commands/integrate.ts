@@ -104,8 +104,26 @@ async function showIntegrationCommands(params: {
   console.log(`Base branch (current worktree): ${currentBranch}`);
   console.log(`Tasks to merge: ${uniqueBranches.length} branches`);
 
+  // 統合ブランチを作成
+  const timestamp = Date.now();
+  const integrationBranch = branchName(`integration/merge-${timestamp}`);
+
+  const createBranchResult = await gitEffects.createBranch(repo, integrationBranch, currentBranch);
+  if (isErr(createBranchResult)) {
+    console.error(`❌ Failed to create integration branch: ${createBranchResult.err.message}`);
+    process.exit(1);
+  }
+
+  // 統合ブランチに切り替え
+  const switchResult = await gitEffects.switchBranch(repo, integrationBranch);
+  if (isErr(switchResult)) {
+    console.error(`❌ Failed to switch to integration branch: ${switchResult.err.message}`);
+    process.exit(1);
+  }
+
   const mergedTaskIds: string[] = [];
 
+  // 統合ブランチに各タスクをマージ
   for (const task of selectedTasks) {
     const mergeResult = await gitEffects.merge(repo, task.branch);
     if (isErr(mergeResult)) {
@@ -130,6 +148,44 @@ async function showIntegrationCommands(params: {
 
     mergedTaskIds.push(String(task.id));
     console.log(`✅ Merged ${task.branch}`);
+  }
+
+  // 統合ブランチをベースブランチに対してrebase（署名付き）
+  console.log('\n🔏 Applying signatures to all commits...');
+  const gpgSign = config.commit.integrationSignature;
+  const rebaseResult = await gitEffects.rebase(repo, currentBranch, { gpgSign });
+  if (isErr(rebaseResult)) {
+    console.error(`❌ Failed to rebase integration branch: ${rebaseResult.err.message}`);
+    process.exit(1);
+  }
+  if (gpgSign) {
+    console.log('✅ All commits signed');
+  }
+
+  // ベースブランチに切り替え
+  const switchBackResult = await gitEffects.switchBranch(repo, currentBranch);
+  if (isErr(switchBackResult)) {
+    console.error(`❌ Failed to switch back to base branch: ${switchBackResult.err.message}`);
+    process.exit(1);
+  }
+
+  // Fast-forward merge
+  console.log('\n🔀 Merging integration branch...');
+  const finalMergeResult = await gitEffects.merge(repo, integrationBranch, ['--ff-only']);
+  if (isErr(finalMergeResult)) {
+    console.error(`❌ Failed to merge integration branch: ${finalMergeResult.err.message}`);
+    process.exit(1);
+  }
+
+  if (!finalMergeResult.val.success) {
+    console.error('❌ Fast-forward merge failed');
+    process.exit(1);
+  }
+
+  // 統合ブランチを削除
+  const deleteBranchResult = await gitEffects.deleteBranch(repo, integrationBranch);
+  if (isErr(deleteBranchResult)) {
+    console.warn(`⚠️  Failed to delete integration branch: ${deleteBranchResult.err.message}`);
   }
 
   console.log('\n✅ Integration complete');

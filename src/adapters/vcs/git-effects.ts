@@ -161,8 +161,27 @@ export interface GitEffects {
    * コミットを作成
    * @param path リポジトリまたは Worktree のパス
    * @param message コミットメッセージ
+   * @param options コミットオプション
+   * @param options.noGpgSign GPG署名を無効化
    */
-  commit(path: RepoPath | WorktreePath, message: string): Promise<Result<void, GitError>>;
+  commit(
+    path: RepoPath | WorktreePath,
+    message: string,
+    options?: { noGpgSign?: boolean },
+  ): Promise<Result<void, GitError>>;
+
+  /**
+   * 指定したブランチに対してrebaseを実行
+   * @param path リポジトリまたは Worktree のパス
+   * @param branch rebase先のブランチ名
+   * @param options rebaseオプション
+   * @param options.gpgSign GPG署名を有効化（全コミットに署名し直す）
+   */
+  rebase(
+    path: RepoPath | WorktreePath,
+    branch: BranchName,
+    options?: { gpgSign?: boolean },
+  ): Promise<Result<void, GitError>>;
 
   /**
    * リモートにプッシュ

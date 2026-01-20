@@ -102,12 +102,26 @@ export const createSimpleGitEffects = (): Omit<
     return mapErrForResult(result, toGitError('stageAll'));
   };
 
-  const commit: GitEffects['commit'] = async (path, message) => {
+  const commit: GitEffects['commit'] = async (path, message, options) => {
     const result = await tryCatchIntoResultAsync(async () => {
       const git = simpleGit(path);
-      await git.commit(message);
+      const commitOptions = options?.noGpgSign ? { '--no-gpg-sign': null } : undefined;
+      await git.commit(message, undefined, commitOptions);
     });
     return mapErrForResult(result, toGitError('commit'));
+  };
+
+  const rebase: GitEffects['rebase'] = async (path, branch, options) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      const args = ['rebase'];
+      if (options?.gpgSign) {
+        args.push('--gpg-sign');
+      }
+      args.push(branch);
+      await git.raw(args);
+    });
+    return mapErrForResult(result, toGitError('rebase'));
   };
 
   const push: GitEffects['push'] = async (path, remote, branch) => {
@@ -306,6 +320,7 @@ export const createSimpleGitEffects = (): Omit<
     listBranches,
     stageAll,
     commit,
+    rebase,
     push,
     pull,
     hasRemote,

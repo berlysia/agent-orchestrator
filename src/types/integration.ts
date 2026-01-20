@@ -100,6 +100,12 @@ export type IntegrationFinalResult =
       readonly method: 'command';
       /** ローカルマージ用コマンド */
       readonly mergeCommand: string;
+    }
+  | {
+      /** 取り込み方法: 自動統合（rebase + merge） */
+      readonly method: 'auto';
+      /** マージ成功フラグ */
+      readonly merged: boolean;
     };
 
 /**

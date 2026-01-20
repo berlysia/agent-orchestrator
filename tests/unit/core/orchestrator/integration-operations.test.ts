@@ -46,10 +46,18 @@ describe('Integration Operations', () => {
         hasRemote: mock.fn(async () => createOk(false)),
       };
 
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       // テスト用のタスク
@@ -127,10 +135,18 @@ describe('Integration Operations', () => {
         hasRemote: mock.fn(async () => createOk(false)),
       };
 
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       // テスト用のタスク（両方とも同じファイルを変更）
@@ -180,10 +196,18 @@ describe('Integration Operations', () => {
         hasRemote: mock.fn(async () => createOk(false)),
       };
 
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       const conflictInfo = [
@@ -228,10 +252,18 @@ describe('Integration Operations', () => {
         hasRemote: mock.fn(async () => createOk(false)),
       };
 
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       const result = await integrationOps.finalizeIntegration(
@@ -256,12 +288,25 @@ describe('Integration Operations', () => {
       const mockGitEffects = {
         getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
         hasRemote: mock.fn(async () => createOk(false)),
+        switchBranch: mock.fn(async () => createOk(undefined)),
+        rebase: mock.fn(async () => createOk(undefined)),
+        merge: mock.fn(async () =>
+          createOk({ success: true, mergedFiles: [], hasConflicts: false, conflicts: [], status: 'success' as const }),
+        ),
+      };
+
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
       };
 
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       const result = await integrationOps.finalizeIntegration(
@@ -272,7 +317,8 @@ describe('Integration Operations', () => {
 
       assert.strictEqual(result.ok, true);
       if (result.ok) {
-        assert.strictEqual(result.val.method, 'command');
+        assert.strictEqual(result.val.method, 'auto');
+        assert.strictEqual(result.val.merged, true);
       }
     });
 
@@ -286,10 +332,18 @@ describe('Integration Operations', () => {
         hasRemote: mock.fn(async () => createOk(false)),
       };
 
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
       const integrationOps = createIntegrationOperations({
         taskStore: mockTaskStore as any,
         gitEffects: mockGitEffects as any,
         appRepoPath: '/test/repo',
+        config: mockConfig as any,
       });
 
       const result = await integrationOps.finalizeIntegration(
