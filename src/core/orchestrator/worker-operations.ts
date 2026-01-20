@@ -59,8 +59,7 @@ Task ID: ${task.id}
 Branch: ${task.branch}
 
 🤖 Generated with Agent Orchestrator
-
-Co-Authored-By: AI Agent <noreply@agent-orchestrator>`;
+`;
 };
 
 /**
