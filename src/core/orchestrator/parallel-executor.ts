@@ -9,6 +9,7 @@ import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import { TaskState } from '../../types/task.ts';
+import type { BaseBranchResolution } from './base-branch-resolver.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -129,20 +130,45 @@ export async function executeLevelParallel(
 
         // 2. Worker: タスク実行
         // WHY: タスクの依存関係から起点ブランチを解決（依存先の変更を含める）
-        let baseBranch: BranchName | undefined;
-        if (claimedTask.dependencies.length === 1) {
+        let resolution: BaseBranchResolution;
+
+        if (claimedTask.dependencies.length === 0) {
+          resolution = { type: 'none' };
+        } else if (claimedTask.dependencies.length === 1) {
           const depId = claimedTask.dependencies[0];
           if (depId) {
             const depTaskResult = await taskStore.readTask(depId);
             if (depTaskResult.ok) {
-              baseBranch = depTaskResult.val.branch;
+              resolution = { type: 'single', baseBranch: depTaskResult.val.branch };
+            } else {
+              console.log(`  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`);
+              await schedulerOps.blockTask(tid);
+              return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+            }
+          } else {
+            // 依存タスクIDがundefinedの場合（通常は発生しない）
+            console.log(`  ❌ [${rawTaskId}] Invalid dependency task ID`);
+            await schedulerOps.blockTask(tid);
+            return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+          }
+        } else {
+          // 複数依存の場合はブランチリストを構築
+          const dependencyBranches: BranchName[] = [];
+          for (const depId of claimedTask.dependencies) {
+            const depTaskResult = await taskStore.readTask(depId);
+            if (depTaskResult.ok) {
+              dependencyBranches.push(depTaskResult.val.branch);
+            } else {
+              console.log(`  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`);
+              await schedulerOps.blockTask(tid);
+              return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
             }
           }
+          resolution = { type: 'multi', dependencyBranches };
         }
-        // 複数依存の場合は将来実装（マージベース作成）
 
         console.log(`  🚀 [${rawTaskId}] Executing task...`);
-        const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
+        const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, resolution);
 
         if (isErr(workerResult)) {
           const errorMsg =

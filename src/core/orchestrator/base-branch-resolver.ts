@@ -11,25 +11,25 @@ import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
 import { createInitialTask } from '../../types/task.ts';
 import type { BranchName, RepoPath } from '../../types/branded.ts';
-import { branchName, taskId } from '../../types/branded.ts';
+import { taskId } from '../../types/branded.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
-import { conflictResolutionRequired } from '../../types/errors.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { ConflictContent } from '../../types/integration.ts';
 import { randomUUID } from 'node:crypto';
 
 /**
- * ベースブランチ解決結果
+ * ベースブランチ解決結果（Discriminated Union型）
+ *
+ * WHY: 依存関係のパターンを型で明示し、不正な状態を型で防ぐ
+ * - none: 依存なし（HEADから分岐）
+ * - single: 単一依存（依存先ブランチを直接使用）
+ * - multi: 複数依存（worktree内でマージが必要）
  */
-export interface BaseBranchResolution {
-  /** ベースブランチ名（依存なしの場合はundefined） */
-  baseBranch: BranchName | undefined;
-  /** 一時ブランチかどうか */
-  isTemporary: boolean;
-  /** 一時ブランチ名（isTemporary=trueの場合のみ） */
-  temporaryBranchName?: BranchName;
-}
+export type BaseBranchResolution =
+  | { readonly type: 'none' }
+  | { readonly type: 'single'; readonly baseBranch: BranchName }
+  | { readonly type: 'multi'; readonly dependencyBranches: readonly BranchName[] };
 
 /**
  * BaseBranchResolver依存関係
@@ -51,22 +51,25 @@ export const createBaseBranchResolver = (deps: BaseBranchResolverDeps) => {
   /**
    * タスクの依存関係からベースブランチを解決
    *
-   * WHY: 依存タスクの成果物を引き継ぐため、依存先ブランチをベースにする
-   * - 依存なし: undefined（HEADから分岐）
-   * - 単一依存: 依存先ブランチ
-   * - 複数依存: 一時マージブランチを作成（コンフリクト時はエラー）
+   * WHY: 依存タスクの成果物を引き継ぐため、依存先ブランチ情報を収集
+   * - 依存なし: { type: 'none' }（HEADから分岐）
+   * - 単一依存: { type: 'single', baseBranch }（依存先ブランチを直接使用）
+   * - 複数依存: { type: 'multi', dependencyBranches }（worktree内でマージ）
+   *
+   * 注: 複数依存時のマージ処理はworktree内で実行するため、
+   *     メインリポジトリのHEADを変更しない
    *
    * @param task タスク
-   * @returns ベースブランチ解決結果、またはConflictResolutionRequiredエラー
+   * @returns ベースブランチ解決結果
    */
   const resolveBaseBranch = async (
     task: Task,
   ): Promise<Result<BaseBranchResolution, OrchestratorError>> => {
     const { dependencies } = task;
 
-    // 依存なし: undefined
+    // 依存なし: type='none'
     if (dependencies.length === 0) {
-      return createOk({ baseBranch: undefined, isTemporary: false });
+      return createOk({ type: 'none' });
     }
 
     // 依存先タスクのブランチを収集
@@ -79,75 +82,13 @@ export const createBaseBranchResolver = (deps: BaseBranchResolverDeps) => {
       dependencyBranches.push(depTaskResult.val.branch);
     }
 
-    // 単一依存: 依存先ブランチ
+    // 単一依存: type='single'
     if (dependencyBranches.length === 1) {
-      return createOk({ baseBranch: dependencyBranches[0], isTemporary: false });
+      return createOk({ type: 'single', baseBranch: dependencyBranches[0]! });
     }
 
-    // 複数依存: 一時マージブランチを作成
-    const tempBranch = branchName(`temp-merge-${task.id}-${Date.now()}`);
-
-    // 最初の依存ブランチから一時ブランチを作成
-    const firstBranch = dependencyBranches[0]!; // 配列長は既にチェック済み
-    const createBranchResult = await gitEffects.createBranch(
-      appRepoPath,
-      tempBranch,
-      firstBranch,
-    );
-    if (isErr(createBranchResult)) {
-      return createErr(createBranchResult.err);
-    }
-
-    // 一時ブランチに切り替え
-    const switchResult = await gitEffects.switchBranch(appRepoPath, tempBranch);
-    if (isErr(switchResult)) {
-      // 作成した一時ブランチをクリーンアップ
-      await cleanupTemporaryBranch(tempBranch);
-      return createErr(switchResult.err);
-    }
-
-    const mergedBranches: BranchName[] = [firstBranch];
-
-    // 残りの依存ブランチを順次マージ
-    for (let i = 1; i < dependencyBranches.length; i++) {
-      const branchToMerge = dependencyBranches[i]!; // インデックスは範囲内で保証済み
-      const mergeResult = await gitEffects.merge(appRepoPath, branchToMerge);
-
-      if (isErr(mergeResult)) {
-        // マージエラー: 一時ブランチをクリーンアップしてエラーを返す
-        await gitEffects.abortMerge(appRepoPath);
-        await cleanupTemporaryBranch(tempBranch);
-        return createErr(mergeResult.err);
-      }
-
-      const merge = mergeResult.val;
-
-      if (merge.hasConflicts) {
-        // コンフリクト発生: 解消タスクを生成
-        const conflictTaskResult = await createAndStoreConflictResolutionTask(task, {
-          tempBranch,
-          mergedBranches: [...mergedBranches, branchToMerge],
-          conflicts: merge.conflicts,
-        });
-
-        if (isErr(conflictTaskResult)) {
-          // 解消タスク生成失敗: 一時ブランチをクリーンアップしてエラーを返す
-          await gitEffects.abortMerge(appRepoPath);
-          await cleanupTemporaryBranch(tempBranch);
-          return createErr(conflictTaskResult.err);
-        }
-
-        // ConflictResolutionRequiredエラーを返す
-        return createErr(
-          conflictResolutionRequired(task.id, conflictTaskResult.val.id, tempBranch),
-        );
-      }
-
-      mergedBranches.push(branchToMerge);
-    }
-
-    // 全てのマージが成功
-    return createOk({ baseBranch: tempBranch, isTemporary: true, temporaryBranchName: tempBranch });
+    // 複数依存: type='multi'（マージ処理はworktree内で実行）
+    return createOk({ type: 'multi', dependencyBranches });
   };
 
   /**
@@ -265,52 +206,9 @@ export const createBaseBranchResolver = (deps: BaseBranchResolverDeps) => {
     return lines.join('\n');
   };
 
-  /**
-   * 一時ブランチをクリーンアップ
-   *
-   * WHY: エラー時やマージ完了後に一時ブランチを削除
-   *
-   * @param tempBranch 一時ブランチ名
-   */
-  const cleanupTemporaryBranch = async (
-    tempBranch: BranchName,
-  ): Promise<Result<void, OrchestratorError>> => {
-    // HEADに戻る
-    const currentBranchResult = await gitEffects.getCurrentBranch(appRepoPath);
-    if (isErr(currentBranchResult)) {
-      return createErr(currentBranchResult.err);
-    }
-
-    // 一時ブランチにいる場合は別のブランチに切り替え
-    if (currentBranchResult.val === tempBranch) {
-      // masterまたはmainに切り替え
-      const branches = await gitEffects.listBranches(appRepoPath);
-      if (isErr(branches)) {
-        return createErr(branches.err);
-      }
-
-      const defaultBranch =
-        branches.val.find((b) => b.name === 'master' || b.name === 'main')?.name ??
-        branchName('main');
-
-      const switchResult = await gitEffects.switchBranch(appRepoPath, defaultBranch);
-      if (isErr(switchResult)) {
-        return createErr(switchResult.err);
-      }
-    }
-
-    // 一時ブランチを削除
-    const deleteResult = await gitEffects.deleteBranch(appRepoPath, tempBranch, true);
-    if (isErr(deleteResult)) {
-      return createErr(deleteResult.err);
-    }
-
-    return createOk(undefined);
-  };
-
   return {
     resolveBaseBranch,
     createAndStoreConflictResolutionTask,
-    cleanupTemporaryBranch,
+    buildConflictResolutionPrompt,
   };
 };

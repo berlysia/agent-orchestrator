@@ -1,5 +1,5 @@
 import type { TaskId, WorkerId } from '../../types/branded.ts';
-import { workerId } from '../../types/branded.ts';
+import { workerId, taskId, branchName } from '../../types/branded.ts';
 import type { DependencyGraph } from './dependency-graph.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
 import type { JudgeOperations } from './judge-operations.ts';
@@ -152,9 +152,34 @@ async function executeTaskAsync(
     const baseBranchResolution = await baseBranchResolver.resolveBaseBranch(claimedTask);
 
     if (isErr(baseBranchResolution)) {
+      // resolveBaseBranchは常に成功を返すはずだが、念のためエラー処理を残す
+      console.log(
+        `  ❌ [${rawTaskId}] Failed to resolve base branch: ${baseBranchResolution.err.message}`,
+      );
+      await schedulerOps.blockTask(tid);
+      return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+    }
+
+    const resolution = baseBranchResolution.val;
+
+    // 3. Worker: タスク実行
+    console.log(`  🚀 [${rawTaskId}] Executing task...`);
+    const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, resolution);
+
+    if (isErr(workerResult)) {
       // ConflictResolutionRequiredエラーの場合は特別処理
-      if (baseBranchResolution.err.type === 'ConflictResolutionRequiredError') {
-        const { conflictTaskId, tempBranch } = baseBranchResolution.err;
+      if (
+        workerResult.err &&
+        typeof workerResult.err === 'object' &&
+        'type' in workerResult.err &&
+        workerResult.err.type === 'ConflictResolutionRequiredError'
+      ) {
+        const conflictErr = workerResult.err as {
+          type: 'ConflictResolutionRequiredError';
+          conflictTaskId: string;
+          tempBranch: string;
+        };
+        const { conflictTaskId, tempBranch } = conflictErr;
 
         console.log(
           `  ⚠️  [${rawTaskId}] Conflict detected, scheduling resolution task: ${conflictTaskId}`,
@@ -166,8 +191,8 @@ async function executeTaskAsync(
           state: TaskState.BLOCKED,
           owner: null, // ワーカーを解放
           pendingConflictResolution: {
-            conflictTaskId,
-            tempBranch,
+            conflictTaskId: taskId(conflictTaskId),
+            tempBranch: branchName(tempBranch),
           },
           updatedAt: new Date().toISOString(),
         }));
@@ -183,20 +208,6 @@ async function executeTaskAsync(
       }
 
       // その他のエラー
-      console.log(
-        `  ❌ [${rawTaskId}] Failed to resolve base branch: ${baseBranchResolution.err.message}`,
-      );
-      await schedulerOps.blockTask(tid);
-      return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
-    }
-
-    const { baseBranch } = baseBranchResolution.val;
-
-    // 3. Worker: タスク実行
-    console.log(`  🚀 [${rawTaskId}] Executing task...`);
-    const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, baseBranch);
-
-    if (isErr(workerResult)) {
       const errorMsg =
         workerResult.err &&
         typeof workerResult.err === 'object' &&
