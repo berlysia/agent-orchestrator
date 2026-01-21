@@ -9,22 +9,20 @@ import { createJudgeOperations } from './judge-operations.ts';
 import { createBaseBranchResolver } from './base-branch-resolver.ts';
 import { createIntegrationOperations } from './integration-operations.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
-import { taskId, repoPath, branchName, type TaskId } from '../../types/branded.ts';
+import { taskId, repoPath, branchName } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
-import {
-  buildDependencyGraph,
-  computeExecutionLevels,
-  detectSerialChains,
-} from './dependency-graph.ts';
-import { computeBlockedTasks } from './parallel-executor.ts';
-import { executeSerialChain } from './serial-executor.ts';
-import { executeDynamically } from './dynamic-scheduler.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
 import type { IntegrationWorktreeInfo } from '../../types/integration.ts';
+import {
+  loadTasks,
+  collectCompletedTaskSummaries,
+  collectFailedTaskDescriptions,
+} from './task-helpers.ts';
+import { executeTaskPipeline } from './task-execution-pipeline.ts';
 
 /**
  * Orchestrator依存関係
@@ -183,185 +181,29 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      // 2. すべてのタスクを取得して依存関係グラフを構築
-      console.log('\n🔗 Building dependency graph...');
-      const tasks: Task[] = [];
-      for (const rawTaskId of taskIds) {
-        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-        if (!taskResult.ok) {
-          console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
-          failedTaskIds.push(rawTaskId);
-          continue;
-        }
-        tasks.push(taskResult.val);
-      }
+      // 2. すべてのタスクを取得
+      const loadResult = await loadTasks(taskIds, deps.taskStore);
+      const tasks = loadResult.tasks;
+      failedTaskIds.push(...loadResult.failedTaskIds);
 
-      const graph = buildDependencyGraph(tasks);
+      // 3. タスク実行パイプライン
+      const pipelineResult = await executeTaskPipeline({
+        tasks,
+        taskStore: deps.taskStore,
+        schedulerOps,
+        workerOps,
+        judgeOps,
+        gitEffects: deps.gitEffects,
+        baseBranchResolver,
+        config: deps.config,
+        maxWorkers: deps.maxWorkers ?? 3,
+        initialSchedulerState: schedulerState,
+      });
 
-      // 依存関係を表示
-      console.log('\n📊 Task dependencies:');
-      for (const task of tasks) {
-        const deps = task.dependencies;
-        if (deps.length === 0) {
-          console.log(`  ${String(task.id)}: no dependencies`);
-        } else {
-          console.log(
-            `  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`,
-          );
-        }
-      }
-
-      // 3. 循環依存をチェック
-      if (graph.cyclicDependencies && graph.cyclicDependencies.length > 0) {
-        console.warn(
-          `⚠️  Circular dependencies detected: ${graph.cyclicDependencies.map((id) => String(id)).join(', ')}`,
-        );
-        console.warn('   These tasks will be BLOCKED');
-
-        // 循環依存タスクをBLOCKEDにする
-        for (const tid of graph.cyclicDependencies) {
-          await schedulerOps.blockTask(tid);
-          blockedTaskIds.push(String(tid));
-        }
-      }
-
-      // 4. 直列チェーンを検出
-      console.log('\n🔗 Detecting serial chains...');
-      const serialChains = detectSerialChains(graph);
-
-      if (serialChains.length > 0) {
-        console.log(`  Found ${serialChains.length} serial chains:`);
-        for (const chain of serialChains) {
-          console.log(`    Chain: ${chain.map((id) => String(id)).join(' → ')}`);
-        }
-      } else {
-        console.log('  No serial chains detected');
-      }
-
-      // 5. 直列チェーンのタスクIDを記録
-      const serialTaskIds = new Set(graph.cyclicDependencies ?? []);
-      for (const chain of serialChains) {
-        for (const tid of chain) {
-          serialTaskIds.add(tid);
-        }
-      }
-
-      // 6. 直列チェーンを除外して実行レベルを計算
-      const parallelTasks = tasks.filter((task) => !serialTaskIds.has(task.id));
-      const parallelGraph =
-        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
-      const { levels, unschedulable } = parallelGraph
-        ? computeExecutionLevels(parallelGraph)
-        : { levels: [], unschedulable: [] };
-
-      if (unschedulable.length > 0) {
-        console.warn(
-          `⚠️  Unschedulable tasks: ${unschedulable.map((id) => String(id)).join(', ')}`,
-        );
-        for (const tid of unschedulable) {
-          await schedulerOps.blockTask(tid);
-          blockedTaskIds.push(String(tid));
-        }
-      }
-
-      console.log(
-        `\n📊 Execution plan: ${serialChains.length} serial chains, ${levels.length} parallel levels`,
-      );
-      for (let i = 0; i < levels.length; i++) {
-        const levelTasks = levels[i];
-        if (levelTasks) {
-          console.log(`  Parallel Level ${i}: ${levelTasks.map((id) => String(id)).join(', ')}`);
-        }
-      }
-
-      // 7. 直列チェーンを順番に実行
-      const serialChainFailedTasks: TaskId[] = [];
-      if (serialChains.length > 0) {
-        console.log('\n🔗 Executing serial chains...');
-        for (const chain of serialChains) {
-          const result = await executeSerialChain(
-            chain,
-            deps.taskStore,
-            schedulerOps,
-            workerOps,
-            judgeOps,
-            deps.gitEffects,
-            schedulerState,
-            deps.config.iterations.serialChainTaskRetries,
-          );
-          schedulerState = result.updatedSchedulerState;
-
-          completedTaskIds.push(...result.completed.map((id) => String(id)));
-          failedTaskIds.push(...result.failed.map((id) => String(id)));
-          serialChainFailedTasks.push(...result.failed);
-
-          // Worktreeをクリーンアップ
-          if (result.worktreePath && chain[0]) {
-            const firstTaskId = chain[0];
-            await workerOps.cleanupWorktree(firstTaskId);
-          }
-        }
-
-        // Serial chainで失敗したタスクの依存先を自動的にブロック
-        if (serialChainFailedTasks.length > 0) {
-          const dependentTasks = computeBlockedTasks(serialChainFailedTasks, graph);
-          if (dependentTasks.length > 0) {
-            console.log(
-              `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
-            );
-            for (const tid of dependentTasks) {
-              await schedulerOps.blockTask(tid);
-              blockedTaskIds.push(String(tid));
-            }
-          }
-        }
-      }
-
-      // 8. レベルごとに並列実行（直列チェーンを除外）
-      const blockedTaskIdsSet = new Set(graph.cyclicDependencies ?? []);
-      for (const tid of unschedulable) {
-        blockedTaskIdsSet.add(tid);
-      }
-      // 直列チェーンのタスクもブロック済みとして扱う（並列実行から除外）
-      for (const tid of serialTaskIds) {
-        blockedTaskIdsSet.add(tid);
-      }
-      // Serial chainで失敗したタスクの依存先もブロック済みとして扱う
-      if (serialChainFailedTasks.length > 0) {
-        const dependentTasks = computeBlockedTasks(serialChainFailedTasks, graph);
-        for (const tid of dependentTasks) {
-          blockedTaskIdsSet.add(tid);
-        }
-      }
-
-      if (parallelTasks.length > 0) {
-        console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
-
-        const dynamicResult = await executeDynamically(
-          parallelTasks.map((t) => t.id),
-          parallelGraph!,
-          schedulerOps,
-          workerOps,
-          judgeOps,
-          deps.taskStore,
-          deps.maxWorkers ?? 3,
-          schedulerState,
-          blockedTaskIdsSet,
-          baseBranchResolver,
-        );
-
-        // スケジューラ状態を更新
-        schedulerState = dynamicResult.updatedSchedulerState;
-
-        // 結果を集計
-        completedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
-        blockedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
-
-        console.log(
-          `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
-        );
-      }
+      schedulerState = pipelineResult.schedulerState;
+      completedTaskIds.push(...pipelineResult.completedTaskIds);
+      failedTaskIds.push(...pipelineResult.failedTaskIds);
+      blockedTaskIds.push(...pipelineResult.blockedTaskIds);
 
       // 9. 統合後評価フェーズ
       if (completedTaskIds.length > 0 || failedTaskIds.length > 0) {
@@ -374,42 +216,27 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         // 完了タスクを取得
         const completedTasks: Task[] = [];
-        const completedTaskDescriptions: string[] = [];
-        const completedTaskRunSummaries: string[] = [];
-
         for (const rawTaskId of completedTaskIds) {
           const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-          if (taskResult.ok) {
-            if (taskResult.val.state === TaskState.DONE) {
-              completedTasks.push(taskResult.val);
-            }
-            completedTaskDescriptions.push(
-              `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
-            );
-
-            // 実行ログサマリーを取得
-            const latestRunId = taskResult.val.latestRunId;
-            if (latestRunId) {
-              const runMetadataResult = await deps.runnerEffects.loadRunMetadata(latestRunId);
-              if (runMetadataResult.ok) {
-                const run = runMetadataResult.val;
-                const summary = `[${rawTaskId}] Status: ${run.status}${run.errorMessage ? `, Error: ${run.errorMessage}` : ''}`;
-                completedTaskRunSummaries.push(summary);
-              }
-            }
+          if (taskResult.ok && taskResult.val.state === TaskState.DONE) {
+            completedTasks.push(taskResult.val);
           }
         }
 
-        // 失敗タスクの詳細を取得
-        const failedTaskDescriptions: string[] = [];
-        for (const rawTaskId of failedTaskIds) {
-          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-          if (taskResult.ok) {
-            failedTaskDescriptions.push(
-              `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
-            );
-          }
-        }
+        // 完了タスクのサマリ収集
+        const completedSummary = await collectCompletedTaskSummaries(
+          completedTaskIds,
+          deps.taskStore,
+          deps.runnerEffects,
+        );
+        const completedTaskDescriptions = completedSummary.descriptions;
+        const completedTaskRunSummaries = completedSummary.runSummaries;
+
+        // 失敗タスクの説明収集
+        const failedTaskDescriptions = await collectFailedTaskDescriptions(
+          failedTaskIds,
+          deps.taskStore,
+        );
 
         let codeChanges = '';
         let integrationWorktreeInfo: IntegrationWorktreeInfo | null = null;
@@ -527,48 +354,41 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           // 追加タスクを統合ブランチから実行
           console.log('  🔨 Executing additional tasks from integration branch...');
-          const additionalCompletedIds: string[] = [];
-          const additionalFailedIds: string[] = [];
 
-          for (const rawTaskId of additionalTaskIds) {
-            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-            if (!taskResult.ok) {
-              console.warn(`  ⚠️  Failed to read task ${rawTaskId}: ${taskResult.err.message}`);
-              additionalFailedIds.push(rawTaskId);
-              continue;
-            }
+          // タスクを読み込み
+          const additionalLoadResult = await loadTasks(additionalTaskIds, deps.taskStore);
+          const additionalTasks = additionalLoadResult.tasks;
 
-            const task = taskResult.val;
+          // WHY: 統合ブランチから実行するため、カスタムBaseBranchResolverを作成
+          const integrationBaseBranchResolver = {
+            resolveBaseBranch: async (_task: Task) =>
+              createOk({ type: 'single', baseBranch: integrationWorktreeInfo.integrationBranch }),
+            // Phase 5の追加タスクはコンフリクト解決タスクを作成しないため、ダミー実装
+            createAndStoreConflictResolutionTask: async (_parentTask: Task, _conflictInfo: any) =>
+              createErr({ type: 'UNKNOWN_ERROR', message: 'Not implemented' } as any),
+            buildConflictResolutionPrompt: (_parentTask: Task, _mergedBranches: any, _conflictDetails: any) => '',
+          } as unknown as ReturnType<typeof createBaseBranchResolver>;
 
-            // 統合ブランチからworktreeをセットアップ
-            const setupResult = await workerOps.setupWorktree(
-              task,
-              integrationWorktreeInfo.integrationBranch,
-            );
-            if (isErr(setupResult)) {
-              console.warn(`  ⚠️  Failed to setup worktree for ${rawTaskId}: ${setupResult.err.message}`);
-              additionalFailedIds.push(rawTaskId);
-              continue;
-            }
+          // タスク実行パイプライン
+          const additionalPipelineResult = await executeTaskPipeline({
+            tasks: additionalTasks,
+            taskStore: deps.taskStore,
+            schedulerOps,
+            workerOps,
+            judgeOps,
+            gitEffects: deps.gitEffects,
+            baseBranchResolver: integrationBaseBranchResolver,
+            config: deps.config,
+            maxWorkers: deps.maxWorkers ?? 3,
+            initialSchedulerState: initialSchedulerState(deps.maxWorkers ?? 3),
+          });
 
-            const worktreePath = setupResult.val;
-
-            // タスク実行
-            const execResult = await workerOps.executeTask(task, worktreePath);
-            if (isErr(execResult)) {
-              console.warn(`  ⚠️  Failed to execute task ${rawTaskId}: ${execResult.err.message}`);
-              additionalFailedIds.push(rawTaskId);
-              continue;
-            }
-
-            // 実行結果を確認
-            const updatedTaskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-            if (updatedTaskResult.ok && updatedTaskResult.val.state === TaskState.DONE) {
-              additionalCompletedIds.push(rawTaskId);
-            } else {
-              additionalFailedIds.push(rawTaskId);
-            }
-          }
+          const additionalCompletedIds = additionalPipelineResult.completedTaskIds;
+          const additionalFailedIds = [
+            ...additionalLoadResult.failedTaskIds,
+            ...additionalPipelineResult.failedTaskIds,
+            ...additionalPipelineResult.blockedTaskIds,
+          ];
 
           console.log(
             `  ✅ Additional tasks executed: ${additionalCompletedIds.length} succeeded, ${additionalFailedIds.length} failed`,
@@ -618,34 +438,20 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           failedTaskIds.push(...additionalFailedIds);
 
           // 完了タスクの説明とサマリーを更新
-          for (const rawTaskId of additionalCompletedIds) {
-            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-            if (taskResult.ok) {
-              completedTaskDescriptions.push(
-                `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
-              );
-
-              const latestRunId = taskResult.val.latestRunId;
-              if (latestRunId) {
-                const runMetadataResult = await deps.runnerEffects.loadRunMetadata(latestRunId);
-                if (runMetadataResult.ok) {
-                  const run = runMetadataResult.val;
-                  const summary = `[${rawTaskId}] Status: ${run.status}${run.errorMessage ? `, Error: ${run.errorMessage}` : ''}`;
-                  completedTaskRunSummaries.push(summary);
-                }
-              }
-            }
-          }
+          const additionalCompletedSummary = await collectCompletedTaskSummaries(
+            additionalCompletedIds,
+            deps.taskStore,
+            deps.runnerEffects,
+          );
+          completedTaskDescriptions.push(...additionalCompletedSummary.descriptions);
+          completedTaskRunSummaries.push(...additionalCompletedSummary.runSummaries);
 
           // 失敗タスクの説明を更新
-          for (const rawTaskId of additionalFailedIds) {
-            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-            if (taskResult.ok) {
-              failedTaskDescriptions.push(
-                `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
-              );
-            }
-          }
+          const additionalFailedDescriptions = await collectFailedTaskDescriptions(
+            additionalFailedIds,
+            deps.taskStore,
+          );
+          failedTaskDescriptions.push(...additionalFailedDescriptions);
 
           // 再評価
           console.log('  📊 Re-evaluating completion...');
@@ -811,16 +617,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
       // 4. すべてのタスクを取得して状態を確認
       console.log('\n🔍 Checking task states...');
-      const tasks: Task[] = [];
-      for (const rawTaskId of taskIds) {
-        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-        if (!taskResult.ok) {
-          console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
-          failedTaskIds.push(rawTaskId);
-          continue;
-        }
-        tasks.push(taskResult.val);
-      }
+      const loadResult = await loadTasks(taskIds, deps.taskStore);
+      const tasks = loadResult.tasks;
+      failedTaskIds.push(...loadResult.failedTaskIds);
 
       // 5. 失敗/停止タスクの処理を適用
       for (const task of tasks) {
@@ -846,119 +645,28 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
       }
 
-      // 6. 依存関係グラフを構築して実行（executeInstructionと同じロジック）
-      console.log('\n🔗 Building dependency graph...');
-      const allTasks: Task[] = [];
-      for (const rawTaskId of taskIds) {
-        const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-        if (taskResult.ok) {
-          allTasks.push(taskResult.val);
-        }
-      }
+      // 6. タスク実行パイプライン
+      // WHY: 既にスキップ済みのタスクIDを初期ブロック対象として渡す
+      const initialBlockedTaskIds = new Set(failedTaskIds.map((id) => taskId(id)));
 
-      const graph = buildDependencyGraph(allTasks);
+      const pipelineResult = await executeTaskPipeline({
+        tasks,
+        taskStore: deps.taskStore,
+        schedulerOps,
+        workerOps,
+        judgeOps,
+        gitEffects: deps.gitEffects,
+        baseBranchResolver,
+        config: deps.config,
+        maxWorkers: deps.maxWorkers ?? 3,
+        initialSchedulerState: schedulerState,
+        initialBlockedTaskIds,
+      });
 
-      // 依存関係を表示
-      console.log('\n📊 Task dependencies:');
-      for (const task of allTasks) {
-        const deps = task.dependencies;
-        if (deps.length === 0) {
-          console.log(`  ${String(task.id)}: no dependencies`);
-        } else {
-          console.log(
-            `  ${String(task.id)}: depends on [${deps.map((d) => String(d)).join(', ')}]`,
-          );
-        }
-      }
-
-      // 7. 実行（既に完了したタスクはスキップ）
-      const blockedTaskIdsSet = new Set([
-        ...(graph.cyclicDependencies ?? []),
-        ...failedTaskIds.map((id) => taskId(id)),
-      ]);
-
-      // 直列チェーンを検出
-      const serialChains = detectSerialChains(graph);
-      const serialTaskIds = new Set(graph.cyclicDependencies ?? []);
-      for (const chain of serialChains) {
-        for (const tid of chain) {
-          serialTaskIds.add(tid);
-        }
-      }
-
-      const parallelTasks = allTasks.filter((task) => !serialTaskIds.has(task.id));
-      const parallelGraph =
-        parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
-
-      // 8. 直列チェーンを実行
-      const resumeSerialChainFailedTasks: TaskId[] = [];
-      if (serialChains.length > 0) {
-        console.log('\n🔗 Executing serial chains...');
-        for (const chain of serialChains) {
-          const result = await executeSerialChain(
-            chain,
-            deps.taskStore,
-            schedulerOps,
-            workerOps,
-            judgeOps,
-            deps.gitEffects,
-            schedulerState,
-            deps.config.iterations.serialChainTaskRetries,
-          );
-          schedulerState = result.updatedSchedulerState;
-
-          completedTaskIds.push(...result.completed.map((id) => String(id)));
-          failedTaskIds.push(...result.failed.map((id) => String(id)));
-          resumeSerialChainFailedTasks.push(...result.failed);
-
-          if (result.worktreePath && chain[0]) {
-            const firstTaskId = chain[0];
-            await workerOps.cleanupWorktree(firstTaskId);
-          }
-        }
-
-        // Serial chainで失敗したタスクの依存先を自動的にブロック
-        if (resumeSerialChainFailedTasks.length > 0) {
-          const dependentTasks = computeBlockedTasks(resumeSerialChainFailedTasks, graph);
-          if (dependentTasks.length > 0) {
-            console.log(
-              `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
-            );
-            for (const tid of dependentTasks) {
-              blockedTaskIdsSet.add(tid);
-              await schedulerOps.blockTask(tid);
-              blockedTaskIds.push(String(tid));
-            }
-          }
-        }
-      }
-
-      // 9. 並列タスクを動的スケジューリングで実行
-      if (parallelTasks.length > 0) {
-        console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
-
-        const dynamicResult = await executeDynamically(
-          parallelTasks.map((t) => t.id),
-          parallelGraph!,
-          schedulerOps,
-          workerOps,
-          judgeOps,
-          deps.taskStore,
-          deps.maxWorkers ?? 3,
-          schedulerState,
-          blockedTaskIdsSet,
-          baseBranchResolver,
-        );
-
-        schedulerState = dynamicResult.updatedSchedulerState;
-        completedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
-        failedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
-        blockedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
-
-        console.log(
-          `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
-        );
-      }
+      schedulerState = pipelineResult.schedulerState;
+      completedTaskIds.push(...pipelineResult.completedTaskIds);
+      failedTaskIds.push(...pipelineResult.failedTaskIds);
+      blockedTaskIds.push(...pipelineResult.blockedTaskIds);
 
       const success = failedTaskIds.length === 0;
       console.log(
@@ -1208,104 +916,30 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         allTaskIds.push(...newTaskIds);
 
-        // 9. 新しいタスクを実行（既存の実行ロジックを再利用）
+        // 9. 新しいタスクを実行
         console.log('\n🚀 Executing additional tasks...');
 
-        const tasks: Task[] = [];
-        for (const rawTaskId of newTaskIds) {
-          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-          if (!taskResult.ok) {
-            console.warn(`⚠️  Failed to load task ${rawTaskId}: ${taskResult.err.message}`);
-            allFailedTaskIds.push(rawTaskId);
-            continue;
-          }
-          tasks.push(taskResult.val);
-        }
+        const loadResult = await loadTasks(newTaskIds, deps.taskStore);
+        const tasks = loadResult.tasks;
+        allFailedTaskIds.push(...loadResult.failedTaskIds);
 
-        // 依存関係グラフを構築して実行
-        const graph = buildDependencyGraph(tasks);
-        const serialChains = detectSerialChains(graph);
-        const serialTaskIds = new Set<string>();
-        for (const chain of serialChains) {
-          for (const tid of chain) {
-            serialTaskIds.add(String(tid));
-          }
-        }
+        // タスク実行パイプライン
+        const pipelineResult = await executeTaskPipeline({
+          tasks,
+          taskStore: deps.taskStore,
+          schedulerOps,
+          workerOps,
+          judgeOps,
+          gitEffects: deps.gitEffects,
+          baseBranchResolver,
+          config: deps.config,
+          maxWorkers: deps.maxWorkers ?? 3,
+          initialSchedulerState: initialSchedulerState(deps.maxWorkers ?? 3),
+        });
 
-        const parallelTasks = tasks.filter((task) => !serialTaskIds.has(String(task.id)));
-        const parallelGraph =
-          parallelTasks.length > 0 ? buildDependencyGraph(parallelTasks, graph.allTaskIds) : null;
-
-        let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
-        const blockedTaskIds = new Set(graph.cyclicDependencies ?? []);
-
-        // 直列チェーンを実行
-        const continueSerialChainFailedTasks: TaskId[] = [];
-        if (serialChains.length > 0) {
-          for (const chain of serialChains) {
-            const result = await executeSerialChain(
-              chain,
-              deps.taskStore,
-              schedulerOps,
-              workerOps,
-              judgeOps,
-              deps.gitEffects,
-              schedulerState,
-              deps.config.iterations.serialChainTaskRetries,
-            );
-            schedulerState = result.updatedSchedulerState;
-
-            allCompletedTaskIds.push(...result.completed.map((id) => String(id)));
-            allFailedTaskIds.push(...result.failed.map((id) => String(id)));
-            continueSerialChainFailedTasks.push(...result.failed);
-
-            if (result.worktreePath && chain[0]) {
-              await workerOps.cleanupWorktree(chain[0]);
-            }
-          }
-
-          // Serial chainで失敗したタスクの依存先を自動的にブロック
-          if (continueSerialChainFailedTasks.length > 0) {
-            const dependentTasks = computeBlockedTasks(continueSerialChainFailedTasks, graph);
-            if (dependentTasks.length > 0) {
-              console.log(
-                `  ⚠️  Blocking ${dependentTasks.length} dependent tasks due to serial chain failures: ${dependentTasks.map((id) => String(id)).join(', ')}`,
-              );
-              for (const tid of dependentTasks) {
-                blockedTaskIds.add(tid);
-                await schedulerOps.blockTask(tid);
-                allFailedTaskIds.push(String(tid));
-              }
-            }
-          }
-        }
-
-        // 並列タスクを動的スケジューリングで実行
-        if (parallelTasks.length > 0) {
-          console.log(`\n📍 Executing parallel tasks with dynamic scheduling...`);
-
-          const dynamicResult = await executeDynamically(
-            parallelTasks.map((t) => t.id),
-            parallelGraph!,
-            schedulerOps,
-            workerOps,
-            judgeOps,
-            deps.taskStore,
-            deps.maxWorkers ?? 3,
-            schedulerState,
-            blockedTaskIds,
-            baseBranchResolver,
-          );
-
-          schedulerState = dynamicResult.updatedSchedulerState;
-          allCompletedTaskIds.push(...dynamicResult.completed.map((id) => String(id)));
-          allFailedTaskIds.push(...dynamicResult.failed.map((id) => String(id)));
-          allFailedTaskIds.push(...dynamicResult.blocked.map((id) => String(id)));
-
-          console.log(
-            `  ✅ Dynamic execution completed: ${dynamicResult.completed.length} succeeded, ${dynamicResult.failed.length} failed, ${dynamicResult.blocked.length} blocked`,
-          );
-        }
+        allCompletedTaskIds.push(...pipelineResult.completedTaskIds);
+        allFailedTaskIds.push(...pipelineResult.failedTaskIds);
+        allFailedTaskIds.push(...pipelineResult.blockedTaskIds);
 
         console.log(
           `✅ Additional tasks executed: ${allCompletedTaskIds.length} completed, ${allFailedTaskIds.length} failed`,
