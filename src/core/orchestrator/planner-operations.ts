@@ -857,47 +857,23 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join('\n\n');
 
-    // 既存タスクの情報を取得して、完了済み・未完了を分類し、IDマッピングを作成
+    // WHY: 統合ブランチには完了タスクが全てマージ済みなので、
+    //      新規タスクは完了タスクに依存する必要がない。
+    //      既存タスク数のみ取得して、新規タスクの番号を決定する。
     const allTasksResult = await deps.taskStore.listTasks();
-    let nextTaskNumber = 1;
-    const completedTaskIds: string[] = [];
-    const incompleteTaskIds: string[] = [];
-    const existingTaskMapping = new Map<string, string>(); // task-7 → task-191aeb69-7
-
-    if (isOk(allTasksResult) && allTasksResult.val) {
-      const taskNumbers: number[] = [];
-      for (const task of allTasksResult.val) {
-        const match = String(task.id).match(/-(\d+)$/);
-        const taskNumber = match && match[1] ? parseInt(match[1], 10) : 0;
-        if (taskNumber > 0) {
-          taskNumbers.push(taskNumber);
-          const shortId = `task-${taskNumber}`;
-          existingTaskMapping.set(shortId, String(task.id)); // マッピングを記録
-          if (task.state === TaskState.DONE) {
-            completedTaskIds.push(shortId);
-          } else if (task.state === TaskState.BLOCKED || task.state === TaskState.NEEDS_CONTINUATION) {
-            incompleteTaskIds.push(shortId);
-          }
-        }
-      }
-      if (taskNumbers.length > 0) {
-        nextTaskNumber = Math.max(...taskNumbers) + 1;
-      }
-    }
+    const completedTaskCount = isOk(allTasksResult) && allTasksResult.val
+      ? allTasksResult.val.filter(task => task.state === TaskState.DONE).length
+      : 0;
 
     const additionalPrompt = `Previous conversation:
 ${conversationContext}
 
 IMPORTANT CONTEXT:
-- Your new tasks will be executed from the integration branch.
-- The integration branch includes all COMPLETED tasks: ${completedTaskIds.length > 0 ? completedTaskIds.join(', ') : 'none'}
-- DO NOT create dependencies on completed tasks - they are already in the integration branch.
-${incompleteTaskIds.length > 0 ? `- WARNING: The following tasks are INCOMPLETE and NOT in the integration branch: ${incompleteTaskIds.join(', ')}
-- If your new tasks depend on incomplete tasks, you MUST specify those dependencies explicitly.` : ''}
-- Start task numbering from task-${nextTaskNumber} to avoid conflicts.
-- Only create dependencies on:
-  1. Incomplete tasks (${incompleteTaskIds.length > 0 ? incompleteTaskIds.join(', ') : 'none'}) if needed
-  2. New tasks you generate (task-${nextTaskNumber} onwards)
+- Your new tasks will be executed from the integration branch, which includes ALL completed work.
+- ${completedTaskCount} tasks have been successfully completed and merged into the integration branch.
+- DO NOT create dependencies on any previously completed tasks - they are already in the codebase.
+- Your new tasks should start from task-1 (unique IDs will be assigned automatically).
+- Only create dependencies on other NEW tasks you generate in this session (e.g., task-2 depends on task-1).
 
 Based on the above context, the following aspects are still missing:
 ${missingAspects.map((aspect, i) => `${i + 1}. ${aspect}`).join('\n')}
@@ -908,7 +884,7 @@ Follow the same format and guidelines as before.
 Output format (JSON array):
 [
   {
-    "id": "task-${nextTaskNumber}",
+    "id": "task-1",
     "description": "Task description",
     "branch": "feature/branch-name",
     "scopePaths": ["path1/", "path2/"],
@@ -920,10 +896,8 @@ Output format (JSON array):
   }
 ]
 
-CRITICAL: Dependencies should ONLY reference:
-${incompleteTaskIds.length > 0 ? `- Incomplete tasks: ${incompleteTaskIds.join(', ')} (if your new tasks depend on them)` : ''}
-- New tasks: task-${nextTaskNumber} or higher
-Do NOT depend on completed tasks (${completedTaskIds.length > 0 ? completedTaskIds.join(', ') : 'none'}) as they are already in the integration branch.
+CRITICAL: Dependencies should ONLY reference NEW tasks (task-1, task-2, etc.) you generate in this session.
+Do NOT depend on any previous tasks - they are already merged into the integration branch.
 
 Output only the JSON array, no additional text.`;
 
@@ -1006,12 +980,8 @@ Output only the JSON array, no additional text.`;
         taskType: breakdown.type,
         context: breakdown.context,
         dependencies: breakdown.dependencies.map((depId) => {
-          // 既存タスクへの依存の場合、実際のタスクIDを使用
-          const existingTaskId = existingTaskMapping.get(depId);
-          if (existingTaskId) {
-            return taskId(existingTaskId);
-          }
-          // 新規タスクへの依存の場合、現在のセッションIDで生成
+          // WHY: 統合ブランチからの実行なので、依存は新規タスク間のみ
+          //      全ての依存を現在のセッションIDで変換
           return taskId(makeUniqueTaskId(depId, sessionShort));
         }),
         plannerRunId: additionalRunId,
