@@ -2,7 +2,7 @@
   "$schema": "../dist/config.schema.json",
   "appRepoPath": "/home/berlysia/workspace/agent-orchestorator",
   "agentCoordPath": "/home/berlysia/workspace/agent-orchestorator-coord",
-  "maxWorkers": 3,
+  "maxWorkers": 5,
   "agents": {
     "planner": {
       "type": "claude",
