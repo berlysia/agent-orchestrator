@@ -256,8 +256,62 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       if (merge.hasConflicts) {
         // コンフリクト発生: 情報を収集して返す
         // WHY: Worker自身がその場で解決することで、タスク失敗→依存ブロックの連鎖を防ぐ
+
+        // Issue 4: バイナリファイルのコンフリクトを検出
+        // WHY: バイナリファイルは自動解決不可能なため、事前にチェックする
+        const isBinaryFile = (filePath: string): boolean => {
+          const binaryExtensions = [
+            // 画像
+            '.png',
+            '.jpg',
+            '.jpeg',
+            '.gif',
+            '.bmp',
+            '.ico',
+            '.webp',
+            '.svg',
+            // ドキュメント
+            '.pdf',
+            '.doc',
+            '.docx',
+            '.xls',
+            '.xlsx',
+            '.ppt',
+            '.pptx',
+            // アーカイブ
+            '.zip',
+            '.tar',
+            '.gz',
+            '.rar',
+            '.7z',
+            // バイナリ実行ファイル
+            '.exe',
+            '.dll',
+            '.so',
+            '.dylib',
+            // その他
+            '.bin',
+            '.dat',
+            '.db',
+            '.sqlite',
+          ];
+          const ext = path.extname(filePath).toLowerCase();
+          return binaryExtensions.includes(ext);
+        };
+
         const conflictDetails: ConflictContent[] = [];
+        const unresolvableConflicts: string[] = [];
+
         for (const conflict of merge.conflicts) {
+          // バイナリファイルかチェック
+          if (isBinaryFile(conflict.filePath)) {
+            unresolvableConflicts.push(conflict.filePath);
+            console.log(
+              `  ⚠️  Binary file conflict detected: ${conflict.filePath} (skipping auto-resolution)`,
+            );
+            continue;
+          }
+
           const contentResult = await deps.gitEffects.getConflictContent(
             repoPath(worktreePath),
             conflict.filePath,
@@ -265,6 +319,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
           if (contentResult.ok) {
             conflictDetails.push(contentResult.val);
           }
+        }
+
+        // バイナリファイルのコンフリクトが含まれる場合はエラー
+        if (unresolvableConflicts.length > 0) {
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
+          await cleanupWorktree(task.id);
+          return createErr({
+            type: 'ValidationError',
+            message: `Cannot auto-resolve binary file conflicts: ${unresolvableConflicts.join(', ')}`,
+            details: 'Binary files require manual conflict resolution',
+          });
         }
 
         const conflictInfo: ConflictResolutionInfo = {
@@ -757,6 +822,41 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
         // コンフリクト解決プロンプトを構築
         const conflictPrompt = buildConflictResolutionPromptInline(conflictInfo);
 
+        // Issue 1: コンフリクト解決用のRunIDを生成
+        // WHY: コンフリクト解決の実行履歴を追跡可能にする
+        const ensureResult = await deps.runnerEffects.ensureRunsDir();
+        if (isErr(ensureResult)) {
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
+          await cleanupWorktree(task.id);
+          return createErr(ensureResult.err);
+        }
+
+        const conflictResolutionRunId = runId(`conflict-resolution-${task.id}-${Date.now()}`);
+        const conflictRun = createInitialRun({
+          id: conflictResolutionRunId,
+          taskId: task.id,
+          agentType: deps.agentType,
+          logPath: path.join(deps.agentCoordPath, 'runs', `${conflictResolutionRunId}.log`),
+        });
+
+        const saveMetaResult = await deps.runnerEffects.saveRunMetadata(conflictRun);
+        if (isErr(saveMetaResult)) {
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
+          await cleanupWorktree(task.id);
+          return createErr(saveMetaResult.err);
+        }
+
+        const initLogResult = await deps.runnerEffects.initializeLogFile(conflictRun);
+        if (isErr(initLogResult)) {
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
+          await cleanupWorktree(task.id);
+          return createErr(initLogResult.err);
+        }
+
+        console.log(
+          `  📝 Conflict resolution log: ${getRunDisplayPath(conflictResolutionRunId, 'log')}`,
+        );
+
         // Claudeにコンフリクト解決を依頼
         const resolutionResult =
           deps.agentType === 'claude'
@@ -764,11 +864,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
                 conflictPrompt,
                 worktreePath as string,
                 deps.model!,
+                conflictResolutionRunId,
               )
             : await deps.runnerEffects.runCodexAgent(
                 conflictPrompt,
                 worktreePath as string,
                 deps.model,
+                conflictResolutionRunId,
               );
 
         if (isErr(resolutionResult)) {
@@ -776,16 +878,59 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
           console.log(
             `  ❌ Failed to resolve merge conflicts: ${resolutionResult.err.message}`,
           );
+
+          // メタデータ更新（失敗）
+          const failedRun = {
+            ...conflictRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: resolutionResult.err.message,
+          };
+          await deps.runnerEffects.saveRunMetadata(failedRun);
+
           await deps.gitEffects.abortMerge(repoPath(worktreePath));
           await cleanupWorktree(task.id);
           return createErr(resolutionResult.err);
         }
 
+        // メタデータ更新（成功）
+        const completedRun = {
+          ...conflictRun,
+          status: RunStatus.SUCCESS,
+          finishedAt: new Date().toISOString(),
+        };
+        await deps.runnerEffects.saveRunMetadata(completedRun);
+
         // コンフリクト解決成功: 変更をステージングしてコミット
         const stageResult = await deps.gitEffects.stageAll(worktreePath);
         if (isErr(stageResult)) {
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
           await cleanupWorktree(task.id);
           return createErr(stageResult.err);
+        }
+
+        // Issue 5: コンフリクトマーカーが残っていないかチェック
+        // WHY: LLMが解決に失敗し、コンフリクトマーカーが残ったままコミットされるのを防ぐ
+        const diffResult = await deps.gitEffects.getDiff(worktreePath, ['--cached']);
+        if (isErr(diffResult)) {
+          console.log(`  ⚠️  Failed to check for conflict markers: ${diffResult.err.message}`);
+          // diff取得失敗は致命的ではないため、警告のみ
+        } else {
+          const diff = diffResult.val;
+          const hasConflictMarkers =
+            diff.includes('<<<<<<<') || diff.includes('=======') || diff.includes('>>>>>>>');
+
+          if (hasConflictMarkers) {
+            console.log(`  ❌ Conflict markers still present after resolution`);
+            await deps.gitEffects.abortMerge(repoPath(worktreePath));
+            await cleanupWorktree(task.id);
+            return createErr({
+              type: 'ValidationError',
+              message: 'Conflict resolution incomplete: conflict markers still present',
+              details:
+                'The agent failed to fully resolve conflicts. Manual intervention is required.',
+            });
+          }
         }
 
         const commitResult = await deps.gitEffects.commit(
@@ -795,6 +940,9 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
         );
 
         if (isErr(commitResult)) {
+          // Issue 2: コミット失敗時にマージを中断
+          console.log(`  ❌ Failed to commit conflict resolution: ${commitResult.err.message}`);
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
           await cleanupWorktree(task.id);
           return createErr(commitResult.err);
         }

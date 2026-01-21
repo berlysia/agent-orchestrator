@@ -1115,124 +1115,169 @@ CRITICAL RULES:
 
 Output only the JSON array, no additional text.`;
 
-    await appendPlanningLog(`\nPrompt:\n${additionalPrompt}\n\n`);
+    // Issue 3: バリデーション失敗時のリトライ機構
+    // WHY: LLMに即座にフィードバックを与えることで、タスク重複を防ぐ
+    const MAX_VALIDATION_RETRIES = 3;
+    let validationAttempts = 0;
+    let taskBreakdowns: ReturnType<typeof parseAgentOutputWithErrors>['tasks'];
+    let currentValidationErrors: string[] = [];
 
-    // エージェントを実行
-    const runResult =
-      deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(additionalPrompt, deps.appRepoPath, deps.model!, additionalRunId)
-        : await deps.runnerEffects.runCodexAgent(additionalPrompt, deps.appRepoPath, deps.model, additionalRunId);
+    // リトライループ: バリデーション成功 or 最大試行回数まで
+    do {
+      validationAttempts++;
 
-    if (isErr(runResult)) {
-      await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
-      await appendPlanningLog(`${runResult.err.message}\n`);
+      // プロンプト生成（初回 or リトライ時）
+      let promptToUse = additionalPrompt;
+      if (validationAttempts > 1) {
+        // リトライ時はバリデーションエラーをフィードバックとして追加
+        const feedbackSection = `\n\n⚠️ VALIDATION FEEDBACK (Attempt ${validationAttempts}/${MAX_VALIDATION_RETRIES}):\nYour previous task generation failed validation with the following errors:\n${currentValidationErrors.map((err, idx) => `${idx + 1}. ${err}`).join('\n')}\n\nPlease regenerate the tasks, carefully addressing these issues:\n- Ensure no duplicate tasks with completed tasks listed above\n- Ensure every task has a non-empty summary field\n\nOutput only the corrected JSON array, no additional text.`;
+        promptToUse = additionalPrompt + feedbackSection;
+      }
 
+      await appendPlanningLog(`\nPrompt (attempt ${validationAttempts}):\n${promptToUse}\n\n`);
+
+      // エージェントを実行
+      const runResult =
+        deps.agentType === 'claude'
+          ? await deps.runnerEffects.runClaudeAgent(promptToUse, deps.appRepoPath, deps.model!, additionalRunId)
+          : await deps.runnerEffects.runCodexAgent(promptToUse, deps.appRepoPath, deps.model, additionalRunId);
+
+      if (isErr(runResult)) {
+        await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
+        await appendPlanningLog(`${runResult.err.message}\n`);
+
+        const failedRun = {
+          ...planningRun,
+          status: RunStatus.FAILURE,
+          finishedAt: new Date().toISOString(),
+          errorMessage: `Additional task planner agent execution failed: ${runResult.err.message}`,
+        };
+        await deps.runnerEffects.saveRunMetadata(failedRun);
+
+        return createErr(
+          ioError('planAdditionalTasks.runAgent', `Agent execution failed: ${runResult.err.message}`),
+        );
+      }
+
+      // エージェント出力をパース
+      const finalResponse = runResult.val.finalResponse || '';
+      await appendPlanningLog(`\n=== Planner Agent Output (attempt ${validationAttempts}) ===\n`);
+      await appendPlanningLog(`${finalResponse}\n`);
+
+      const parseResult = parseAgentOutputWithErrors(finalResponse);
+
+      if (parseResult.errors.length > 0) {
+        await appendPlanningLog(`\n=== Parse Errors ===\n`);
+        parseResult.errors.forEach((err) => {
+          appendPlanningLog(`${err}\n`);
+        });
+      }
+
+      if (parseResult.tasks.length === 0) {
+        const errorMsg =
+          parseResult.errors.length > 0
+            ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
+            : 'No valid task breakdowns found in agent output';
+
+        await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+
+        // パース失敗の場合は即座に終了（リトライ不要）
+        const failedRun = {
+          ...planningRun,
+          status: RunStatus.FAILURE,
+          finishedAt: new Date().toISOString(),
+          errorMessage: errorMsg,
+        };
+        await deps.runnerEffects.saveRunMetadata(failedRun);
+
+        return createErr(ioError('planAdditionalTasks.parseOutput', errorMsg));
+      }
+
+      taskBreakdowns = parseResult.tasks;
+
+      // WHY: 防御的プログラミング - LLMの理解に依存せず、プログラムで重複を検出
+      /**
+       * 新規タスクが完了済みタスクと重複していないか検証
+       *
+       * @param newTasks 新規タスクリスト
+       * @param completedTasks 完了済みタスクリスト
+       * @returns 検証結果（エラーがあればエラーメッセージのリスト）
+       */
+      const validateNoDuplicates = (
+        newTasks: typeof taskBreakdowns,
+        completedTasks: Task[],
+      ): string[] => {
+        const validationErrors: string[] = [];
+
+        for (const task of newTasks) {
+          // 受け入れ基準の類似度チェック（完全一致または高類似度）
+          const duplicate = completedTasks.find((ct) => {
+            // 完全一致
+            if (ct.acceptance === task.acceptance) return true;
+
+            // 類似度チェック（Levenshtein距離による）
+            const similarity = calculateSimilarity(ct.acceptance, task.acceptance);
+            return similarity > 0.9; // 90%以上類似で重複と判定
+          });
+
+          if (duplicate) {
+            validationErrors.push(
+              `Task "${task.id}" (${task.summary ?? 'no summary'}) appears to duplicate completed task "${duplicate.id}" (${duplicate.summary ?? 'no summary'}). ` +
+                `Acceptance criteria match or are highly similar.`,
+            );
+          }
+
+          // summary必須チェック
+          if (!task.summary || task.summary.trim() === '') {
+            validationErrors.push(`Task "${task.id}" is missing required summary field`);
+          }
+        }
+
+        return validationErrors;
+      };
+
+      // バリデーション実行
+      currentValidationErrors = validateNoDuplicates(taskBreakdowns, completedTasks);
+
+      if (currentValidationErrors.length > 0) {
+        await appendPlanningLog(
+          `\n❌ Task validation failed (attempt ${validationAttempts}/${MAX_VALIDATION_RETRIES}):\n`,
+        );
+        for (const error of currentValidationErrors) {
+          await appendPlanningLog(`  - ${error}\n`);
+        }
+
+        if (validationAttempts < MAX_VALIDATION_RETRIES) {
+          await appendPlanningLog(`\n🔄 Retrying with feedback...\n`);
+          // 次のループで再試行
+        } else {
+          // 最大リトライ回数に到達
+          await appendPlanningLog(
+            `\n❌ Maximum retry attempts (${MAX_VALIDATION_RETRIES}) reached. Validation failed.\n`,
+          );
+        }
+      } else {
+        // バリデーション成功
+        await appendPlanningLog(`\n✅ Task validation passed (attempt ${validationAttempts})\n`);
+      }
+    } while (currentValidationErrors.length > 0 && validationAttempts < MAX_VALIDATION_RETRIES);
+
+    // 最大リトライ後もバリデーションエラーが残る場合
+    if (currentValidationErrors.length > 0) {
       const failedRun = {
         ...planningRun,
         status: RunStatus.FAILURE,
         finishedAt: new Date().toISOString(),
-        errorMessage: `Additional task planner agent execution failed: ${runResult.err.message}`,
+        errorMessage: `Task validation failed after ${MAX_VALIDATION_RETRIES} attempts: ${currentValidationErrors.join('; ')}`,
       };
       await deps.runnerEffects.saveRunMetadata(failedRun);
 
       return createErr(
-        ioError('planAdditionalTasks.runAgent', `Agent execution failed: ${runResult.err.message}`),
+        ioError(
+          'planAdditionalTasks.validation',
+          `Validation failed after ${MAX_VALIDATION_RETRIES} attempts: ${currentValidationErrors.join('; ')}`,
+        ),
       );
-    }
-
-    // エージェント出力をパース
-    const finalResponse = runResult.val.finalResponse || '';
-    await appendPlanningLog(`\n=== Planner Agent Output ===\n`);
-    await appendPlanningLog(`${finalResponse}\n`);
-
-    const parseResult = parseAgentOutputWithErrors(finalResponse);
-
-    if (parseResult.errors.length > 0) {
-      await appendPlanningLog(`\n=== Validation Errors ===\n`);
-      parseResult.errors.forEach((err) => {
-        appendPlanningLog(`${err}\n`);
-      });
-    }
-
-    if (parseResult.tasks.length === 0) {
-      const errorMsg =
-        parseResult.errors.length > 0
-          ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
-          : 'No valid task breakdowns found in agent output';
-
-      await appendPlanningLog(`\n❌ ${errorMsg}\n`);
-
-      const failedRun = {
-        ...planningRun,
-        status: RunStatus.FAILURE,
-        finishedAt: new Date().toISOString(),
-        errorMessage: errorMsg,
-      };
-      await deps.runnerEffects.saveRunMetadata(failedRun);
-
-      return createErr(ioError('planAdditionalTasks.parseOutput', errorMsg));
-    }
-
-    const taskBreakdowns = parseResult.tasks;
-
-    // WHY: 防御的プログラミング - LLMの理解に依存せず、プログラムで重複を検出
-    /**
-     * 新規タスクが完了済みタスクと重複していないか検証
-     *
-     * @param newTasks 新規タスクリスト
-     * @param completedTasks 完了済みタスクリスト
-     * @returns 検証結果（エラーがあればエラーメッセージのリスト）
-     */
-    const validateNoDuplicates = (
-      newTasks: typeof taskBreakdowns,
-      completedTasks: Task[],
-    ): string[] => {
-      const validationErrors: string[] = [];
-
-      for (const task of newTasks) {
-        // 受け入れ基準の類似度チェック（完全一致または高類似度）
-        const duplicate = completedTasks.find((ct) => {
-          // 完全一致
-          if (ct.acceptance === task.acceptance) return true;
-
-          // 類似度チェック（Levenshtein距離による）
-          const similarity = calculateSimilarity(ct.acceptance, task.acceptance);
-          return similarity > 0.9; // 90%以上類似で重複と判定
-        });
-
-        if (duplicate) {
-          validationErrors.push(
-            `Task "${task.id}" (${task.summary ?? 'no summary'}) appears to duplicate completed task "${duplicate.id}" (${duplicate.summary ?? 'no summary'}). ` +
-              `Acceptance criteria match or are highly similar.`,
-          );
-        }
-
-        // summary必須チェック
-        if (!task.summary || task.summary.trim() === '') {
-          validationErrors.push(`Task "${task.id}" is missing required summary field`);
-        }
-      }
-
-      return validationErrors;
-    };
-
-    // バリデーション実行
-    const validationErrors = validateNoDuplicates(taskBreakdowns, completedTasks);
-    if (validationErrors.length > 0) {
-      await appendPlanningLog(`\n❌ Task validation failed:\n`);
-      for (const error of validationErrors) {
-        await appendPlanningLog(`  - ${error}\n`);
-      }
-
-      const failedRun = {
-        ...planningRun,
-        status: RunStatus.FAILURE,
-        finishedAt: new Date().toISOString(),
-        errorMessage: `Task validation failed: ${validationErrors.join('; ')}`,
-      };
-      await deps.runnerEffects.saveRunMetadata(failedRun);
-
-      return createErr(ioError('planAdditionalTasks.validation', validationErrors.join('; ')));
     }
 
     // タスクをTaskStoreに保存
