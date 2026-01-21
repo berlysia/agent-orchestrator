@@ -23,12 +23,12 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
 
-    /* Emit */
+    /* Emit - VSCodeと型チェック用にnoEmit */
+    "noEmit": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
 
     /* Experimental TypeScript Features */
     "erasableSyntaxOnly": true,
@@ -39,6 +39,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", ".tmp", "tests"]
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist", ".tmp"]
 }
