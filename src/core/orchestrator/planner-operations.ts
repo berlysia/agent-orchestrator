@@ -1,11 +1,11 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
-import { createInitialTask } from '../../types/task.ts';
+import { createInitialTask, TaskState } from '../../types/task.ts';
 import { taskId, repoPath, branchName, runId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 import type { Result } from 'option-t/plain_result';
-import { createOk, createErr, isErr } from 'option-t/plain_result';
+import { createOk, createErr, isErr, isOk } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
@@ -857,8 +857,47 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join('\n\n');
 
+    // 既存タスクの情報を取得して、完了済み・未完了を分類し、IDマッピングを作成
+    const allTasksResult = await deps.taskStore.listTasks();
+    let nextTaskNumber = 1;
+    const completedTaskIds: string[] = [];
+    const incompleteTaskIds: string[] = [];
+    const existingTaskMapping = new Map<string, string>(); // task-7 → task-191aeb69-7
+
+    if (isOk(allTasksResult) && allTasksResult.val) {
+      const taskNumbers: number[] = [];
+      for (const task of allTasksResult.val) {
+        const match = String(task.id).match(/-(\d+)$/);
+        const taskNumber = match && match[1] ? parseInt(match[1], 10) : 0;
+        if (taskNumber > 0) {
+          taskNumbers.push(taskNumber);
+          const shortId = `task-${taskNumber}`;
+          existingTaskMapping.set(shortId, String(task.id)); // マッピングを記録
+          if (task.state === TaskState.DONE) {
+            completedTaskIds.push(shortId);
+          } else if (task.state === TaskState.BLOCKED || task.state === TaskState.NEEDS_CONTINUATION) {
+            incompleteTaskIds.push(shortId);
+          }
+        }
+      }
+      if (taskNumbers.length > 0) {
+        nextTaskNumber = Math.max(...taskNumbers) + 1;
+      }
+    }
+
     const additionalPrompt = `Previous conversation:
 ${conversationContext}
+
+IMPORTANT CONTEXT:
+- Your new tasks will be executed from the integration branch.
+- The integration branch includes all COMPLETED tasks: ${completedTaskIds.length > 0 ? completedTaskIds.join(', ') : 'none'}
+- DO NOT create dependencies on completed tasks - they are already in the integration branch.
+${incompleteTaskIds.length > 0 ? `- WARNING: The following tasks are INCOMPLETE and NOT in the integration branch: ${incompleteTaskIds.join(', ')}
+- If your new tasks depend on incomplete tasks, you MUST specify those dependencies explicitly.` : ''}
+- Start task numbering from task-${nextTaskNumber} to avoid conflicts.
+- Only create dependencies on:
+  1. Incomplete tasks (${incompleteTaskIds.length > 0 ? incompleteTaskIds.join(', ') : 'none'}) if needed
+  2. New tasks you generate (task-${nextTaskNumber} onwards)
 
 Based on the above context, the following aspects are still missing:
 ${missingAspects.map((aspect, i) => `${i + 1}. ${aspect}`).join('\n')}
@@ -869,7 +908,7 @@ Follow the same format and guidelines as before.
 Output format (JSON array):
 [
   {
-    "id": "task-X",
+    "id": "task-${nextTaskNumber}",
     "description": "Task description",
     "branch": "feature/branch-name",
     "scopePaths": ["path1/", "path2/"],
@@ -880,6 +919,11 @@ Output format (JSON array):
     "dependencies": []
   }
 ]
+
+CRITICAL: Dependencies should ONLY reference:
+${incompleteTaskIds.length > 0 ? `- Incomplete tasks: ${incompleteTaskIds.join(', ')} (if your new tasks depend on them)` : ''}
+- New tasks: task-${nextTaskNumber} or higher
+Do NOT depend on completed tasks (${completedTaskIds.length > 0 ? completedTaskIds.join(', ') : 'none'}) as they are already in the integration branch.
 
 Output only the JSON array, no additional text.`;
 
@@ -961,9 +1005,15 @@ Output only the JSON array, no additional text.`;
         acceptance: breakdown.acceptance,
         taskType: breakdown.type,
         context: breakdown.context,
-        dependencies: breakdown.dependencies.map((depId) =>
-          taskId(makeUniqueTaskId(depId, sessionShort)),
-        ),
+        dependencies: breakdown.dependencies.map((depId) => {
+          // 既存タスクへの依存の場合、実際のタスクIDを使用
+          const existingTaskId = existingTaskMapping.get(depId);
+          if (existingTaskId) {
+            return taskId(existingTaskId);
+          }
+          // 新規タスクへの依存の場合、現在のセッションIDで生成
+          return taskId(makeUniqueTaskId(depId, sessionShort));
+        }),
         plannerRunId: additionalRunId,
         plannerLogPath: additionalPlannerLogPath,
         plannerMetadataPath: additionalPlannerMetadataPath,
