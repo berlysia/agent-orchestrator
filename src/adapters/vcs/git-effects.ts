@@ -158,6 +158,13 @@ export interface GitEffects {
   stageAll(path: RepoPath | WorktreePath): Promise<Result<void, GitError>>;
 
   /**
+   * 指定したファイルをステージング
+   * @param path リポジトリまたは Worktree のパス
+   * @param files ステージングするファイルパスの配列
+   */
+  stageFiles(path: RepoPath | WorktreePath, files: string[]): Promise<Result<void, GitError>>;
+
+  /**
    * コミットを作成
    * @param path リポジトリまたは Worktree のパス
    * @param message コミットメッセージ

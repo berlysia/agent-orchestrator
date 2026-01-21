@@ -529,6 +529,16 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       }
 
       if (mergeResult.val.success) {
+        // 差分なしマージの検出
+        // WHY: ブランチが既に統合済みの場合、コミット作成をスキップして効率化
+        if (mergeResult.val.mergedFiles.length === 0) {
+          console.log(
+            `  ⚠️  No-op merge for task ${task.id}: branch already contains all changes`,
+          );
+          mergedTaskIds.push(task.id);
+          continue;
+        }
+
         // マージ成功: コミットを作成
         const commitMessage = `Merge task ${task.id}: ${task.acceptance}`;
         const commitResult = await gitEffects.commit(repo, commitMessage);

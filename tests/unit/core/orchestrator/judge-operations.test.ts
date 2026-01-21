@@ -32,6 +32,7 @@ const createMockGitEffects = (): GitEffects => ({
   listWorktrees: mock.fn(async () => createOk([])),
   getWorktreePath: mock.fn(async () => createOk(worktreePath('/tmp/worktree'))),
   stageAll: mock.fn(async () => createOk(undefined)),
+  stageFiles: mock.fn(async () => createOk(undefined)),
   commit: mock.fn(async () => createOk(undefined)),
   push: mock.fn(async () => createOk(undefined)),
   pull: mock.fn(async () => createOk(undefined)),

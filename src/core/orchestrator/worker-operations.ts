@@ -207,10 +207,26 @@ export const shouldSkipAutoResolution = (
 
 /**
  * コミットメッセージを生成（純粋関数）
+ *
+ * WHY: taskTypeに応じたConventional Commitタイプを使用し、
+ *      summaryまたはacceptanceの先頭50文字を使用して簡潔なメッセージを生成
  */
 export const generateCommitMessage = (task: Task): string => {
-  return `feat: ${task.acceptance}
+  const typeMap: Record<Task['taskType'], string> = {
+    implementation: 'feat',
+    documentation: 'docs',
+    investigation: 'chore',
+    integration: 'refactor',
+  };
+  const commitType = typeMap[task.taskType];
 
+  const title = task.summary
+    ? task.summary
+    : task.acceptance.substring(0, 50) + (task.acceptance.length > 50 ? '...' : '');
+
+  return `${commitType}: ${title}
+
+Acceptance: ${task.acceptance}
 Task ID: ${task.id}
 Branch: ${task.branch}
 
@@ -686,6 +702,8 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
    *
    * WHY: config.commit.autoSignatureで自動コミット時の署名を制御。
    *      Worker実行時の各タスクコミットはデフォルトで署名なし（開発効率重視）。
+   * WHY: scopePathsが指定されている場合はそれらのファイルのみをステージングし、
+   *      verify-*.tsなどの検証用ファイルがコミットされることを防ぐ。
    *
    * @param task タスク
    * @param worktreePath worktreeのパス
@@ -695,10 +713,27 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     task: Task,
     worktreePath: WorktreePath,
   ): Promise<Result<void, OrchestratorError>> => {
-    // 変更をステージング
-    const stageResult = await deps.gitEffects.stageAll(worktreePath);
+    // scopePathsが指定されている場合はそれをステージング、なければ全てステージング
+    const stageResult =
+      task.scopePaths.length > 0
+        ? await deps.gitEffects.stageFiles(worktreePath, task.scopePaths)
+        : await deps.gitEffects.stageAll(worktreePath);
+
     if (isErr(stageResult)) {
       return createErr(stageResult.err);
+    }
+
+    // 変更がステージングされているか確認
+    const statusResult = await deps.gitEffects.getStatus(worktreePath);
+    if (isErr(statusResult)) {
+      return createErr(statusResult.err);
+    }
+
+    if (statusResult.val.staged.length === 0) {
+      console.warn(
+        `  ⚠️  No changes staged for commit (scopePaths: ${task.scopePaths.join(', ') || 'none'})`,
+      );
+      return createOk(undefined);
     }
 
     // コミットメッセージを生成

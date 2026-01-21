@@ -102,6 +102,17 @@ export const createSimpleGitEffects = (): Omit<
     return mapErrForResult(result, toGitError('stageAll'));
   };
 
+  const stageFiles: GitEffects['stageFiles'] = async (path, files) => {
+    if (files.length === 0) {
+      return createOk(undefined);
+    }
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      await git.add(files);
+    });
+    return mapErrForResult(result, toGitError('stageFiles'));
+  };
+
   const commit: GitEffects['commit'] = async (path, message, options) => {
     const result = await tryCatchIntoResultAsync(async () => {
       const git = simpleGit(path);
@@ -327,6 +338,7 @@ export const createSimpleGitEffects = (): Omit<
     getCurrentBranch,
     listBranches,
     stageAll,
+    stageFiles,
     commit,
     rebase,
     push,
