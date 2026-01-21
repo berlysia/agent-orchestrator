@@ -8,7 +8,7 @@ import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
-import { TaskState } from '../../types/task.ts';
+import { TaskState, BlockReason } from '../../types/task.ts';
 import type { BaseBranchResolution } from './base-branch-resolver.ts';
 import { truncateSummary } from './utils/log-utils.ts';
 import { TaskExecutionStatus } from './task-execution-status.ts';
@@ -223,7 +223,10 @@ export async function executeLevelParallel(
             console.log(
               `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
             );
-            await judgeOps.markTaskAsBlocked(tid);
+            await judgeOps.markTaskAsBlocked(tid, {
+              reason: BlockReason.MAX_RETRIES,
+              message: `Exceeded max retry iterations: ${continuationResult.err.message}`,
+            });
             return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
           }
 

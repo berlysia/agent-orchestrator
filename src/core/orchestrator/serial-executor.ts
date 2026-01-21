@@ -19,6 +19,7 @@ import type { createWorkerOperations } from './worker-operations.ts';
 import { truncateSummary } from './utils/log-utils.ts';
 import type { PlannerDeps } from './planner-operations.ts';
 import { replanFailedTask, markTaskAsReplanned } from './replanning-operations.ts';
+import { BlockReason } from '../../types/task.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -234,7 +235,10 @@ export async function executeSerialChain(
             console.log(
               `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
             );
-            await judgeOps.markTaskAsBlocked(tid);
+            await judgeOps.markTaskAsBlocked(tid, {
+              reason: BlockReason.MAX_RETRIES,
+              message: `Exceeded max retry iterations: ${continuationResult.err.message}`,
+            });
             failed.push(tid);
             break; // チェーン実行を中断
           }

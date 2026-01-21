@@ -29,6 +29,31 @@ export const TaskState = {
 export type TaskState = (typeof TaskState)[keyof typeof TaskState];
 
 /**
+ * BLOCKED状態の理由
+ *
+ * WHY: BLOCKED理由を細分化することで、統合ブランチからの再試行可否を判定できる
+ *
+ * - MAX_RETRIES: 元ブランチでの継続実行の回数上限（統合ブランチから再試行可能）
+ * - MAX_RETRIES_INTEGRATION: 統合ブランチからも失敗（手動介入が必要）
+ * - CONFLICT: マージコンフリクト（手動介入が必要）
+ * - SYSTEM_ERROR_TRANSIENT: 一時的システムエラー（ネットワーク等、再試行可能）
+ * - SYSTEM_ERROR_PERMANENT: 永続的システムエラー（ディスク満杯等、手動介入が必要）
+ * - MANUAL: ユーザーが手動でブロック（手動介入が必要）
+ * - UNKNOWN: マイグレーション用（既存データ、手動介入が必要）
+ */
+export const BlockReason = {
+  MAX_RETRIES: 'MAX_RETRIES',
+  MAX_RETRIES_INTEGRATION: 'MAX_RETRIES_INTEGRATION',
+  CONFLICT: 'CONFLICT',
+  SYSTEM_ERROR_TRANSIENT: 'SYSTEM_ERROR_TRANSIENT',
+  SYSTEM_ERROR_PERMANENT: 'SYSTEM_ERROR_PERMANENT',
+  MANUAL: 'MANUAL',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export type BlockReason = (typeof BlockReason)[keyof typeof BlockReason];
+
+/**
  * Taskのスキーマ定義（Zod）
  *
  * CAS（Compare-And-Swap）並行制御のため、versionフィールドが必須
@@ -149,6 +174,15 @@ export const TaskSchema = z.object({
     })
     .nullable()
     .optional(),
+
+  /** BLOCKED理由（Phase 1: 未完了タスク再実行機能） */
+  blockReason: z.nativeEnum(BlockReason).optional().nullable(),
+
+  /** BLOCKED理由の詳細メッセージ（Phase 1: 未完了タスク再実行機能） */
+  blockMessage: z.string().optional().nullable(),
+
+  /** 統合ブランチからの再試行済みフラグ（Phase 1: 未完了タスク再実行機能） */
+  integrationRetried: z.boolean().default(false),
 });
 
 /**
@@ -194,5 +228,6 @@ export function createInitialTask(params: {
     plannerLogPath: params.plannerLogPath ?? null,
     plannerMetadataPath: params.plannerMetadataPath ?? null,
     latestRunId: null,
+    integrationRetried: false,
   };
 }

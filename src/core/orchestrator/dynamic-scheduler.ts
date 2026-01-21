@@ -10,7 +10,7 @@ import type { TaskStore } from '../task-store/interface.ts';
 import { isErr } from 'option-t/plain_result';
 import { computeBlockedTasks } from './parallel-executor.ts';
 import type { createBaseBranchResolver } from './base-branch-resolver.ts';
-import { TaskState } from '../../types/task.ts';
+import { TaskState, BlockReason } from '../../types/task.ts';
 import { truncateSummary } from './utils/log-utils.ts';
 import { TaskExecutionStatus, type TaskExecutionResult } from './task-execution-status.ts';
 import type { PlannerDeps } from './planner-operations.ts';
@@ -239,7 +239,10 @@ async function executeTaskAsync(
         console.log(
           `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
         );
-        await judgeOps.markTaskAsBlocked(tid);
+        await judgeOps.markTaskAsBlocked(tid, {
+          reason: BlockReason.MAX_RETRIES,
+          message: `Exceeded max retry iterations: ${continuationResult.err.message}`,
+        });
         return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
       }
 

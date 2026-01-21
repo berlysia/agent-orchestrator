@@ -1,7 +1,7 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { Task } from '../../types/task.ts';
-import { TaskState } from '../../types/task.ts';
+import { TaskState, BlockReason } from '../../types/task.ts';
 import type { TaskId } from '../../types/branded.ts';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { validationError } from '../../types/errors.ts';
@@ -379,10 +379,16 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
   /**
    * タスクをブロック状態に更新
    *
+   * WHY: Phase 1で追加 - BLOCKED理由を記録することで、統合ブランチからの再試行可否を判定できる
+   *
    * @param tid タスクID
+   * @param options オプション（reason: BLOCKED理由、message: 詳細メッセージ）
    * @returns 更新後のタスク（Result型）
    */
-  const markTaskAsBlocked = async (tid: TaskId): Promise<Result<Task, TaskStoreError>> => {
+  const markTaskAsBlocked = async (
+    tid: TaskId,
+    options?: { reason?: typeof BlockReason[keyof typeof BlockReason]; message?: string },
+  ): Promise<Result<Task, TaskStoreError>> => {
     const taskResult = await deps.taskStore.readTask(tid);
     if (!taskResult.ok) {
       return taskResult;
@@ -393,6 +399,8 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
     return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({
       ...currentTask,
       state: TaskState.BLOCKED,
+      blockReason: options?.reason ?? null,
+      blockMessage: options?.message ?? null,
       owner: null,
       updatedAt: new Date().toISOString(),
     }));

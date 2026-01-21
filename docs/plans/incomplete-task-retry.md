@@ -637,6 +637,32 @@ export const TaskSchema = z.object({
    - 新しいworktreeを作成するため、Git操作が増加
    - 理由: rebaseよりも安全で予測可能
 
+## 実装状況
+
+### Phase 1: BLOCKED理由の記録 ✅ **完了** (2026-01-21)
+
+**実装内容**:
+- `BlockReason`列挙型を追加（7種類の理由を定義）
+- Task型に`blockReason`、`blockMessage`、`integrationRetried`フィールドを追加
+- `markTaskAsBlocked`関数のシグネチャを変更（オプショナルなreasonとmessageパラメータ）
+- 最大リトライ回数超過時に`BlockReason.MAX_RETRIES`を記録
+
+**変更ファイル**:
+- `src/types/task.ts`: BlockReason型定義、TaskSchema更新、createInitialTask更新
+- `src/core/orchestrator/judge-operations.ts`: markTaskAsBlocked更新
+- `src/core/orchestrator/scheduler-operations.ts`: blockTask更新
+- `src/core/orchestrator/dynamic-scheduler.ts`: 最大リトライ超過時の理由記録
+- `src/core/orchestrator/serial-executor.ts`: 最大リトライ超過時の理由記録
+- `src/core/orchestrator/parallel-executor.ts`: 最大リトライ超過時の理由記録
+
+**テスト結果**: 138個のテスト全てパス
+
+**既存動作への影響**: なし（optionsパラメータはオプショナル、既存呼び出しはそのまま動作）
+
+### Phase 2: MAX_RETRIESタスクの統合ブランチからの再実行 🔜 **未実装**
+
+### Phase 3: 追加タスクからの依存サポート 🔜 **未実装**
+
 ## 関連ドキュメント
 
 - [Architecture Overview](../architecture.md)
