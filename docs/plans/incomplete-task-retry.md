@@ -687,6 +687,39 @@ export const TaskSchema = z.object({
 
 **既存動作への影響**: なし（Plannerの応答品質が向上）
 
+### Phase 4: エッジケース処理 ✅ **完了** (2026-01-21)
+
+**実装内容**:
+- **再実行タスク数制限** (5.2): 最大5件の制限を追加、優先順位でソート（NEEDS_CONTINUATION優先）
+- **依存タスク管理** (5.1):
+  - `findDependentTasks`ヘルパー関数を`scheduler-operations.ts`に追加
+  - `blockDependentTasksRecursively`関数を`dynamic-scheduler.ts`に追加
+  - 統合ブランチからの再試行でも失敗した場合、`BlockReason.MAX_RETRIES_INTEGRATION`を設定
+  - 依存タスクを再帰的にBLOCKEDにマーク
+- **Worktreeクリーンアップ強化** (3.3):
+  - `cleanupWorktree`関数を拡張して、統合ブランチ用のworktree（`${task.id}-integration`）も削除
+  - タスク完了後に自動クリーンアップ
+
+**変更ファイル**:
+- `src/core/orchestrator/planner-operations.ts`:
+  - 再実行タスク数制限（MAX_RETRY_TASKS = 5）
+  - 優先順位ソート処理
+  - 制限適用時のログメッセージ
+- `src/core/orchestrator/scheduler-operations.ts`:
+  - `findDependentTasks`関数追加
+- `src/core/orchestrator/dynamic-scheduler.ts`:
+  - `blockDependentTasksRecursively`関数追加
+  - 継続失敗時と判定失敗時の`integrationRetried`チェック
+  - `BlockReason.MAX_RETRIES_INTEGRATION`設定
+  - 依存タスクの再帰的ブロック処理
+- `src/core/orchestrator/worker-operations.ts`:
+  - `cleanupWorktree`関数強化
+  - 統合ブランチ用worktreeの削除処理
+
+**テスト結果**: 138個のテスト全てパス
+
+**既存動作への影響**: なし（エッジケース処理の追加のみ）
+
 ## 関連ドキュメント
 
 - [Architecture Overview](../architecture.md)

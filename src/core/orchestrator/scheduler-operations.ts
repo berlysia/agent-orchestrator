@@ -191,12 +191,34 @@ export const createSchedulerOperations = (deps: SchedulerDeps) => {
     }));
   };
 
+  /**
+   * 指定されたタスクに依存している全タスクを取得
+   *
+   * WHY: 5.1 エッジケース - 依存タスクが再度失敗した場合の処理
+   *      失敗したタスクに依存する全てのタスクを再帰的にBLOCKEDにマークするため
+   *
+   * @param taskId 検索対象のタスクID
+   * @returns 依存タスク配列（Result型）
+   */
+  const findDependentTasks = async (taskId: TaskId): Promise<Task[]> => {
+    // 全タスクを読み込み、dependenciesに指定されたtaskIdを含むものを抽出
+    const allTasksResult = await deps.taskStore.listTasks();
+    if (!allTasksResult.ok) {
+      return [];
+    }
+
+    return allTasksResult.val.filter(task =>
+      task.dependencies.some(dep => String(dep) === String(taskId))
+    );
+  };
+
   return {
     getReadyTasks,
     claimTask,
     completeTask,
     blockTask,
     resetTaskToReady,
+    findDependentTasks,
   };
 };
 

@@ -527,11 +527,34 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   /**
    * Worktreeをクリーンアップ（削除）
    *
+   * WHY: 3.3 エッジケース - タスク完了後のworktree削除（通常と統合ブランチ用）
+   *
    * @param taskId タスクID
    * @returns Result型
    */
   const cleanupWorktree = async (taskId: TaskId): Promise<Result<void, OrchestratorError>> => {
+    // タスク情報を取得して integrationRetried フラグを確認
+    const taskResult = await deps.taskStore.readTask(taskId);
+
+    // 通常のworktreeを削除
     const removeResult = await deps.gitEffects.removeWorktree(deps.appRepoPath, taskId);
+
+    // 統合ブランチ用のworktree（存在する場合）も削除
+    if (taskResult.ok && taskResult.val.integrationRetried) {
+      const integrationWorktreeName = `${String(taskId)}-integration`;
+      const removeIntegrationResult = await deps.gitEffects.removeWorktree(
+        deps.appRepoPath,
+        integrationWorktreeName,
+      );
+
+      if (isErr(removeIntegrationResult)) {
+        // 統合worktreeの削除失敗は警告のみ（通常worktreeの削除結果を優先）
+        console.warn(
+          `Failed to remove integration worktree ${integrationWorktreeName}: ${removeIntegrationResult.err.message}`,
+        );
+      }
+    }
+
     return removeResult;
   };
 

@@ -903,7 +903,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const allTasks = allTasksResult.val;
 
     // 再実行対象タスクの抽出
-    const retryableTasks = allTasks.filter(task => {
+    // WHY: 5.2 エッジケース - 再実行対象タスクが多数ある場合の制限
+    const MAX_RETRY_TASKS = 5;
+
+    const candidateRetryTasks = allTasks.filter(task => {
       // NEEDS_CONTINUATION は常に再実行対象
       if (task.state === TaskState.NEEDS_CONTINUATION) {
         return true;
@@ -930,7 +933,28 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       return false;
     });
 
-    await appendPlanningLog(`Found ${retryableTasks.length} retryable tasks\n`);
+    // 優先順位でソート：NEEDS_CONTINUATION > それ以外（作成順）
+    const sortedRetryTasks = candidateRetryTasks.sort((a, b) => {
+      // NEEDS_CONTINUATION を優先
+      if (a.state === TaskState.NEEDS_CONTINUATION && b.state !== TaskState.NEEDS_CONTINUATION) {
+        return -1;
+      }
+      if (b.state === TaskState.NEEDS_CONTINUATION && a.state !== TaskState.NEEDS_CONTINUATION) {
+        return 1;
+      }
+
+      // それ以外は作成順（IDの辞書順）
+      return String(a.id).localeCompare(String(b.id));
+    });
+
+    // 上位N件のみ再実行
+    const retryableTasks = sortedRetryTasks.slice(0, MAX_RETRY_TASKS);
+
+    await appendPlanningLog(`Found ${candidateRetryTasks.length} candidate retryable tasks\n`);
+    if (candidateRetryTasks.length > MAX_RETRY_TASKS) {
+      await appendPlanningLog(`  ⚠️  Limited to top ${MAX_RETRY_TASKS} tasks (sorted by priority)\n`);
+    }
+    await appendPlanningLog(`Processing ${retryableTasks.length} retryable tasks\n`);
     if (retryableTasks.length > 0) {
       for (const task of retryableTasks) {
         await appendPlanningLog(`  - ${task.id} (${task.state}${task.blockReason ? ` / ${task.blockReason}` : ''})\n`);

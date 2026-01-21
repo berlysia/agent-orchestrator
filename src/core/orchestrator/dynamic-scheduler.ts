@@ -239,10 +239,23 @@ async function executeTaskAsync(
         console.log(
           `  ❌ [${rawTaskId}] Exceeded max iterations, marking as blocked: ${continuationResult.err.message}`,
         );
+
+        // WHY: 5.1 エッジケース - 統合ブランチからの再試行でも失敗した場合
+        const blockReason = claimedTask.integrationRetried
+          ? BlockReason.MAX_RETRIES_INTEGRATION
+          : BlockReason.MAX_RETRIES;
+
         await judgeOps.markTaskAsBlocked(tid, {
-          reason: BlockReason.MAX_RETRIES,
+          reason: blockReason,
           message: `Exceeded max retry iterations: ${continuationResult.err.message}`,
         });
+
+        // 統合ブランチからも失敗した場合、依存タスクを再帰的にブロック
+        if (claimedTask.integrationRetried) {
+          console.log(`  ⚠️  [${rawTaskId}] Integration retry also failed, blocking dependent tasks...`);
+          await blockDependentTasksRecursively(tid, schedulerOps);
+        }
+
         return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
       }
 
@@ -305,7 +318,23 @@ async function executeTaskAsync(
     } else {
       // 完全失敗（shouldContinue=false && shouldReplan=false）
       console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
-      await judgeOps.markTaskAsBlocked(tid);
+
+      // WHY: 5.1 エッジケース - 統合ブランチからの再試行でも失敗した場合
+      const blockReason = claimedTask.integrationRetried
+        ? BlockReason.MAX_RETRIES_INTEGRATION
+        : undefined;
+
+      await judgeOps.markTaskAsBlocked(tid, {
+        reason: blockReason,
+        message: judgement.reason,
+      });
+
+      // 統合ブランチからも失敗した場合、依存タスクを再帰的にブロック
+      if (claimedTask.integrationRetried) {
+        console.log(`  ⚠️  [${rawTaskId}] Integration retry also failed, blocking dependent tasks...`);
+        await blockDependentTasksRecursively(tid, schedulerOps);
+      }
+
       return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
     }
   } catch (error) {
@@ -525,4 +554,50 @@ export async function executeDynamically(
     blocked: Array.from(dynamicState.blockedTasks),
     updatedSchedulerState: schedulerState,
   };
+}
+
+/**
+ * 依存タスクを再帰的にBLOCKEDにマーク
+ *
+ * WHY: 5.1 エッジケース - 依存タスクが再度失敗した場合の処理
+ *      統合ブランチからの再試行でも失敗した場合、依存する全タスクをBLOCKEDにする
+ *
+ * @param taskId 失敗したタスクのID
+ * @param schedulerOps スケジューラ操作
+ * @param visited 訪問済みタスクID（循環参照防止用）
+ */
+async function blockDependentTasksRecursively(
+  taskId: TaskId,
+  schedulerOps: SchedulerOperations,
+  visited: Set<TaskId> = new Set()
+): Promise<void> {
+  // 循環参照防止
+  if (visited.has(taskId)) {
+    return;
+  }
+  visited.add(taskId);
+
+  // 直接依存しているタスクを取得
+  const dependentTasks = await schedulerOps.findDependentTasks(taskId);
+
+  for (const depTask of dependentTasks) {
+    // すでにDONEまたはBLOCKED状態の場合はスキップ
+    if (depTask.state === TaskState.DONE || depTask.state === TaskState.BLOCKED) {
+      continue;
+    }
+
+    // BLOCKEDにマーク
+    const blockResult = await schedulerOps.blockTask(depTask.id, {
+      reason: BlockReason.MANUAL,
+      message: `Dependency ${String(taskId)} failed permanently`,
+    });
+
+    if (blockResult.ok) {
+      console.log(
+        `  ⚠️  Blocked dependent task ${String(depTask.id)} due to dependency failure: ${String(taskId)}`
+      );
+      // 再帰的に依存タスクをBLOCKED
+      await blockDependentTasksRecursively(depTask.id, schedulerOps, visited);
+    }
+  }
 }
