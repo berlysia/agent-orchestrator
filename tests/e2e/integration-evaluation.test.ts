@@ -308,6 +308,11 @@ test('E2E: Integration Evaluation', async (t) => {
         orchestrateMainLoop: 1,
         serialChainTaskRetries: 1,
       },
+      replanning: {
+        enabled: true,
+        maxIterations: 3,
+        timeoutSeconds: 300,
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -375,6 +380,11 @@ test('E2E: Integration Evaluation', async (t) => {
         orchestrateMainLoop: 1,
         serialChainTaskRetries: 1,
       },
+      replanning: {
+        enabled: true,
+        maxIterations: 3,
+        timeoutSeconds: 300,
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -430,6 +440,11 @@ test('E2E: Integration Evaluation', async (t) => {
         orchestrateMainLoop: 1,
         serialChainTaskRetries: 1,
       },
+      replanning: {
+        enabled: true,
+        maxIterations: 3,
+        timeoutSeconds: 300,
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -484,6 +499,11 @@ test('E2E: Integration Evaluation', async (t) => {
         judgeTaskRetries: 1,
         orchestrateMainLoop: 1,
         serialChainTaskRetries: 1,
+      },
+      replanning: {
+        enabled: true,
+        maxIterations: 3,
+        timeoutSeconds: 300,
       },
     };
 

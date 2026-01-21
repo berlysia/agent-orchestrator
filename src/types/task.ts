@@ -14,6 +14,7 @@ export type { CheckId, WorkerId } from './branded.ts';
  * - DONE: 完了
  * - BLOCKED: エラーや依存関係により実行不可
  * - CANCELLED: ユーザーによる中断
+ * - REPLACED_BY_REPLAN: 再計画により新タスクに置き換えられた
  */
 export const TaskState = {
   READY: 'READY',
@@ -22,6 +23,7 @@ export const TaskState = {
   DONE: 'DONE',
   BLOCKED: 'BLOCKED',
   CANCELLED: 'CANCELLED',
+  REPLACED_BY_REPLAN: 'REPLACED_BY_REPLAN',
 } as const;
 
 export type TaskState = (typeof TaskState)[keyof typeof TaskState];
@@ -43,6 +45,7 @@ export const TaskSchema = z.object({
     TaskState.DONE,
     TaskState.BLOCKED,
     TaskState.CANCELLED,
+    TaskState.REPLACED_BY_REPLAN,
   ]),
 
   /** 楽観的ロック用バージョン番号（CAS制御） */
@@ -126,6 +129,23 @@ export const TaskSchema = z.object({
       conflictTaskId: z.string().transform(taskId),
       /** 一時マージブランチ名 */
       tempBranch: z.string().transform(branchName),
+    })
+    .nullable()
+    .optional(),
+
+  /** Planner再評価情報（REPLACED_BY_REPLAN状態時の追跡用） */
+  replanningInfo: z
+    .object({
+      /** 現在の再計画イテレーション回数 */
+      iteration: z.number().int().nonnegative(),
+      /** 最大再計画イテレーション回数 */
+      maxIterations: z.number().int().nonnegative(),
+      /** 最初のタスクID（再計画の連鎖を追跡） */
+      originalTaskId: z.string().transform(taskId).optional(),
+      /** 置き換え先の新タスクIDリスト */
+      replacedBy: z.array(z.string().transform(taskId)).optional(),
+      /** 再計画の理由 */
+      replanReason: z.string().optional(),
     })
     .nullable()
     .optional(),

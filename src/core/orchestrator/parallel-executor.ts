@@ -11,19 +11,9 @@ import type { TaskStore } from '../task-store/interface.ts';
 import { TaskState } from '../../types/task.ts';
 import type { BaseBranchResolution } from './base-branch-resolver.ts';
 import { truncateSummary } from './utils/log-utils.ts';
+import { TaskExecutionStatus } from './task-execution-status.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
-
-/**
- * タスク実行ステータス
- *
- * WHY: タスク実行結果の種類を明示的に定義し、一貫性を保つため
- */
-const TaskExecutionStatus = {
-  COMPLETED: 'completed',
-  FAILED: 'failed',
-  CONTINUE: 'continue',
-} as const;
 
 /**
  * レベル実行結果

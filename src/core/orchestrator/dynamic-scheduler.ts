@@ -12,31 +12,10 @@ import { computeBlockedTasks } from './parallel-executor.ts';
 import type { createBaseBranchResolver } from './base-branch-resolver.ts';
 import { TaskState } from '../../types/task.ts';
 import { truncateSummary } from './utils/log-utils.ts';
+import { TaskExecutionStatus, type TaskExecutionResult } from './task-execution-status.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
-
-/**
- * タスク実行ステータス
- *
- * WHY: タスク実行結果の種類を明示的に定義
- */
-const TaskExecutionStatus = {
-  COMPLETED: 'completed',
-  FAILED: 'failed',
-  CONTINUE: 'continue',
-} as const;
-
-type TaskExecutionStatusType = (typeof TaskExecutionStatus)[keyof typeof TaskExecutionStatus];
-
-/**
- * タスク実行結果
- */
-interface TaskExecutionResult {
-  taskId: TaskId;
-  status: TaskExecutionStatusType;
-  workerId: string;
-}
 
 /**
  * 動的スケジューラの状態

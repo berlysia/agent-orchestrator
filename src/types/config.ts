@@ -131,6 +131,27 @@ const IterationsConfigSchema = z
   });
 
 /**
+ * Planner再評価設定のスキーマ
+ *
+ * WHY: Judge判定で shouldReplan=true となったタスクを自動的に再分解して、
+ *      手動介入なしでタスク完了率を向上させる
+ */
+const ReplanningConfigSchema = z
+  .object({
+    /** Planner再評価機能を有効化 */
+    enabled: z.boolean().default(true),
+    /** タスクあたりの最大再評価回数 */
+    maxIterations: z.number().int().min(1).max(10).default(3),
+    /** Planner再評価のタイムアウト（秒） */
+    timeoutSeconds: z.number().int().min(60).max(600).default(300),
+  })
+  .default({
+    enabled: true,
+    maxIterations: 3,
+    timeoutSeconds: 300,
+  });
+
+/**
  * プロジェクト設定のスキーマ定義（Zod）
  *
  * `.agent/config.json` に保存される設定
@@ -172,6 +193,9 @@ export const ConfigSchema = z.object({
 
   /** 反復実行回数設定 */
   iterations: IterationsConfigSchema,
+
+  /** Planner再評価設定 */
+  replanning: ReplanningConfigSchema,
 });
 
 /**
@@ -224,6 +248,11 @@ export function createDefaultConfig(params: {
       judgeTaskRetries: 3,
       orchestrateMainLoop: 3,
       serialChainTaskRetries: 3,
+    },
+    replanning: {
+      enabled: true,
+      maxIterations: 3,
+      timeoutSeconds: 300,
     },
   };
 }
