@@ -26,7 +26,7 @@ const TaskExecutionStatus = {
   CONTINUE: 'continue',
 } as const;
 
-type TaskExecutionStatusType = typeof TaskExecutionStatus[keyof typeof TaskExecutionStatus];
+type TaskExecutionStatusType = (typeof TaskExecutionStatus)[keyof typeof TaskExecutionStatus];
 
 /**
  * タスク実行結果
@@ -209,9 +209,7 @@ async function executeTaskAsync(
 
       // その他のエラー
       const errorMsg =
-        workerResult.err &&
-        typeof workerResult.err === 'object' &&
-        'message' in workerResult.err
+        workerResult.err && typeof workerResult.err === 'object' && 'message' in workerResult.err
           ? String((workerResult.err as { message: unknown }).message)
           : String(workerResult.err);
       console.log(`  ❌ [${rawTaskId}] Task execution failed: ${errorMsg}`);
@@ -279,9 +277,7 @@ async function executeTaskAsync(
     const cleanupResult = await workerOps.cleanupWorktree(tid);
     if (isErr(cleanupResult)) {
       const errorMsg =
-        cleanupResult.err &&
-        typeof cleanupResult.err === 'object' &&
-        'message' in cleanupResult.err
+        cleanupResult.err && typeof cleanupResult.err === 'object' && 'message' in cleanupResult.err
           ? String((cleanupResult.err as { message: unknown }).message)
           : String(cleanupResult.err);
       console.warn(`  ⚠️  [${rawTaskId}] Failed to cleanup worktree: ${errorMsg}`);
@@ -369,7 +365,9 @@ export async function executeDynamically(
     if (executableTasks.length > 0 && availableSlots > 0) {
       const tasksToExecute = executableTasks.slice(0, availableSlots);
 
-      console.log(`\n🔨 Starting ${tasksToExecute.length} tasks (${availableSlots} slots available)`);
+      console.log(
+        `\n🔨 Starting ${tasksToExecute.length} tasks (${availableSlots} slots available)`,
+      );
       for (const tid of tasksToExecute) {
         console.log(`  - ${tid}`);
       }
@@ -398,8 +396,7 @@ export async function executeDynamically(
       // Promise.raceでどれか1つ完了するまで待つ
       // どのタスクが完了したか識別するため、taskIdを一緒に返す
       const promiseEntries = Array.from(dynamicState.runningPromises.entries()).map(
-        ([tid, promise]) =>
-          promise.then((result) => ({ taskId: tid, result })),
+        ([tid, promise]) => promise.then((result) => ({ taskId: tid, result })),
       );
 
       const { taskId, result } = await Promise.race(promiseEntries);

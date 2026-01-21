@@ -291,7 +291,13 @@ describe('Integration Operations', () => {
         switchBranch: mock.fn(async () => createOk(undefined)),
         rebase: mock.fn(async () => createOk(undefined)),
         merge: mock.fn(async () =>
-          createOk({ success: true, mergedFiles: [], hasConflicts: false, conflicts: [], status: 'success' as const }),
+          createOk({
+            success: true,
+            mergedFiles: [],
+            hasConflicts: false,
+            conflicts: [],
+            status: 'success' as const,
+          }),
         ),
       };
 

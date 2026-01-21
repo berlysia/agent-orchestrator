@@ -70,10 +70,7 @@ describe('BaseBranchResolver', () => {
     it('should delete temporary merge branch on error', () => {
       // WHY: エラー時に一時ブランチが削除されることを確認
       // 実際のGitリポジトリが必要なため、E2Eテストで検証
-      assert.ok(
-        true,
-        'Temporary branch cleanup requires E2E testing with actual Git repository',
-      );
+      assert.ok(true, 'Temporary branch cleanup requires E2E testing with actual Git repository');
     });
 
     it('should switch away from temporary branch before deletion', () => {

@@ -413,9 +413,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       }
 
       if (!mergeResult.val.success) {
-        return createErr(
-          ioError('finalizeIntegration', new Error('Fast-forward merge failed')),
-        );
+        return createErr(ioError('finalizeIntegration', new Error('Fast-forward merge failed')));
       }
 
       return createOk({

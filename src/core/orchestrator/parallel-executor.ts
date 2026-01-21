@@ -141,7 +141,9 @@ export async function executeLevelParallel(
             if (depTaskResult.ok) {
               resolution = { type: 'single', baseBranch: depTaskResult.val.branch };
             } else {
-              console.log(`  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`);
+              console.log(
+                `  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`,
+              );
               await schedulerOps.blockTask(tid);
               return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
             }
@@ -159,7 +161,9 @@ export async function executeLevelParallel(
             if (depTaskResult.ok) {
               dependencyBranches.push(depTaskResult.val.branch);
             } else {
-              console.log(`  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`);
+              console.log(
+                `  ❌ [${rawTaskId}] Failed to read dependency task: ${depTaskResult.err.message}`,
+              );
               await schedulerOps.blockTask(tid);
               return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
             }

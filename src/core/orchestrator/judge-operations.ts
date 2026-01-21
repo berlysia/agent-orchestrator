@@ -201,10 +201,7 @@ const parseJudgementResult = (output: string): z.infer<typeof AgentJudgementSche
       return result.data;
     }
 
-    console.error(
-      '❌ Agent judgement validation failed:',
-      JSON.stringify(result.error.format()),
-    );
+    console.error('❌ Agent judgement validation failed:', JSON.stringify(result.error.format()));
     return undefined;
   } catch (error) {
     console.error(

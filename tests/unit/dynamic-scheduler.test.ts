@@ -278,7 +278,8 @@ test('DynamicScheduler: state transitions', async (t) => {
     assert.strictEqual(task.state, TaskState.READY);
 
     // READY状態のタスクは実行可能
-    const isExecutable = task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION;
+    const isExecutable =
+      task.state === TaskState.READY || task.state === TaskState.NEEDS_CONTINUATION;
     assert.strictEqual(isExecutable, true);
   });
 });
