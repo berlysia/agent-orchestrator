@@ -8,8 +8,9 @@
     "agent": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsgo",
-    "compile": "rm -rf dist && pnpm generate:version && tsgo --project tsconfig.build.json && chmod +x dist/cli/index.js && pnpm generate:schema && pnpm restore:version",
+    "typecheck": "tsgo",
+    "build": "tsgo --project tsconfig.build.json",
+    "compile": "rm -rf dist && pnpm generate:version && pnpm build && chmod +x dist/cli/index.js && pnpm generate:schema && pnpm restore:version",
     "test": "node --test tests/unit/**/*.test.ts",
     "test:e2e": "node --test tests/e2e/**/*.test.ts",
     "test:all": "node --test tests/**/*.test.ts",
