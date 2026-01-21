@@ -7,6 +7,7 @@ import { createPlannerOperations } from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
 import { createBaseBranchResolver } from './base-branch-resolver.ts';
+import { createIntegrationOperations } from './integration-operations.ts';
 import { initialSchedulerState } from './scheduler-state.ts';
 import { taskId, repoPath, branchName, type TaskId } from '../../types/branded.ts';
 import { getAgentType, getModel } from '../config/models.ts';
@@ -134,6 +135,12 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     gitEffects: deps.gitEffects,
     taskStore: deps.taskStore,
     appRepoPath: repoPath(deps.config.appRepoPath),
+  });
+  const integrationOps = createIntegrationOperations({
+    taskStore: deps.taskStore,
+    gitEffects: deps.gitEffects,
+    appRepoPath: deps.config.appRepoPath,
+    config: deps.config,
   });
   /**
    * ユーザー指示を実行
@@ -355,48 +362,26 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         );
       }
 
-      // 9. 統合フェーズ（並列実行されたタスクが複数ある場合のみ）
-      if (completedTaskIds.length > 1) {
-        console.log('\n🔗 Integration phase: command-only (manual).');
-
-        // 完了したタスクを取得
-        const completedTasks: Task[] = [];
-        for (const rawTaskId of completedTaskIds) {
-          const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
-          if (taskResult.ok && taskResult.val.state === TaskState.DONE) {
-            completedTasks.push(taskResult.val);
-          }
-        }
-
-        if (completedTasks.length > 1) {
-          // ベースブランチを取得（main worktree を壊さないため、統合は実行しない）
-          const repo = repoPath(deps.config.appRepoPath);
-          const currentBranchResult = await deps.gitEffects.getCurrentBranch(repo);
-          const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
-
-          const taskIds = completedTasks.map((task) => String(task.id));
-          const taskIdArgs = taskIds.length > 0 ? ` --tasks ${taskIds.join(' ')}` : '';
-
-          console.log(
-            `⚠️  Integration is not executed automatically to protect the main worktree.`,
-          );
-          console.log(`\n📋 Run this subcommand in the worktree you want to merge into:`);
-          console.log(`agent integrate --base ${baseBranch}${taskIdArgs}`);
-        }
-      }
-
-      // 10. 最終完了判定フェーズ
+      // 9. 統合後評価フェーズ
       if (completedTaskIds.length > 0 || failedTaskIds.length > 0) {
-        console.log('\n🎯 Final completion evaluation...');
+        console.log('\n🎯 Integration and final completion evaluation...');
 
-        // 完了タスクと失敗タスクの詳細を取得
+        // ベースブランチを取得
+        const repo = repoPath(deps.config.appRepoPath);
+        const currentBranchResult = await deps.gitEffects.getCurrentBranch(repo);
+        const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
+
+        // 完了タスクを取得
+        const completedTasks: Task[] = [];
         const completedTaskDescriptions: string[] = [];
-        const failedTaskDescriptions: string[] = [];
         const completedTaskRunSummaries: string[] = [];
 
         for (const rawTaskId of completedTaskIds) {
           const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
           if (taskResult.ok) {
+            if (taskResult.val.state === TaskState.DONE) {
+              completedTasks.push(taskResult.val);
+            }
             completedTaskDescriptions.push(
               `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
             );
@@ -414,6 +399,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
+        // 失敗タスクの詳細を取得
+        const failedTaskDescriptions: string[] = [];
         for (const rawTaskId of failedTaskIds) {
           const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
           if (taskResult.ok) {
@@ -423,15 +410,79 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
-        // コード差分を取得
-        const repo = repoPath(deps.config.appRepoPath);
-        const currentBranchResult = await deps.gitEffects.getCurrentBranch(repo);
-        const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
+        let codeChanges = '';
 
-        const diffResult = await deps.gitEffects.getDiff(repo, ['--stat', String(baseBranch)]);
-        const codeChanges = diffResult.ok ? diffResult.val : '';
+        // WHY: 統合後評価を有効化している場合、統合worktree上でコード差分を取得して評価する
+        if (deps.config.integration.postIntegrationEvaluation && completedTasks.length > 1) {
+          console.log('  📦 Creating integration worktree...');
 
-        // 最終判定を実行（実行結果とコード差分を含む）
+          // 統合worktreeを作成
+          const worktreeResult = await integrationOps.createIntegrationWorktree(baseBranch);
+          if (isErr(worktreeResult)) {
+            console.warn(
+              `  ⚠️  Failed to create integration worktree: ${worktreeResult.err.message}`,
+            );
+            console.warn('  Falling back to regular evaluation without integration...');
+          } else {
+            const worktreeInfo = worktreeResult.val;
+
+            console.log(`  ✅ Integration worktree created: ${worktreeInfo.worktreePath}`);
+            console.log(`  🔗 Merging ${completedTasks.length} tasks...`);
+
+            // 完了タスクを統合worktreeにマージ
+            const mergeResult = await integrationOps.mergeTasksInWorktree(
+              worktreeInfo,
+              completedTasks,
+            );
+
+            if (isErr(mergeResult)) {
+              console.warn(`  ⚠️  Failed to merge tasks: ${mergeResult.err.message}`);
+            } else {
+              const merge = mergeResult.val;
+              console.log(
+                `  ✅ Merged ${merge.mergedTaskIds.length}/${completedTasks.length} tasks`,
+              );
+
+              if (merge.conflictedTaskIds.length > 0) {
+                console.log(`  ⚠️  ${merge.conflictedTaskIds.length} tasks have conflicts`);
+                merge.conflictedTaskIds.forEach((tid) => {
+                  console.log(`    - ${tid}`);
+                });
+
+                if (merge.conflictResolutionTaskId) {
+                  console.log(
+                    `  💡 Conflict resolution task created: ${merge.conflictResolutionTaskId}`,
+                  );
+                }
+              }
+
+              // 統合worktree上でコード差分を取得
+              const diffResult = await integrationOps.getIntegrationDiff(
+                worktreeInfo,
+                baseBranch,
+              );
+              if (diffResult.ok) {
+                codeChanges = diffResult.val;
+              }
+            }
+
+            // 統合worktreeをクリーンアップ（Phase 5で最終統合実装時に移動予定）
+            console.log('  🧹 Cleaning up integration worktree...');
+            const cleanupResult = await integrationOps.cleanupIntegrationWorktree(worktreeInfo);
+            if (isErr(cleanupResult)) {
+              console.warn(
+                `  ⚠️  Failed to cleanup integration worktree: ${cleanupResult.err.message}`,
+              );
+            }
+          }
+        } else {
+          // 統合後評価が無効、または単一タスクの場合は通常のdiff取得
+          const diffResult = await deps.gitEffects.getDiff(repo, ['--stat', String(baseBranch)]);
+          codeChanges = diffResult.ok ? diffResult.val : '';
+        }
+
+        // 最終判定を実行（統合後のコード差分を含む）
+        console.log('  📊 Evaluating completion...');
         const finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
           userInstruction,
           completedTaskDescriptions,

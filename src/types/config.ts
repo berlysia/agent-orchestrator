@@ -52,13 +52,20 @@ const ChecksConfigSchema = z
 
 /**
  * 統合設定のスキーマ
+ *
+ * WHY: 統合後評価により、全タスク完了後に統合コードベースで最終評価を実施し、
+ *      不完全な場合は追加タスクを生成して前に進み続ける
  */
 const IntegrationConfigSchema = z
   .object({
     /** 統合方法: 'pr' (Pull Request作成), 'command' (コマンド出力), 'auto' (自動判定) */
     method: z.enum(['pr', 'command', 'auto']).default('auto'),
+    /** 統合後評価を有効化（統合worktree上でコード差分を含む最終評価を実施） */
+    postIntegrationEvaluation: z.boolean().default(true),
+    /** 追加タスクループの最大反復回数（評価が不完全な場合に追加タスクを生成） */
+    maxAdditionalTaskIterations: z.number().int().min(1).max(10).default(3),
   })
-  .default({ method: 'auto' });
+  .default({ method: 'auto', postIntegrationEvaluation: true, maxAdditionalTaskIterations: 3 });
 
 /**
  * コミット設定のスキーマ
@@ -203,6 +210,8 @@ export function createDefaultConfig(params: {
     },
     integration: {
       method: 'auto',
+      postIntegrationEvaluation: true,
+      maxAdditionalTaskIterations: 3,
     },
     planning: {
       qualityThreshold: 60,

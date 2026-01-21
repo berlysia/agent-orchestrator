@@ -5,7 +5,7 @@
  * マージ操作、コンフリクト検出、解決処理に使用する。
  */
 
-import type { TaskId, BranchName } from './branded.ts';
+import type { TaskId, BranchName, WorktreePath } from './branded.ts';
 
 /**
  * Git コンフリクト情報
@@ -122,4 +122,54 @@ export interface ConflictResolutionInfo {
   readonly conflicts: GitConflictInfo[];
   /** コンフリクトの詳細内容 */
   readonly conflictContents: ConflictContent[];
+}
+
+/**
+ * 統合worktree情報
+ *
+ * WHY: 統合後評価のために専用worktreeを管理する
+ */
+export interface IntegrationWorktreeInfo {
+  /** worktreeのパス */
+  readonly worktreePath: WorktreePath;
+  /** 統合ブランチ名 */
+  readonly integrationBranch: BranchName;
+}
+
+/**
+ * 統合マージ結果
+ *
+ * WHY: 統合worktree内でのマージ結果を追跡する
+ */
+export interface IntegrationMergeResult {
+  /** マージが成功したか */
+  readonly success: boolean;
+  /** マージされたタスクIDのリスト */
+  readonly mergedTaskIds: TaskId[];
+  /** コンフリクトが発生したタスクIDのリスト */
+  readonly conflictedTaskIds: TaskId[];
+  /** コンフリクト解決タスクのID（存在する場合） */
+  readonly conflictResolutionTaskId: TaskId | null;
+}
+
+/**
+ * 統合フェーズ結果
+ *
+ * WHY: 統合後評価ループの結果を管理し、追加タスク実行の判断に使用する
+ */
+export interface IntegrationPhaseResult {
+  /** 元のユーザー指示が完全に達成されたか */
+  readonly isComplete: boolean;
+  /** 達成度スコア（0-100） */
+  readonly completionScore: number;
+  /** 達成できていない側面のリスト */
+  readonly missingAspects: string[];
+  /** 追加で必要なタスクの提案 */
+  readonly additionalTaskSuggestions: string[];
+  /** 実行した反復回数 */
+  readonly iterationsPerformed: number;
+  /** 統合ブランチ名 */
+  readonly integrationBranch: BranchName;
+  /** worktreeパス（存在する場合） */
+  readonly worktreePath: WorktreePath | null;
 }

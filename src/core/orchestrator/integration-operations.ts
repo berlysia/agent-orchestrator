@@ -15,6 +15,8 @@ import type {
   IntegrationFinalResult,
   MergeDetail,
   ConflictResolutionInfo,
+  IntegrationWorktreeInfo,
+  IntegrationMergeResult,
 } from '../../types/integration.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
@@ -339,6 +341,189 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
   };
 
   /**
+   * 統合用worktreeを作成
+   *
+   * WHY: 統合後評価のために、baseBranchから新しいworktreeを作成し、
+   *      そこで完了タスクをマージして評価を行う
+   *
+   * @param baseBranch ベースブランチ
+   * @returns 統合worktree情報
+   */
+  const createIntegrationWorktree = async (
+    baseBranch: BranchName,
+  ): Promise<Result<IntegrationWorktreeInfo, OrchestratorError>> => {
+    const repo = repoPath(appRepoPath);
+
+    // WHY: タスク実行中にベースブランチが更新される可能性があるため、
+    // 統合ブランチを作成する前に最新のベースブランチを取得する
+    const switchToBaseResult = await gitEffects.switchBranch(repo, baseBranch);
+    if (isErr(switchToBaseResult)) {
+      return createErr(switchToBaseResult.err);
+    }
+
+    // リモートがあれば最新の変更を取得
+    const hasRemoteResult = await gitEffects.hasRemote(repo, 'origin');
+    if (hasRemoteResult.ok && hasRemoteResult.val) {
+      const pullResult = await gitEffects.pull(repo, 'origin', baseBranch);
+      if (isErr(pullResult)) {
+        console.warn(`  ⚠️  Failed to pull latest changes from origin: ${pullResult.err.message}`);
+      }
+    }
+
+    // 統合ブランチを作成
+    const timestamp = Date.now();
+    const integrationBranch = branchName(`integration/evaluation-${timestamp}`);
+
+    // 統合用worktreeを作成（ブランチも同時に作成）
+    const worktreeResult = await gitEffects.createWorktree(
+      repo,
+      taskId(`integration-${timestamp}`),
+      integrationBranch,
+      true, // createBranch
+      baseBranch, // baseBranch
+    );
+
+    if (isErr(worktreeResult)) {
+      return createErr(worktreeResult.err);
+    }
+
+    return createOk({
+      worktreePath: worktreeResult.val,
+      integrationBranch,
+    });
+  };
+
+  /**
+   * 統合worktree内でタスクをマージ
+   *
+   * WHY: 完了タスクを統合worktreeにマージし、コンフリクトがあれば検出する
+   *
+   * @param worktreeInfo 統合worktree情報
+   * @param completedTasks 完了タスクのリスト
+   * @returns 統合マージ結果
+   */
+  const mergeTasksInWorktree = async (
+    worktreeInfo: IntegrationWorktreeInfo,
+    completedTasks: Task[],
+  ): Promise<Result<IntegrationMergeResult, OrchestratorError>> => {
+    const { worktreePath: wtPath, integrationBranch } = worktreeInfo;
+    const repo = repoPath(String(wtPath));
+
+    const mergedTaskIds: TaskId[] = [];
+    const conflictedTaskIds: TaskId[] = [];
+    const failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }> = [];
+
+    // 各タスクのブランチを順番にマージ
+    for (const task of completedTasks) {
+      const sourceBranch = task.branch;
+
+      // WHY: --no-ff でマージコミットを作成し、各タスクの変更を明示的に記録
+      const mergeResult = await gitEffects.merge(repo, sourceBranch, ['--no-ff', '--no-commit']);
+
+      if (isErr(mergeResult)) {
+        return createErr(mergeResult.err);
+      }
+
+      if (mergeResult.val.success) {
+        // マージ成功: コミットを作成
+        const commitMessage = `Merge task ${task.id}: ${task.acceptance}`;
+        const commitResult = await gitEffects.commit(repo, commitMessage);
+
+        if (isErr(commitResult)) {
+          return createErr(commitResult.err);
+        }
+
+        mergedTaskIds.push(task.id);
+      } else if (mergeResult.val.hasConflicts) {
+        // コンフリクト発生
+        conflictedTaskIds.push(task.id);
+        failedMerges.push({
+          taskId: task.id,
+          sourceBranch,
+          conflicts: mergeResult.val.conflicts,
+        });
+
+        // マージを中止
+        const abortResult = await gitEffects.abortMerge(repo);
+        if (isErr(abortResult)) {
+          console.warn(`  ⚠️  Failed to abort merge: ${abortResult.err.message}`);
+        }
+      }
+    }
+
+    // コンフリクトがある場合は解決タスクを生成
+    let conflictResolutionTaskId: TaskId | null = null;
+    if (failedMerges.length > 0) {
+      const conflictTaskResult = await createConflictResolutionTask(
+        conflictedTaskIds,
+        failedMerges,
+        integrationBranch,
+      );
+
+      if (conflictTaskResult.ok) {
+        conflictResolutionTaskId = conflictTaskResult.val.id;
+      }
+    }
+
+    return createOk({
+      success: conflictedTaskIds.length === 0,
+      mergedTaskIds,
+      conflictedTaskIds,
+      conflictResolutionTaskId,
+    });
+  };
+
+  /**
+   * 統合worktreeのコード差分を取得
+   *
+   * WHY: 統合後評価のために、baseBranchとの差分を取得する
+   *
+   * @param worktreeInfo 統合worktree情報
+   * @param baseBranch ベースブランチ
+   * @returns git diff結果（文字列）
+   */
+  const getIntegrationDiff = async (
+    worktreeInfo: IntegrationWorktreeInfo,
+    baseBranch: BranchName,
+  ): Promise<Result<string, OrchestratorError>> => {
+    const { worktreePath: wtPath } = worktreeInfo;
+    const repo = repoPath(String(wtPath));
+
+    // WHY: --stat でファイル一覧と変更行数を含む差分を取得
+    const diffResult = await gitEffects.getDiff(repo, ['--stat', String(baseBranch)]);
+
+    if (isErr(diffResult)) {
+      return createErr(diffResult.err);
+    }
+
+    return createOk(diffResult.val);
+  };
+
+  /**
+   * 統合worktreeをクリーンアップ
+   *
+   * WHY: 評価完了後、統合worktreeを削除してディスクスペースを解放する
+   *
+   * @param worktreeInfo 統合worktree情報
+   * @returns 成功可否
+   */
+  const cleanupIntegrationWorktree = async (
+    worktreeInfo: IntegrationWorktreeInfo,
+  ): Promise<Result<void, OrchestratorError>> => {
+    const { worktreePath: wtPath } = worktreeInfo;
+    const repo = repoPath(appRepoPath);
+
+    // worktreeを削除
+    const removeResult = await gitEffects.removeWorktree(repo, wtPath);
+
+    if (isErr(removeResult)) {
+      return createErr(removeResult.err);
+    }
+
+    return createOk(undefined);
+  };
+
+  /**
    * 統合ブランチの取り込み方法を決定し、結果を返す
    *
    * WHY: 統合ブランチ全体に署名を付けてベースブランチにマージする。
@@ -428,6 +613,10 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     createConflictResolutionTask,
     buildConflictResolutionPrompt,
     collectConflictDetails,
+    createIntegrationWorktree,
+    mergeTasksInWorktree,
+    getIntegrationDiff,
+    cleanupIntegrationWorktree,
     finalizeIntegration,
   };
 };
