@@ -241,7 +241,20 @@ export async function executeSerialChain(
           shouldRetry = true;
           retryCount++;
           previousFeedback = continuationResult.val.judgementFeedback?.lastJudgement.reason;
+        } else if (judgement.shouldReplan) {
+          // Planner再評価が必要
+          console.log(`  🔄 [${rawTaskId}] Task needs replanning: ${judgement.reason}`);
+          if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
+            console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
+          }
+          // TODO: Planner再評価機能の実装
+          // 現時点では BLOCKED にマークして、後でPlanner再評価機能を追加する
+          console.log(`  ⚠️  [${rawTaskId}] Planner re-evaluation not yet implemented, marking as blocked`);
+          await judgeOps.markTaskAsBlocked(tid);
+          failed.push(tid);
+          break; // チェーン実行を中断
         } else {
+          // 完全失敗（shouldContinue=false && shouldReplan=false）
           console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
           await judgeOps.markTaskAsBlocked(tid);
           failed.push(tid);

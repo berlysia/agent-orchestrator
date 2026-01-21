@@ -108,6 +108,8 @@ export interface JudgementResult {
   success: boolean;
   /** 継続の可否（true=次イテレーション実行、false=停止） */
   shouldContinue: boolean;
+  /** Planner再評価の必要性（true=タスク分解をやり直す、false=不要） */
+  shouldReplan: boolean;
   /** 理由メッセージ */
   reason: string;
   /** 未達成要件リスト */
@@ -122,6 +124,7 @@ const AgentJudgementSchema = z.object({
   reason: z.string(),
   missingRequirements: z.array(z.string()).optional().default([]),
   shouldContinue: z.boolean().optional().default(false),
+  shouldReplan: z.boolean().optional().default(false),
 });
 
 /**
@@ -152,20 +155,40 @@ Your task:
 1. Determine if the acceptance criteria were fully met based on the execution log
 2. Check if the implementation is complete and functional
 3. Identify any missing requirements or issues
-4. Decide if the task should continue for another iteration (rare - only if fixable issues found)
+4. Decide if the task should continue, be replanned, or fail
 
 Output (JSON only, no additional text):
 {
   "success": true/false,
   "reason": "Detailed explanation of your judgement",
   "missingRequirements": ["req1", "req2"],  // Empty array if none
-  "shouldContinue": true/false  // true only if issues can be fixed in next iteration
+  "shouldContinue": true/false,  // true if worker can fix in next iteration
+  "shouldReplan": true/false     // true if task needs to be broken down by planner
 }
 
 Rules:
 - success=true only if ALL acceptance criteria are met
 - missingRequirements should list specific unmet criteria
-- shouldContinue=true only if there are fixable issues (not for fundamental problems)
+
+- shouldContinue=true if the worker can fix issues in next iteration:
+  * Test failures (can be debugged and fixed)
+  * Compilation errors (can be corrected)
+  * Minor bugs or incomplete implementations (can be completed)
+  * Missing error handling or edge cases (can be added)
+  * Code quality issues (can be improved)
+  * Partial implementation that can be finished
+
+- shouldContinue=false && shouldReplan=true if task needs restructuring:
+  * Task scope is too large for single iteration
+  * Task requirements are contradictory or unclear
+  * Implementation approach is fundamentally wrong
+  * Task depends on missing external resources or prerequisites
+  * Current task design makes completion impossible
+
+- shouldContinue=false && shouldReplan=false for complete failures only:
+  * Task is physically/logically impossible to complete
+  * Critical system constraints prevent any solution
+
 - Provide a clear, actionable reason
 
 Output only the JSON object, no markdown code blocks or additional text.`;
@@ -249,6 +272,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
         taskId: tid,
         success: false,
         shouldContinue: false,
+        shouldReplan: false,
         reason: `Task is not in RUNNING state: ${task.state}`,
       });
     }
@@ -287,6 +311,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
           taskId: tid,
           success: parsedJudgement.success,
           shouldContinue: parsedJudgement.shouldContinue,
+          shouldReplan: parsedJudgement.shouldReplan,
           reason: parsedJudgement.reason,
           missingRequirements: parsedJudgement.missingRequirements,
         });
