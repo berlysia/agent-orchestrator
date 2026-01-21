@@ -39,6 +39,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "tests/**/*"],
-  "exclude": ["node_modules", "dist", ".tmp"]
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", ".tmp", "tests"]
 }

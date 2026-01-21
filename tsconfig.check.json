@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* 型チェック専用設定 - ビルド成果物を生成しない */
+    "noEmit": true
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist", ".tmp"]
+}

@@ -29,6 +29,13 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Test build artifacts (should not be committed)
+# WHY: tsgoを直接実行するとtests/内にビルド成果物が生成されてしまうため除外
+tests/**/*.js
+tests/**/*.d.ts
+tests/**/*.d.ts.map
+tests/**/*.js.map
+
 # Agent coordination repository (external)
 # This is managed in a separate repository
 agent-coord/
