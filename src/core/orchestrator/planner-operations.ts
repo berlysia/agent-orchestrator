@@ -83,6 +83,15 @@ export interface FinalCompletionJudgement {
   additionalTaskSuggestions: string[];
   /** 達成度スコア（0-100） */
   completionScore?: number;
+  /** コード変更分析（オプショナル） */
+  codeChangeAnalysis?: {
+    /** タスクから期待される変更 */
+    expectedChanges: string[];
+    /** 実際に観測された変更 */
+    actualChanges: string[];
+    /** 期待と実際の不一致 */
+    mismatches: string[];
+  };
 }
 
 /**
@@ -93,6 +102,13 @@ export const FinalCompletionJudgementSchema = z.object({
   missingAspects: z.array(z.string()),
   additionalTaskSuggestions: z.array(z.string()),
   completionScore: z.number().min(0).max(100).optional(),
+  codeChangeAnalysis: z
+    .object({
+      expectedChanges: z.array(z.string()),
+      actualChanges: z.array(z.string()),
+      mismatches: z.array(z.string()),
+    })
+    .optional(),
 });
 
 /**
@@ -653,6 +669,55 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   };
 
   /**
+   * 実行結果とコード差分を含めた最終完了判定を実行
+   *
+   * WHY: タスク説明だけでなく実行結果とコード変更を含めることで、
+   *      より正確な完了判定を行う
+   *
+   * @param userInstruction 元のユーザー指示
+   * @param completedTaskDescriptions 完了したタスクの説明リスト
+   * @param failedTaskDescriptions 失敗したタスクの説明リスト
+   * @param completedTaskRunSummaries 完了したタスクの実行サマリーリスト
+   * @param codeChanges コード差分（git diff --stat）
+   * @returns 最終完了判定結果
+   */
+  const judgeFinalCompletionWithContext = async (
+    userInstruction: string,
+    completedTaskDescriptions: string[],
+    failedTaskDescriptions: string[],
+    completedTaskRunSummaries: string[],
+    codeChanges: string,
+  ): Promise<FinalCompletionJudgement> => {
+    const finalPrompt = buildFinalCompletionPromptWithContext(
+      userInstruction,
+      completedTaskDescriptions,
+      failedTaskDescriptions,
+      completedTaskRunSummaries,
+      codeChanges,
+    );
+
+    // Judge用エージェントを実行
+    const runResult =
+      deps.agentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(finalPrompt, deps.appRepoPath, deps.judgeModel)
+        : await deps.runnerEffects.runCodexAgent(finalPrompt, deps.appRepoPath, deps.judgeModel);
+
+    if (isErr(runResult)) {
+      console.warn(
+        `⚠️  Final completion judge failed: ${runResult.err.message}, assuming complete`,
+      );
+      return {
+        isComplete: true,
+        missingAspects: [],
+        additionalTaskSuggestions: [],
+      };
+    }
+
+    const judgement = parseFinalCompletionJudgement(runResult.val.finalResponse || '');
+    return judgement;
+  };
+
+  /**
    * 最終完了判定を実行
    *
    * 全タスク完了後に元のユーザー指示が本当に達成されたかを評価する。
@@ -972,6 +1037,7 @@ Output only the JSON array, no additional text.`;
   return {
     planTasks,
     judgeFinalCompletion,
+    judgeFinalCompletionWithContext,
     planAdditionalTasks,
   };
 };
@@ -1188,15 +1254,20 @@ CRITICAL (must pass - weight: 70%):
 2. **Clarity**: Are descriptions clear and actionable?
 3. **Acceptance criteria**: Are acceptance criteria specific, testable, and verifiable?
 4. **Dependency validity**: Are all task dependencies valid (no circular dependencies, no references to non-existent tasks)?
+5. **Coverage**: Do all tasks together fully satisfy the original instruction?
+   - All explicit requirements must be addressed by at least one task
+   - Implicit requirements (e.g., if adding interface, must also use it) must be considered
+   - No aspect of the instruction should be left unaddressed
+   - Example: If instruction says "implement authentication and update orchestrate.ts to use it", there must be tasks for BOTH implementing auth AND updating orchestrate.ts
 
 IMPORTANT (should pass - weight: 20%):
-5. **Context sufficiency**: Does the context field contain information needed to execute the task?
+6. **Context sufficiency**: Does the context field contain information needed to execute the task?
 ${contextCriteria}
-6. **Granularity**: Are tasks appropriately sized? CRITICAL: All tasks MUST be ${maxTaskDuration} hours or less (preferred: 1-${Math.min(maxTaskDuration, 3)} hours)
+7. **Granularity**: Are tasks appropriately sized? CRITICAL: All tasks MUST be ${maxTaskDuration} hours or less (preferred: 1-${Math.min(maxTaskDuration, 3)} hours)
 
 NICE TO HAVE (improves quality - weight: 10%):
-7. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
-8. **Best practices**: Does the task follow coding best practices and patterns?
+8. **Independence**: Can each task be implemented independently (or have proper dependencies listed)?
+9. **Best practices**: Does the task follow coding best practices and patterns?
 
 Scoring guide:
 - 90-100: Excellent quality, all criteria met including nice-to-haves
@@ -1572,6 +1643,68 @@ export const parseAgentOutputWithErrors = (output: string): ParseResult => {
     );
     return { tasks, errors };
   }
+};
+
+/**
+ * 実行結果とコード差分を含めた最終完了判定プロンプトを構築
+ *
+ * WHY: タスク説明だけでなく実行結果とコード変更を含めることで、
+ *      より正確な完了判定を行う
+ *
+ * @param userInstruction 元のユーザー指示
+ * @param completedTaskDescriptions 完了したタスクの説明リスト
+ * @param failedTaskDescriptions 失敗したタスクの説明リスト
+ * @param completedTaskRunSummaries 完了したタスクの実行サマリーリスト
+ * @param codeChanges コード差分（git diff --stat）
+ * @returns 最終完了判定プロンプト
+ */
+export const buildFinalCompletionPromptWithContext = (
+  userInstruction: string,
+  completedTaskDescriptions: string[],
+  failedTaskDescriptions: string[],
+  completedTaskRunSummaries: string[],
+  codeChanges: string,
+): string => {
+  return `You are evaluating whether the original user instruction has been fully satisfied.
+
+ORIGINAL INSTRUCTION:
+${userInstruction}
+
+COMPLETED TASKS:
+${completedTaskDescriptions.length > 0 ? completedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks completed)'}
+
+TASK EXECUTION SUMMARIES:
+${completedTaskRunSummaries.length > 0 ? completedTaskRunSummaries.map((summary, idx) => `${idx + 1}. ${summary}`).join('\n') : '(No execution summaries available)'}
+
+CODE CHANGES (git diff --stat):
+${codeChanges || '(No code changes detected)'}
+
+FAILED TASKS:
+${failedTaskDescriptions.length > 0 ? failedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks failed)'}
+
+Evaluate based on:
+1. Do the completed tasks cover all aspects of the original instruction?
+2. Do the actual code changes match what was expected based on task descriptions?
+3. Are there any implicit requirements left unaddressed?
+4. Is there any mismatch between task descriptions and actual code changes?
+
+Output format (JSON):
+{
+  "isComplete": true/false,
+  "missingAspects": ["List of aspects NOT addressed"],
+  "additionalTaskSuggestions": ["Suggested tasks to complete the instruction"],
+  "completionScore": 0-100,
+  "codeChangeAnalysis": {
+    "expectedChanges": ["Expected changes based on tasks"],
+    "actualChanges": ["Observed changes from diff"],
+    "mismatches": ["Any discrepancies found"]
+  }
+}
+
+If isComplete is true, missingAspects and additionalTaskSuggestions should be empty arrays.
+If isComplete is false, provide specific, actionable items in missingAspects and additionalTaskSuggestions.
+
+Output only the JSON object, no additional text.`;
 };
 
 /**

@@ -377,7 +377,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           const taskIds = completedTasks.map((task) => String(task.id));
           const taskIdArgs = taskIds.length > 0 ? ` --tasks ${taskIds.join(' ')}` : '';
 
-          console.log(`⚠️  Integration is not executed automatically to protect the main worktree.`);
+          console.log(
+            `⚠️  Integration is not executed automatically to protect the main worktree.`,
+          );
           console.log(`\n📋 Run this subcommand in the worktree you want to merge into:`);
           console.log(`agent integrate --base ${baseBranch}${taskIdArgs}`);
         }
@@ -390,6 +392,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         // 完了タスクと失敗タスクの詳細を取得
         const completedTaskDescriptions: string[] = [];
         const failedTaskDescriptions: string[] = [];
+        const completedTaskRunSummaries: string[] = [];
 
         for (const rawTaskId of completedTaskIds) {
           const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
@@ -397,6 +400,17 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             completedTaskDescriptions.push(
               `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
             );
+
+            // 実行ログサマリーを取得
+            const latestRunId = taskResult.val.latestRunId;
+            if (latestRunId) {
+              const runMetadataResult = await deps.runnerEffects.loadRunMetadata(latestRunId);
+              if (runMetadataResult.ok) {
+                const run = runMetadataResult.val;
+                const summary = `[${rawTaskId}] Status: ${run.status}${run.errorMessage ? `, Error: ${run.errorMessage}` : ''}`;
+                completedTaskRunSummaries.push(summary);
+              }
+            }
           }
         }
 
@@ -409,11 +423,21 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
-        // 最終判定を実行
-        const finalJudgement = await plannerOps.judgeFinalCompletion(
+        // コード差分を取得
+        const repo = repoPath(deps.config.appRepoPath);
+        const currentBranchResult = await deps.gitEffects.getCurrentBranch(repo);
+        const baseBranch = currentBranchResult.ok ? currentBranchResult.val : branchName('main');
+
+        const diffResult = await deps.gitEffects.getDiff(repo, ['--stat', String(baseBranch)]);
+        const codeChanges = diffResult.ok ? diffResult.val : '';
+
+        // 最終判定を実行（実行結果とコード差分を含む）
+        const finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
           userInstruction,
           completedTaskDescriptions,
           failedTaskDescriptions,
+          completedTaskRunSummaries,
+          codeChanges,
         );
 
         if (finalJudgement.completionScore !== undefined) {
