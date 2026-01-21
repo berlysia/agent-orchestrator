@@ -1,11 +1,11 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
-import { createInitialTask, TaskState } from '../../types/task.ts';
+import { createInitialTask, TaskState, type Task, BlockReason } from '../../types/task.ts';
 import { taskId, repoPath, branchName, runId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 import type { Result } from 'option-t/plain_result';
-import { createOk, createErr, isErr, isOk } from 'option-t/plain_result';
+import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
@@ -769,6 +769,42 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   };
 
   /**
+   * 再実行対象タスクを準備
+   *
+   * WHY: 統合ブランチからの再実行前に、タスク状態をREADYにリセットし、
+   *      integrationRetriedフラグを設定する
+   *
+   * @param task 再実行対象タスク
+   * @returns リセット後のタスク（Result型）
+   */
+  const prepareForRetry = async (
+    task: Task,
+  ): Promise<Result<Task, TaskStoreError>> => {
+    // CAS更新でタスク状態をリセット
+    return await deps.taskStore.updateTaskCAS(task.id, task.version, (currentTask) => {
+      const updatedTask = {
+        ...currentTask,
+        state: TaskState.READY,
+        owner: null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // MAX_RETRIES からの再試行の場合、フラグを立てる
+      if (currentTask.blockReason === BlockReason.MAX_RETRIES) {
+        updatedTask.integrationRetried = true;
+        updatedTask.blockReason = null;  // 理由をクリア
+      }
+
+      // SYSTEM_ERROR_TRANSIENT の場合もクリア
+      if (currentTask.blockReason === BlockReason.SYSTEM_ERROR_TRANSIENT) {
+        updatedTask.blockReason = null;
+      }
+
+      return updatedTask;
+    });
+  };
+
+  /**
    * 既存セッションを継続して追加タスクを生成
    *
    * 会話履歴を維持しながら、不足している側面に対する追加タスクを生成する。
@@ -852,18 +888,97 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     console.log(`📄 Additional Planner Log Path: ${additionalPlannerLogPath}`);
     console.log(`🗂️  Additional Planner Metadata Path: ${additionalPlannerMetadataPath}`);
 
+    // WHY: Phase 2 - 未完了タスクの再実行サポート
+    //      統合ブランチからの実行により、未完了タスクが完了する可能性がある
+    await appendPlanningLog(`\n=== Phase 2: Checking for Retryable Tasks ===\n`);
+
+    // 全タスクを取得して、再実行対象タスクを抽出
+    const allTasksResult = await deps.taskStore.listTasks();
+    if (isErr(allTasksResult)) {
+      return createErr(
+        ioError('planAdditionalTasks.listTasks', `Failed to list tasks: ${allTasksResult.err.message}`),
+      );
+    }
+
+    const allTasks = allTasksResult.val;
+
+    // 再実行対象タスクの抽出
+    const retryableTasks = allTasks.filter(task => {
+      // NEEDS_CONTINUATION は常に再実行対象
+      if (task.state === TaskState.NEEDS_CONTINUATION) {
+        return true;
+      }
+
+      // BLOCKED (MAX_RETRIES) かつ未再試行
+      if (
+        task.state === TaskState.BLOCKED &&
+        task.blockReason === BlockReason.MAX_RETRIES &&
+        !task.integrationRetried
+      ) {
+        return true;
+      }
+
+      // SYSTEM_ERROR_TRANSIENT も再試行対象（1回のみ）
+      if (
+        task.state === TaskState.BLOCKED &&
+        task.blockReason === BlockReason.SYSTEM_ERROR_TRANSIENT &&
+        !task.integrationRetried  // 統合ブランチからの再試行は1回のみ
+      ) {
+        return true;
+      }
+
+      return false;
+    });
+
+    await appendPlanningLog(`Found ${retryableTasks.length} retryable tasks\n`);
+    if (retryableTasks.length > 0) {
+      for (const task of retryableTasks) {
+        await appendPlanningLog(`  - ${task.id} (${task.state}${task.blockReason ? ` / ${task.blockReason}` : ''})\n`);
+      }
+    }
+
+    // 再実行対象タスクの準備（状態をREADYにリセット）
+    const preparedRetryTasks: Task[] = [];
+    for (const task of retryableTasks) {
+      await appendPlanningLog(`\nPreparing task ${task.id} for retry from integration branch...\n`);
+      const prepared = await prepareForRetry(task);
+      if (prepared.ok) {
+        preparedRetryTasks.push(prepared.val);
+        await appendPlanningLog(`  ✅ Task ${task.id} prepared for retry\n`);
+      } else {
+        await appendPlanningLog(`  ⚠️  Failed to prepare task ${task.id}: ${prepared.err.message}\n`);
+      }
+    }
+
+    // 未完了タスク情報をプロンプト用に収集
+    const incompleteTaskInfo = retryableTasks.map(t => ({
+      id: String(t.id),
+      state: t.state,
+      acceptance: t.acceptance,
+      lastError: t.judgementFeedback?.lastJudgement.reason || t.blockMessage || 'N/A',
+    }));
+
     // 会話履歴を含めたプロンプトを構築
     const conversationContext = session.conversationHistory
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join('\n\n');
 
-    // WHY: 統合ブランチには完了タスクが全てマージ済みなので、
-    //      新規タスクは完了タスクに依存する必要がない。
-    //      既存タスク数のみ取得して、新規タスクの番号を決定する。
-    const allTasksResult = await deps.taskStore.listTasks();
-    const completedTaskCount = isOk(allTasksResult) && allTasksResult.val
-      ? allTasksResult.val.filter(task => task.state === TaskState.DONE).length
-      : 0;
+    // 完了タスク数のカウント（統合ブランチには完了タスクが全てマージ済み）
+    const completedTaskCount = allTasks.filter(task => task.state === TaskState.DONE).length;
+
+    // WHY: Phase 2 - 未完了タスク情報をプロンプトに含める
+    //      Plannerが未完了タスクを参照・依存できるようにする
+    const incompleteTaskSection = incompleteTaskInfo.length > 0
+      ? `\nINCOMPLETE TASKS (can be used as dependencies or for context):
+${incompleteTaskInfo.map(t => `- ${t.id} (${t.state}): ${t.acceptance}\n  Last error: ${t.lastError}`).join('\n')}
+
+NOTE: These incomplete tasks will be retried from the integration branch alongside your new tasks.
+You can:
+1. Create new independent tasks
+2. Create tasks that depend on incomplete tasks (use EXACT IDs above, e.g., "${incompleteTaskInfo[0]?.id}")
+3. The incomplete tasks above will be automatically retried - you don't need to recreate them
+`
+      : '';
 
     const additionalPrompt = `Previous conversation:
 ${conversationContext}
@@ -874,7 +989,7 @@ IMPORTANT CONTEXT:
 - DO NOT create dependencies on any previously completed tasks - they are already in the codebase.
 - Your new tasks should start from task-1 (unique IDs will be assigned automatically).
 - Only create dependencies on other NEW tasks you generate in this session (e.g., task-2 depends on task-1).
-
+${incompleteTaskSection}
 Based on the above context, the following aspects are still missing:
 ${missingAspects.map((aspect, i) => `${i + 1}. ${aspect}`).join('\n')}
 
@@ -980,8 +1095,16 @@ Output only the JSON array, no additional text.`;
         taskType: breakdown.type,
         context: breakdown.context,
         dependencies: breakdown.dependencies.map((depId) => {
-          // WHY: 統合ブランチからの実行なので、依存は新規タスク間のみ
-          //      全ての依存を現在のセッションIDで変換
+          // WHY: Phase 2 - 未完了タスクへの依存をサポート
+          //      実際のタスクID形式（task-xxxx-N）の場合は未完了タスクへの依存
+          //      短縮形（task-N）の場合は新規タスク間の依存
+          if (depId.match(/^task-[a-f0-9]{8}-\d+$/)) {
+            // 未完了タスクへの依存（フルID形式）
+            return taskId(depId);
+          }
+
+          // 短縮形（task-N）の場合は新規タスク間の依存
+          // 現在のセッションIDで変換
           return taskId(makeUniqueTaskId(depId, sessionShort));
         }),
         plannerRunId: additionalRunId,
@@ -1000,10 +1123,22 @@ Output only the JSON array, no additional text.`;
       taskIds.push(uniqueTaskId);
     }
 
+    // WHY: Phase 2 - 再実行タスクのIDも含める
+    //      呼び出し側（orchestrate.ts）で再実行タスクと新規タスクを統合して実行できるようにする
+    const retryTaskIds = preparedRetryTasks.map(t => String(t.id));
+    const allGeneratedTaskIds = [...retryTaskIds, ...taskIds];
+
     if (taskIds.length > 0) {
       await appendPlanningLog(`\n=== Generated Additional Tasks ===\n`);
       for (const rawTaskId of taskIds) {
         await appendPlanningLog(`- ${rawTaskId}\n`);
+      }
+    }
+
+    if (preparedRetryTasks.length > 0) {
+      await appendPlanningLog(`\n=== Prepared Retry Tasks ===\n`);
+      for (const task of preparedRetryTasks) {
+        await appendPlanningLog(`- ${task.id}\n`);
       }
     }
 
@@ -1015,7 +1150,7 @@ Output only the JSON array, no additional text.`;
     }
 
     const completedRun =
-      taskIds.length > 0
+      allGeneratedTaskIds.length > 0
         ? {
             ...planningRun,
             status: RunStatus.SUCCESS,
@@ -1031,7 +1166,7 @@ Output only the JSON array, no additional text.`;
     await deps.runnerEffects.saveRunMetadata(completedRun);
 
     // 会話履歴を更新してセッションを保存
-    if (taskIds.length > 0) {
+    if (allGeneratedTaskIds.length > 0) {
       const timestamp = new Date().toISOString();
       session.conversationHistory.push({
         role: 'user',
@@ -1054,14 +1189,14 @@ Output only the JSON array, no additional text.`;
     }
 
     // 一部でもタスク作成に成功していれば成功とみなす
-    if (taskIds.length === 0) {
+    if (allGeneratedTaskIds.length === 0) {
       return createErr(
         ioError('planAdditionalTasks', `Failed to create any tasks: ${errors.join(', ')}`),
       );
     }
 
     return createOk({
-      taskIds,
+      taskIds: allGeneratedTaskIds,
       runId: additionalRunId,
     });
   };

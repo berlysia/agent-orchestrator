@@ -89,6 +89,10 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * WHY: ブランチ名にタスクIDを含めることで、並列実行時の衝突を防ぐ
    * 例: feature/auth → feature/auth-task-2b8c0253-1
    *
+   * WHY: Phase 2 - 統合ブランチから再実行する場合、新しいworktreeを作成
+   *      元のworktreeは元のブランチを指しているため、rebaseによるブランチ切り替えはリスクが高い
+   *      新しいworktreeを作成することで、元のブランチの状態を保持しつつ、統合ブランチから実行可能
+   *
    * @param task タスク
    * @param baseBranch 起点となるブランチ（新規ブランチ作成時のみ使用）
    * @returns worktreeのパス（Result型）
@@ -109,11 +113,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const branches = branchesResult.val;
     const branchExists = branches.some((b) => b.name === taskBranchName);
 
+    // WHY: Phase 2 - 統合ブランチから再実行する場合、新しいworktree名を使用
+    //      元のworktreeと区別するため、サフィックスを追加
+    const worktreeName = task.integrationRetried
+      ? `${task.id}-integration`
+      : String(task.id);
+
     // Worktreeを作成（createBranchフラグでブランチも同時作成）
     // WHY: baseBranch指定時は、そのブランチから分岐（依存関係を反映）
     const worktreeResult = await deps.gitEffects.createWorktree(
       deps.appRepoPath,
-      task.id,
+      worktreeName,
       taskBranchName,
       !branchExists,
       baseBranch,

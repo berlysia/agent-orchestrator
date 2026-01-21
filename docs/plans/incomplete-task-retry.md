@@ -659,9 +659,33 @@ export const TaskSchema = z.object({
 
 **既存動作への影響**: なし（optionsパラメータはオプショナル、既存呼び出しはそのまま動作）
 
-### Phase 2: MAX_RETRIESタスクの統合ブランチからの再実行 🔜 **未実装**
+### Phase 2: MAX_RETRIESタスクの統合ブランチからの再実行 ✅ **完了** (2026-01-21)
 
-### Phase 3: 追加タスクからの依存サポート 🔜 **未実装**
+**実装内容**:
+- `planAdditionalTasks`関数内で再実行対象タスク（NEEDS_CONTINUATION、BLOCKED (MAX_RETRIES)、SYSTEM_ERROR_TRANSIENT）を抽出
+- `prepareForRetry`ヘルパー関数を追加して、タスク状態をREADYにリセット
+- 未完了タスク情報をプロンプトに追加し、Plannerが参照・依存できるようにした
+- 依存関係マッピングを拡張して、未完了タスクへの依存をサポート
+- `orchestrate.ts`の追加タスクループで、再実行タスクと新規タスクを区別してログ表示
+- `worker-operations.ts`の`setupWorktree`関数で、`integrationRetried`フラグに応じた新しいworktree（`${task.id}-integration`）を作成
+
+**変更ファイル**:
+- `src/core/orchestrator/planner-operations.ts`: `prepareForRetry`関数追加、`planAdditionalTasks`関数修正
+- `src/core/orchestrator/orchestrate.ts`: 追加タスクループのログ出力改善
+- `src/core/orchestrator/worker-operations.ts`: `setupWorktree`関数修正
+
+**テスト結果**: 138個のテスト全てパス
+
+**既存動作への影響**: なし（後方互換性あり）
+
+### Phase 3: 追加タスクからの依存サポート ✅ **完了** (2026-01-21)
+
+**実装内容**:
+- Phase 2の実装に統合（`planAdditionalTasks`のプロンプト修正で実現）
+- 未完了タスク情報をプロンプトに含めることで、Plannerが未完了タスクを参照可能に
+- 依存関係マッピングで、フルID形式（`task-xxxx-N`）の場合は未完了タスクへの依存として処理
+
+**既存動作への影響**: なし（Plannerの応答品質が向上）
 
 ## 関連ドキュメント
 

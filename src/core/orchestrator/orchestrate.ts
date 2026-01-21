@@ -356,7 +356,28 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
 
           const additionalTaskIds = additionalTasksResult.val.taskIds;
-          console.log(`  ✅ Generated ${additionalTaskIds.length} additional tasks`);
+
+          // WHY: Phase 2 - 再実行タスクと新規タスクを区別してログ表示
+          //      planAdditionalTasks は再実行タスクIDと新規タスクIDの両方を返す
+          const allTasks = await loadTasks(additionalTaskIds, deps.taskStore);
+          const retryTaskIds = allTasks.tasks.filter(t => t.integrationRetried).map(t => String(t.id));
+          const newTaskIds = allTasks.tasks.filter(t => !t.integrationRetried).map(t => String(t.id));
+
+          console.log(`  ✅ Generated ${additionalTaskIds.length} tasks (${retryTaskIds.length} retry, ${newTaskIds.length} new)`);
+
+          if (retryTaskIds.length > 0) {
+            console.log(`  🔄 Retry tasks from integration branch:`);
+            for (const tid of retryTaskIds) {
+              console.log(`    - ${tid}`);
+            }
+          }
+
+          if (newTaskIds.length > 0) {
+            console.log(`  ✨ New tasks:`);
+            for (const tid of newTaskIds) {
+              console.log(`    - ${tid}`);
+            }
+          }
 
           if (additionalTaskIds.length === 0) {
             console.log('  ⚠️  No additional tasks generated, stopping loop');
