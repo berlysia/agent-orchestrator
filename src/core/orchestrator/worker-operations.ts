@@ -501,6 +501,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    *
    * WHY: worktreeの現在のブランチ名を取得してpushすることで、serial chain実行時の
    *      ブランチ名の不一致を防ぐ（最初のタスクのブランチ名を使用）
+   * WHY: リモートが存在しない場合はpushをスキップ（ローカル開発環境への対応）
    *
    * @param worktreePath worktreeのパス
    * @returns Result型
@@ -508,6 +509,18 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   const pushChanges = async (
     worktreePath: WorktreePath,
   ): Promise<Result<void, OrchestratorError>> => {
+    // リモートの存在を確認
+    const hasRemoteResult = await deps.gitEffects.hasRemote(worktreePath, 'origin');
+    if (isErr(hasRemoteResult)) {
+      return createErr(hasRemoteResult.err);
+    }
+
+    if (!hasRemoteResult.val) {
+      // リモートが存在しない場合は警告を表示してスキップ
+      console.warn(`  ⚠️  Remote 'origin' not found, skipping push`);
+      return createOk(undefined);
+    }
+
     // worktreeの現在のブランチ名を取得
     const currentBranchResult = await deps.gitEffects.getCurrentBranch(repoPath(worktreePath));
     if (isErr(currentBranchResult)) {
