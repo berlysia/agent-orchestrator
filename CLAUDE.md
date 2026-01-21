@@ -7,10 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build & Test
 
 ```bash
-# Type check
+# Type check (src/ and tests/)
+pnpm typecheck
+
+# Build TypeScript (src/ only, output to dist/)
 pnpm build
 
-# Compile TypeScript to dist/
+# Complete build flow (version generation, build, schema generation)
 pnpm compile
 
 # Run unit tests

@@ -29,10 +29,13 @@ pnpm compile
 ## Development
 
 ```bash
-# Type check
+# Type check (src/ and tests/)
+pnpm typecheck
+
+# Build TypeScript (src/ only, output to dist/)
 pnpm build
 
-# Compile TypeScript
+# Complete build flow (version generation, build, schema generation)
 pnpm compile
 
 # Run tests
