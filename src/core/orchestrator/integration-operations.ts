@@ -23,7 +23,9 @@ import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
 import type { Config } from '../../types/config.ts';
+import { shouldSkipAutoResolution } from './worker-operations.ts';
 
 /**
  * Integration依存関係
@@ -103,7 +105,9 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       const mergeResult = await gitEffects.merge(repo, task.branch);
 
       if (isErr(mergeResult)) {
-        // マージエラー
+        // マージエラー: マージ状態をクリーンにしてから次へ
+        // WHY: マージ状態が残ったまま次のマージを試みると "unmerged files" エラーになる
+        await gitEffects.abortMerge(repo);
         conflictedTaskIds.push(task.id);
         mergeDetails.push({
           taskId: task.id,
@@ -123,23 +127,121 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       const merge = mergeResult.val;
 
       if (merge.hasConflicts) {
-        // コンフリクトが発生
-        conflictedTaskIds.push(task.id);
-        failedMerges.push({
-          taskId: task.id,
-          sourceBranch: task.branch,
-          conflicts: merge.conflicts,
-        });
+        // コンフリクト発生: カテゴリ別に分類して処理
+        const lockfileConflicts: string[] = [];
+        const nodeModulesConflicts: string[] = [];
+        const binaryConflicts: string[] = [];
+        const textConflicts: string[] = [];
 
-        // マージをアボート
-        await gitEffects.abortMerge(repo);
+        for (const conflict of merge.conflicts) {
+          const resolution = shouldSkipAutoResolution(conflict.filePath);
+          if (resolution.isLockfile) {
+            lockfileConflicts.push(conflict.filePath);
+          } else if (resolution.isNodeModules) {
+            nodeModulesConflicts.push(conflict.filePath);
+          } else if (resolution.skip && resolution.reason === 'binary file') {
+            binaryConflicts.push(conflict.filePath);
+          } else if (!resolution.skip) {
+            textConflicts.push(conflict.filePath);
+          } else {
+            nodeModulesConflicts.push(conflict.filePath);
+          }
+        }
 
-        mergeDetails.push({
-          taskId: task.id,
-          sourceBranch: task.branch,
-          targetBranch: integrationBranch,
-          result: merge,
-        });
+        // バイナリファイルのコンフリクトが含まれる場合
+        if (binaryConflicts.length > 0) {
+          console.log(
+            `  ⚠️  Binary file conflicts in ${task.id}: ${binaryConflicts.join(', ')}`,
+          );
+          await gitEffects.abortMerge(repo);
+          conflictedTaskIds.push(task.id);
+          failedMerges.push({
+            taskId: task.id,
+            sourceBranch: task.branch,
+            conflicts: merge.conflicts,
+          });
+          mergeDetails.push({
+            taskId: task.id,
+            sourceBranch: task.branch,
+            targetBranch: integrationBranch,
+            result: merge,
+          });
+          continue;
+        }
+
+        // lockfile/node_modulesコンフリクトを自動解決
+        const autoResolvedCount = lockfileConflicts.length + nodeModulesConflicts.length;
+        if (autoResolvedCount > 0) {
+          console.log(`  🔧 Auto-resolving ${autoResolvedCount} generated file conflicts for ${task.id}`);
+
+          for (const filePath of [...lockfileConflicts, ...nodeModulesConflicts]) {
+            const checkoutResult = await gitEffects.raw?.(repo, ['checkout', '--ours', filePath]);
+            if (checkoutResult && !checkoutResult.ok) {
+              console.log(`  ⚠️  Failed to checkout --ours for ${filePath}`);
+            }
+
+            const markResult = await gitEffects.markConflictResolved(repo, filePath);
+            if (!markResult.ok) {
+              console.log(`  ⚠️  Failed to mark ${filePath} as resolved`);
+            }
+          }
+        }
+
+        // テキストファイルのコンフリクトがある場合
+        if (textConflicts.length > 0) {
+          console.log(`  ⚠️  Text file conflicts in ${task.id}: ${textConflicts.join(', ')}`);
+          await gitEffects.abortMerge(repo);
+          conflictedTaskIds.push(task.id);
+          failedMerges.push({
+            taskId: task.id,
+            sourceBranch: task.branch,
+            conflicts: merge.conflicts.filter((c) => textConflicts.includes(c.filePath)),
+          });
+          mergeDetails.push({
+            taskId: task.id,
+            sourceBranch: task.branch,
+            targetBranch: integrationBranch,
+            result: merge,
+          });
+          continue;
+        }
+
+        // 自動生成ファイルのみのコンフリクトだった場合
+        if (autoResolvedCount > 0 && textConflicts.length === 0) {
+          console.log(`  ✅ All conflicts auto-resolved for ${task.id}`);
+
+          const commitResult = await gitEffects.commit(
+            repo,
+            `Merge ${task.branch}: auto-resolved generated file conflicts`,
+          );
+
+          if (!commitResult.ok) {
+            console.log(`  ❌ Failed to commit auto-resolved conflicts`);
+            await gitEffects.abortMerge(repo);
+            conflictedTaskIds.push(task.id);
+            failedMerges.push({
+              taskId: task.id,
+              sourceBranch: task.branch,
+              conflicts: merge.conflicts,
+            });
+            mergeDetails.push({
+              taskId: task.id,
+              sourceBranch: task.branch,
+              targetBranch: integrationBranch,
+              result: merge,
+            });
+            continue;
+          }
+
+          integratedTaskIds.push(task.id);
+          mergeDetails.push({
+            taskId: task.id,
+            sourceBranch: task.branch,
+            targetBranch: integrationBranch,
+            result: { ...merge, hasConflicts: false, status: 'success' },
+          });
+          continue;
+        }
       } else {
         // マージ成功
         integratedTaskIds.push(task.id);
@@ -421,6 +523,8 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       const mergeResult = await gitEffects.merge(repo, sourceBranch, ['--no-ff', '--no-commit']);
 
       if (isErr(mergeResult)) {
+        // マージエラー: マージ状態をクリーンにしてからエラーを返す
+        await gitEffects.abortMerge(repo);
         return createErr(mergeResult.err);
       }
 
@@ -435,18 +539,98 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
 
         mergedTaskIds.push(task.id);
       } else if (mergeResult.val.hasConflicts) {
-        // コンフリクト発生
-        conflictedTaskIds.push(task.id);
-        failedMerges.push({
-          taskId: task.id,
-          sourceBranch,
-          conflicts: mergeResult.val.conflicts,
-        });
+        // コンフリクト発生: カテゴリ別に分類して処理
+        // WHY: node_modules/lockfileは自動解決可能、テキストファイルのみ手動解決が必要
+        const lockfileConflicts: string[] = [];
+        const nodeModulesConflicts: string[] = [];
+        const binaryConflicts: string[] = [];
+        const textConflicts: string[] = [];
 
-        // マージを中止
-        const abortResult = await gitEffects.abortMerge(repo);
-        if (isErr(abortResult)) {
-          console.warn(`  ⚠️  Failed to abort merge: ${abortResult.err.message}`);
+        for (const conflict of mergeResult.val.conflicts) {
+          const resolution = shouldSkipAutoResolution(conflict.filePath);
+          if (resolution.isLockfile) {
+            lockfileConflicts.push(conflict.filePath);
+          } else if (resolution.isNodeModules) {
+            nodeModulesConflicts.push(conflict.filePath);
+          } else if (resolution.skip && resolution.reason === 'binary file') {
+            binaryConflicts.push(conflict.filePath);
+          } else if (!resolution.skip) {
+            textConflicts.push(conflict.filePath);
+          } else {
+            // その他の自動解決スキップ対象（拡張子なし実行ファイルなど）
+            nodeModulesConflicts.push(conflict.filePath);
+          }
+        }
+
+        // バイナリファイルのコンフリクトが含まれる場合はエラー
+        if (binaryConflicts.length > 0) {
+          console.log(
+            `  ⚠️  Binary file conflicts in ${task.id}: ${binaryConflicts.join(', ')} (cannot auto-resolve)`,
+          );
+          await gitEffects.abortMerge(repo);
+          conflictedTaskIds.push(task.id);
+          failedMerges.push({
+            taskId: task.id,
+            sourceBranch,
+            conflicts: mergeResult.val.conflicts,
+          });
+          continue;
+        }
+
+        // lockfile/node_modulesコンフリクトを自動解決
+        const autoResolvedCount = lockfileConflicts.length + nodeModulesConflicts.length;
+        if (autoResolvedCount > 0) {
+          console.log(`  🔧 Auto-resolving ${autoResolvedCount} generated file conflicts for ${task.id}`);
+
+          for (const filePath of [...lockfileConflicts, ...nodeModulesConflicts]) {
+            // --ours を採用（どちらでも良い、後で再生成される）
+            const checkoutResult = await gitEffects.raw?.(repo, ['checkout', '--ours', filePath]);
+            if (checkoutResult && !checkoutResult.ok) {
+              console.log(`  ⚠️  Failed to checkout --ours for ${filePath}: ${checkoutResult.err.message}`);
+            }
+
+            const markResult = await gitEffects.markConflictResolved(repo, filePath);
+            if (!markResult.ok) {
+              console.log(`  ⚠️  Failed to mark ${filePath} as resolved: ${markResult.err.message}`);
+            }
+          }
+        }
+
+        // テキストファイルのコンフリクトがある場合はconflictResolutionTaskに委任
+        if (textConflicts.length > 0) {
+          console.log(`  ⚠️  Text file conflicts in ${task.id}: ${textConflicts.join(', ')}`);
+          await gitEffects.abortMerge(repo);
+          conflictedTaskIds.push(task.id);
+          failedMerges.push({
+            taskId: task.id,
+            sourceBranch,
+            conflicts: mergeResult.val.conflicts.filter((c) => textConflicts.includes(c.filePath)),
+          });
+          continue;
+        }
+
+        // 自動生成ファイルのみのコンフリクトだった場合
+        if (autoResolvedCount > 0 && textConflicts.length === 0) {
+          console.log(`  ✅ All conflicts auto-resolved for ${task.id}`);
+
+          // コミットして続行
+          const commitMessage = `Merge task ${task.id}: ${task.acceptance} (auto-resolved conflicts)`;
+          const commitResult = await gitEffects.commit(repo, commitMessage);
+
+          if (!commitResult.ok) {
+            // コミット失敗時はマージを中断
+            console.log(`  ❌ Failed to commit auto-resolved conflicts: ${commitResult.err.message}`);
+            await gitEffects.abortMerge(repo);
+            conflictedTaskIds.push(task.id);
+            failedMerges.push({
+              taskId: task.id,
+              sourceBranch,
+              conflicts: mergeResult.val.conflicts,
+            });
+            continue;
+          }
+
+          mergedTaskIds.push(task.id);
         }
       }
     }
@@ -514,7 +698,9 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const repo = repoPath(appRepoPath);
 
     // worktreeを削除
-    const removeResult = await gitEffects.removeWorktree(repo, wtPath);
+    // WHY: removeWorktreeはworktree名を期待するが、wtPathは絶対パスなのでbasenameで抽出
+    const worktreeName = basename(String(wtPath));
+    const removeResult = await gitEffects.removeWorktree(repo, worktreeName);
 
     if (isErr(removeResult)) {
       return createErr(removeResult.err);
