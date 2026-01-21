@@ -15,6 +15,7 @@ import { truncateSummary } from './utils/log-utils.ts';
 import { TaskExecutionStatus, type TaskExecutionResult } from './task-execution-status.ts';
 import type { PlannerDeps } from './planner-operations.ts';
 import { replanFailedTask, markTaskAsReplanned } from './replanning-operations.ts';
+import { loadTasks } from './task-helpers.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
@@ -294,6 +295,13 @@ async function executeTaskAsync(
 
       const newTaskIds = replanResult.val.taskIds;
       console.log(`  ✅ [${rawTaskId}] Generated ${newTaskIds.length} new tasks from replanning`);
+
+      // WHY: 生成されたタスクの詳細を表示してユーザーに可視性を提供
+      const replanTasksLoadResult = await loadTasks(newTaskIds, taskStore);
+      for (const task of replanTasksLoadResult.tasks) {
+        const summaryText = task.summary ? ` - ${truncateSummary(task.summary)}` : '';
+        console.log(`    - ${task.id}${summaryText}`);
+      }
 
       // 3. 元タスクをREPLACED_BY_REPLANにマーク
       const maxReplanIterations = 3;

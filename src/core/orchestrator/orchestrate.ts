@@ -368,15 +368,19 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
           if (retryTaskIds.length > 0) {
             console.log(`  🔄 Retry tasks from integration branch:`);
-            for (const tid of retryTaskIds) {
-              console.log(`    - ${tid}`);
+            const retryTasks = allTasks.tasks.filter(t => t.integrationRetried);
+            for (const task of retryTasks) {
+              const summaryText = task.summary ? `: ${task.summary}` : '';
+              console.log(`    - ${task.id}${summaryText}`);
             }
           }
 
           if (newTaskIds.length > 0) {
             console.log(`  ✨ New tasks:`);
-            for (const tid of newTaskIds) {
-              console.log(`    - ${tid}`);
+            const newTasks = allTasks.tasks.filter(t => !t.integrationRetried);
+            for (const task of newTasks) {
+              const summaryText = task.summary ? `: ${task.summary}` : '';
+              console.log(`    - ${task.id}${summaryText}`);
             }
           }
 
@@ -968,6 +972,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             completedTaskIds: allCompletedTaskIds,
             failedTaskIds: allFailedTaskIds,
           });
+        }
+
+        // WHY: 追加タスクの詳細を表示してユーザーに可視性を提供
+        const additionalTasksLoadResult = await loadTasks(newTaskIds, deps.taskStore);
+        for (const task of additionalTasksLoadResult.tasks) {
+          const summaryText = task.summary ? ` - ${truncateSummary(task.summary)}` : '';
+          console.log(`  - ${task.id}${summaryText}`);
         }
 
         allTaskIds.push(...newTaskIds);
