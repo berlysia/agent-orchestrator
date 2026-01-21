@@ -266,7 +266,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
     }
 
     // その他のメッセージタイプ
-    return `[${timestamp}] [${message.type?.toUpperCase() ?? 'UNKNOWN'}] ${JSON.stringify(message).substring(0, 100)}`;
+    return `[${timestamp}] [${message.type?.toUpperCase() ?? 'UNKNOWN'}] ${JSON.stringify(message)}`;
   };
 
   /**
