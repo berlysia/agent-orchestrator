@@ -12,6 +12,7 @@ import { createInitialRun, RunStatus } from '../../types/run.ts';
 import { z } from 'zod';
 import { createPlannerSession } from '../../types/planner-session.ts';
 import path from 'node:path';
+import { truncateSummary } from './utils/log-utils.ts';
 
 /**
  * Planner依存関係
@@ -164,6 +165,8 @@ export const TaskBreakdownSchema = z.object({
   context: z.string().min(1, 'context must not be empty'),
   /** 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスクのID） */
   dependencies: z.array(z.string()).default([]),
+  /** タスクの30文字程度のサマリ（ログ出力用） */
+  summary: z.string().max(50).optional(),
 });
 
 /**
@@ -564,6 +567,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     // タスクをTaskStoreに保存
     const taskIds: string[] = [];
+    const createdTasks: Array<{ id: string; summary: string | null }> = [];
     const errors: string[] = [];
 
     // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
@@ -583,6 +587,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         dependencies: breakdown.dependencies.map((depId) =>
           taskId(makeUniqueTaskId(depId, sessionShort)),
         ),
+        summary: breakdown.summary ?? null,
         plannerRunId: plannerRunId,
         plannerLogPath: plannerLogPath,
         plannerMetadataPath: plannerMetadataPath,
@@ -597,12 +602,14 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       }
 
       taskIds.push(uniqueTaskId);
+      createdTasks.push({ id: uniqueTaskId, summary: breakdown.summary ?? null });
     }
 
     if (taskIds.length > 0) {
-      await appendPlanningLog(`\n=== Generated Tasks ===\n`);
-      for (const rawTaskId of taskIds) {
-        await appendPlanningLog(`- ${rawTaskId}\n`);
+      await appendPlanningLog(`\n📋 Generated ${taskIds.length} tasks\n`);
+      for (const task of createdTasks) {
+        const summaryText = task.summary ? ` - ${truncateSummary(task.summary)}` : '';
+        await appendPlanningLog(`  - ${task.id}${summaryText}\n`);
       }
     }
 
@@ -1129,6 +1136,11 @@ For each task, provide:
    - Example: If task-3 depends on task-1 and task-2, use ["task-1", "task-2"]
    - Tasks with no dependencies can be executed in parallel
    - Ensure no circular dependencies (task-1 depends on task-2, task-2 depends on task-1)
+10. summary: Short summary of the task (OPTIONAL but RECOMMENDED)
+   - Approximately 30 characters (max 50)
+   - Used for log output and quick task identification
+   - Should be concise and descriptive
+   - Examples: "JWT認証の実装", "Add user login API", "Fix authentication bug"
 
 Output format (JSON array):
 [
@@ -1141,7 +1153,8 @@ Output format (JSON array):
     "type": "implementation",
     "estimatedDuration": 2.5,
     "context": "Context information for task execution",
-    "dependencies": []
+    "dependencies": [],
+    "summary": "Short task summary"
   }
 ]
 
@@ -1169,7 +1182,8 @@ Example:
     "type": "implementation",
     "estimatedDuration": 3.0,
     "context": "Implement using jsonwebtoken v9.0+ library for JWT generation/validation. Use bcrypt with cost factor 10 for password hashing. Store user credentials in existing 'users' table defined in src/db/schema.sql (columns: id, email, password_hash, created_at). Follow the authentication pattern from src/auth/oauth.ts for middleware structure. JWT payload: {userId, email, exp}. Store token in HTTP-only cookie named 'auth_token'. Implement rate limiting using existing RateLimiter class in src/middleware/rate-limit.ts (5 attempts per minute per IP). Handle errors: validation errors (400), authentication failures (401), server errors (500). Add unit tests in tests/auth/jwt.test.ts for token generation, validation, expiry. Add integration tests in tests/auth/login.test.ts for full login flow with database. Security: validate email format with regex, sanitize inputs, use constant-time comparison for passwords. Must pass existing security linter rules in .eslintrc.json.",
-    "dependencies": []
+    "dependencies": [],
+    "summary": "JWT authentication implementation"
   },
   {
     "id": "task-2",
@@ -1180,7 +1194,8 @@ Example:
     "type": "documentation",
     "estimatedDuration": 1.5,
     "context": "Follow existing API documentation format in docs/api/README.md (uses Markdown with code blocks). Reference the authentication implementation in src/auth/ for accurate technical details. Include complete curl examples for each endpoint. Document all HTTP status codes: 200 (success), 400 (validation error), 401 (authentication failed), 429 (rate limited), 500 (server error). Add Mermaid sequence diagram for authentication flow (see docs/diagrams/ for examples). Cross-reference related docs: docs/security/authentication.md for security details, docs/setup/environment.md for HTTPS setup. Include troubleshooting section for common issues: cookie not set (check HTTPS), rate limited (wait 1 minute), token expired (re-login). Validation: run through examples manually and verify they work with local dev server.",
-    "dependencies": ["task-1"]
+    "dependencies": ["task-1"],
+    "summary": "Document auth API endpoints"
   }
 ]
 

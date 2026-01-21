@@ -87,6 +87,9 @@ export const TaskSchema = z.object({
   /** タスク更新日時 */
   updatedAt: z.string().datetime(),
 
+  /** タスクの30文字程度のサマリ（ログ出力用） */
+  summary: z.string().max(50).nullable().optional(),
+
   /** このタスクを生成したプランナーのID（オプショナル） */
   plannerRunId: z.string().nullable().optional(),
 
@@ -145,6 +148,7 @@ export function createInitialTask(params: {
   taskType: 'implementation' | 'documentation' | 'investigation' | 'integration';
   context: string;
   dependencies?: TaskId[];
+  summary?: string | null;
   plannerRunId?: string | null;
   plannerLogPath?: string | null;
   plannerMetadataPath?: string | null;
@@ -165,6 +169,7 @@ export function createInitialTask(params: {
     check: null,
     createdAt: now,
     updatedAt: now,
+    summary: params.summary ?? null,
     plannerRunId: params.plannerRunId ?? null,
     plannerLogPath: params.plannerLogPath ?? null,
     plannerMetadataPath: params.plannerMetadataPath ?? null,

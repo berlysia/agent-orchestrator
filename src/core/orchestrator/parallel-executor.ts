@@ -10,6 +10,7 @@ import type { createWorkerOperations } from './worker-operations.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import { TaskState } from '../../types/task.ts';
 import type { BaseBranchResolution } from './base-branch-resolver.ts';
+import { truncateSummary } from './utils/log-utils.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -108,7 +109,13 @@ export async function executeLevelParallel(
     // 2. 実行可能なタスクを並列実行
     console.log(`\n🔨 Executing ${executableTaskIds.length} tasks in parallel`);
     for (const tid of executableTaskIds) {
-      console.log(`  - ${tid}`);
+      const taskResult = await taskStore.readTask(tid);
+      if (taskResult.ok) {
+        const summaryText = taskResult.val.summary ? ` - ${truncateSummary(taskResult.val.summary)}` : '';
+        console.log(`  - ${tid}${summaryText}`);
+      } else {
+        console.log(`  - ${tid}`);
+      }
     }
 
     // 並列実行用のPromiseを生成
@@ -171,7 +178,8 @@ export async function executeLevelParallel(
           resolution = { type: 'multi', dependencyBranches };
         }
 
-        console.log(`  🚀 [${rawTaskId}] Executing task...`);
+        const summaryText = claimedTask.summary ? ` - ${truncateSummary(claimedTask.summary)}` : '';
+        console.log(`  🚀 [${rawTaskId}]${summaryText} Executing task...`);
         const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, resolution);
 
         if (isErr(workerResult)) {

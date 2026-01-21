@@ -16,6 +16,7 @@ import { workerId } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
+import { truncateSummary } from './utils/log-utils.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -74,7 +75,13 @@ export async function executeSerialChain(
 
   console.log(`\n🔗 Executing serial chain with ${chain.length} tasks`);
   for (const tid of chain) {
-    console.log(`  - ${tid}`);
+    const taskResult = await taskStore.readTask(tid);
+    if (taskResult.ok) {
+      const summaryText = taskResult.val.summary ? ` - ${truncateSummary(taskResult.val.summary)}` : '';
+      console.log(`  - ${tid}${summaryText}`);
+    } else {
+      console.log(`  - ${tid}`);
+    }
   }
 
   for (let i = 0; i < chain.length; i++) {
@@ -106,7 +113,8 @@ export async function executeSerialChain(
 
         // 最初のタスク: 新しいworktreeを作成
         if (i === 0 && retryCount === 0) {
-          console.log(`  🚀 [${rawTaskId}] Creating worktree and executing first task...`);
+          const summaryText = claimedTask.summary ? ` - ${truncateSummary(claimedTask.summary)}` : '';
+          console.log(`  🚀 [${rawTaskId}]${summaryText} Creating worktree and executing first task...`);
           const setupResult = await workerOps.setupWorktree(claimedTask);
           if (isErr(setupResult)) {
             console.log(
@@ -133,7 +141,8 @@ export async function executeSerialChain(
           previousFeedback = runResult.val.runId; // 次のタスクに渡す
         } else {
           // 後続タスク or リトライ: 既存のworktreeを再利用
-          console.log(`  🚀 [${rawTaskId}] Executing task in existing worktree...`);
+          const summaryText = claimedTask.summary ? ` - ${truncateSummary(claimedTask.summary)}` : '';
+          console.log(`  🚀 [${rawTaskId}]${summaryText} Executing task in existing worktree...`);
 
           // WHY: serial chainでは全タスクが最初のタスクのブランチを共有するため、
           // 後続タスクのtask.branchを実際のブランチ名に更新する必要がある。

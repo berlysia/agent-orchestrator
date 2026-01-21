@@ -23,6 +23,7 @@ import {
   collectFailedTaskDescriptions,
 } from './task-helpers.ts';
 import { executeTaskPipeline } from './task-execution-pipeline.ts';
+import { truncateSummary } from './utils/log-utils.ts';
 
 /**
  * Orchestrator依存関係
@@ -174,17 +175,20 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       const { taskIds, runId: sessionId } = planningResult.val;
-      console.log(`📋 Generated ${taskIds.length} tasks`);
-      if (taskIds.length > 0) {
-        for (const createdTaskId of taskIds) {
-          console.log(`  - ${createdTaskId}`);
-        }
-      }
 
       // 2. すべてのタスクを取得
       const loadResult = await loadTasks(taskIds, deps.taskStore);
       const tasks = loadResult.tasks;
       failedTaskIds.push(...loadResult.failedTaskIds);
+
+      // 生成されたタスクを表示
+      console.log(`📋 Generated ${tasks.length} tasks`);
+      if (tasks.length > 0) {
+        for (const task of tasks) {
+          const summaryText = task.summary ? ` - ${truncateSummary(task.summary)}` : '';
+          console.log(`  - ${task.id}${summaryText}`);
+        }
+      }
 
       // 3. タスク実行パイプライン
       const pipelineResult = await executeTaskPipeline({

@@ -120,6 +120,49 @@ This is the recommended approach.`;
       assert.strictEqual(result[0].type, 'implementation');
     });
 
+    it('should parse summary field when present', () => {
+      const output = JSON.stringify([
+        {
+          id: 'task-1',
+          description: 'Implement user authentication',
+          branch: 'feature/auth',
+          scopePaths: ['src/auth/'],
+          acceptance: 'Users can login and logout',
+          type: 'implementation',
+          estimatedDuration: 3.0,
+          context: 'Use bcrypt for password hashing',
+          dependencies: [],
+          summary: 'JWT認証の実装',
+        },
+      ]);
+
+      const result = parseAgentOutput(output);
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].summary, 'JWT認証の実装');
+    });
+
+    it('should handle missing summary field', () => {
+      const output = JSON.stringify([
+        {
+          id: 'task-1',
+          description: 'Implement user authentication',
+          branch: 'feature/auth',
+          scopePaths: ['src/auth/'],
+          acceptance: 'Users can login and logout',
+          type: 'implementation',
+          estimatedDuration: 3.0,
+          context: 'Use bcrypt for password hashing',
+          dependencies: [],
+        },
+      ]);
+
+      const result = parseAgentOutput(output);
+
+      assert.strictEqual(result.length, 1);
+      assert.strictEqual(result[0].summary, undefined);
+    });
+
     it('should handle invalid output gracefully', () => {
       const output = 'This is not JSON';
 

@@ -11,6 +11,7 @@ import { isErr } from 'option-t/plain_result';
 import { computeBlockedTasks } from './parallel-executor.ts';
 import type { createBaseBranchResolver } from './base-branch-resolver.ts';
 import { TaskState } from '../../types/task.ts';
+import { truncateSummary } from './utils/log-utils.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
@@ -163,7 +164,8 @@ async function executeTaskAsync(
     const resolution = baseBranchResolution.val;
 
     // 3. Worker: タスク実行
-    console.log(`  🚀 [${rawTaskId}] Executing task...`);
+    const summaryText = claimedTask.summary ? ` - ${truncateSummary(claimedTask.summary)}` : '';
+    console.log(`  🚀 [${rawTaskId}]${summaryText} Executing task...`);
     const workerResult = await workerOps.executeTaskWithWorktree(claimedTask, resolution);
 
     if (isErr(workerResult)) {
@@ -369,7 +371,13 @@ export async function executeDynamically(
         `\n🔨 Starting ${tasksToExecute.length} tasks (${availableSlots} slots available)`,
       );
       for (const tid of tasksToExecute) {
-        console.log(`  - ${tid}`);
+        const taskResult = await taskStore.readTask(tid);
+        if (taskResult.ok) {
+          const summaryText = taskResult.val.summary ? ` - ${truncateSummary(taskResult.val.summary)}` : '';
+          console.log(`  - ${tid}${summaryText}`);
+        } else {
+          console.log(`  - ${tid}`);
+        }
       }
 
       // タスクを実行中に追加し、Promiseを保存
