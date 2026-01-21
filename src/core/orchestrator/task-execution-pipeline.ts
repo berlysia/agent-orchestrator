@@ -8,6 +8,8 @@ import { createBaseBranchResolver } from './base-branch-resolver.ts';
 import type { Config } from '../../types/config.ts';
 import type { SchedulerState } from './scheduler-state.ts';
 import type { TaskId } from '../../types/branded.ts';
+import type { RunnerEffects } from '../runner/runner-effects.ts';
+import type { PlannerSessionEffects } from './planner-session-effects.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
@@ -51,6 +53,20 @@ export interface TaskExecutionPipelineInput {
   readonly initialBlockedTaskIds?: Set<TaskId>;
   /** 全タスクID（依存関係グラフ構築用） */
   readonly globalTaskIds?: Set<TaskId>;
+  /** Runner Effects（Planner再評価に必要） */
+  readonly runnerEffects: RunnerEffects;
+  /** Planner Session Effects（Planner再評価に必要） */
+  readonly sessionEffects: PlannerSessionEffects;
+  /** アプリケーションリポジトリパス */
+  readonly appRepoPath: string;
+  /** Coordination リポジトリパス */
+  readonly coordRepoPath: string;
+  /** Plannerエージェントタイプ */
+  readonly plannerAgentType: 'claude' | 'codex';
+  /** Plannerモデル */
+  readonly plannerModel: string;
+  /** Judgeモデル */
+  readonly judgeModel: string;
 }
 
 /**
@@ -99,7 +115,26 @@ export async function executeTaskPipeline(
     initialSchedulerState,
     initialBlockedTaskIds,
     globalTaskIds,
+    runnerEffects,
+    sessionEffects,
+    appRepoPath,
+    coordRepoPath,
+    plannerAgentType,
+    plannerModel,
+    judgeModel,
   } = input;
+
+  // WHY: Planner再評価に必要な依存関係を構築
+  const plannerDeps = {
+    taskStore,
+    runnerEffects,
+    sessionEffects,
+    appRepoPath,
+    coordRepoPath,
+    agentType: plannerAgentType,
+    model: plannerModel,
+    judgeModel,
+  };
 
   const completedTaskIds: string[] = [];
   const failedTaskIds: string[] = [];
@@ -198,6 +233,7 @@ export async function executeTaskPipeline(
         gitEffects,
         schedulerState,
         config.iterations.serialChainTaskRetries,
+        plannerDeps,
       );
       schedulerState = result.updatedSchedulerState;
 
@@ -261,6 +297,7 @@ export async function executeTaskPipeline(
       schedulerState,
       blockedTaskIdsSet,
       baseBranchResolver,
+      plannerDeps,
     );
 
     // スケジューラ状態を更新

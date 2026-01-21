@@ -101,17 +101,25 @@ Agent Orchestrator is a multi-agent collaborative development tool with Planner/
 
 - **Planner**: Decomposes instructions into tasks (Claude/Codex agents)
 - **Worker**: Implements tasks in isolated worktrees (Claude/Codex agents)
-- **Judge**: Validates completion (currently disabled - future enhancement)
+- **Judge**: Validates completion with 3-level decision making
+  - Success → DONE
+  - Continuation needed → NEEDS_CONTINUATION (Worker retries)
+  - Replanning needed → REPLACED_BY_REPLAN (Planner re-decomposes)
+  - Complete failure → BLOCKED (manual intervention required)
 - **Integration**: Determines if tasks require integration (PR/command output)
 
 **4. Task State Machine**
 
 ```
-READY → RUNNING → DONE
-   ↓       ↓         ↓
-BLOCKED  CANCELLED  NEEDS_CONTINUATION
-                           ↓
-                       (loops back to RUNNING for continuation)
+READY → RUNNING → Judge → success=true → DONE
+   ↓       ↓                    ↓
+   ↓    CANCELLED        shouldContinue=true
+   ↓                             ↓
+   ↓                    NEEDS_CONTINUATION → (loops back to RUNNING)
+   ↓                             ↓
+BLOCKED ← !shouldContinue    shouldReplan=true
+           && !shouldReplan       ↓
+                           REPLACED_BY_REPLAN → New tasks created (READY)
 ```
 
 States:
@@ -120,8 +128,9 @@ States:
 - **RUNNING**: Worker is executing
 - **NEEDS_CONTINUATION**: Executed but incomplete (Judge determined continuation needed)
 - **DONE**: Completed
-- **BLOCKED**: Cannot execute due to errors or dependencies
+- **BLOCKED**: Cannot execute due to errors or dependencies, requires manual intervention
 - **CANCELLED**: User interrupted
+- **REPLACED_BY_REPLAN**: Task was too large/complex, replaced by new sub-tasks from Planner
 
 **5. Effects Pattern for External I/O**
 
@@ -237,6 +246,11 @@ agent-coord/
     "maxQualityRetries": 5,
     "qualityThreshold": 60,
     "strictContextValidation": false
+  },
+  "replanning": {
+    "enabled": true,
+    "maxIterations": 3,
+    "timeoutSeconds": 300
   }
 }
 ```
@@ -268,6 +282,7 @@ agent-coord/
 - **Planner operations**: `src/core/orchestrator/planner-operations.ts`
 - **Worker operations**: `src/core/orchestrator/worker-operations.ts`
 - **Judge operations**: `src/core/orchestrator/judge-operations.ts`
+- **Replanning operations**: `src/core/orchestrator/replanning-operations.ts` (Judge-triggered task re-decomposition)
 - **Scheduler operations**: `src/core/orchestrator/scheduler-operations.ts`
 - **Integration operations**: `src/core/orchestrator/integration-operations.ts`
 - **Main flow**: `src/core/orchestrator/orchestrate.ts`
@@ -281,18 +296,20 @@ agent-coord/
 
 ## Known Limitations & Future Work
 
-### Current State (Phase 2 Complete)
+### Current State
 
 ✅ Planner agent integration (Claude/Codex)
 ✅ Worker execution with automatic log saving to `runs/`
 ✅ CLI output shows log file paths for monitoring
 ✅ CAS-based task claiming
 ✅ Worktree-based parallelization
-✅ Basic orchestration cycle
+✅ Judge agent integration with 3-level decision making
+✅ Automatic task replanning for failed tasks (Planner re-decomposition)
+✅ Infinite loop prevention (max replanning iterations: 3)
 
 ### Planned Enhancements
 
-- Judge agent integration (currently disabled)
+- Enhanced Judge prompts for better accuracy
 - GitHub Integration (PR creation, status updates) - see `docs/plans/github-integration-*.md`
 - Improved error recovery and retry logic
 - Task dependency graph visualization

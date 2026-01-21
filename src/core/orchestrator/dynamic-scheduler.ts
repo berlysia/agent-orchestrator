@@ -13,6 +13,8 @@ import type { createBaseBranchResolver } from './base-branch-resolver.ts';
 import { TaskState } from '../../types/task.ts';
 import { truncateSummary } from './utils/log-utils.ts';
 import { TaskExecutionStatus, type TaskExecutionResult } from './task-execution-status.ts';
+import type { PlannerDeps } from './planner-operations.ts';
+import { replanFailedTask, markTaskAsReplanned } from './replanning-operations.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
@@ -101,6 +103,7 @@ function getExecutableTasks(state: DynamicSchedulerState): TaskId[] {
  * @param schedulerState スケジューラ状態
  * @param taskStore タスクストア
  * @param baseBranchResolver ベースブランチ解決器
+ * @param plannerDeps Planner依存関係（再評価に必要）
  * @returns タスク実行結果
  */
 async function executeTaskAsync(
@@ -111,6 +114,7 @@ async function executeTaskAsync(
   schedulerState: SchedulerState,
   taskStore: TaskStore,
   baseBranchResolver: BaseBranchResolver,
+  plannerDeps: PlannerDeps,
 ): Promise<TaskExecutionResult> {
   const rawTaskId = String(tid);
   const wid = `worker-${rawTaskId}`;
@@ -249,11 +253,52 @@ async function executeTaskAsync(
       if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
         console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
       }
-      // TODO: Planner再評価機能の実装
-      // 現時点では BLOCKED にマークして、後でPlanner再評価機能を追加する
-      console.log(`  ⚠️  [${rawTaskId}] Planner re-evaluation not yet implemented, marking as blocked`);
-      await judgeOps.markTaskAsBlocked(tid);
-      return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+
+      // 1. 実行ログを取得
+      const logResult = await plannerDeps.runnerEffects.readLog(result.runId);
+      if (!logResult.ok) {
+        console.error(`  ❌ [${rawTaskId}] Failed to read log for replanning: ${logResult.err.message}`);
+        await judgeOps.markTaskAsBlocked(tid);
+        return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+      }
+
+      // 2. Planner再評価を呼び出し
+      const replanResult = await replanFailedTask(
+        plannerDeps,
+        claimedTask,
+        logResult.val,
+        judgement,
+      );
+
+      if (!replanResult.ok) {
+        console.error(`  ❌ [${rawTaskId}] Replanning failed: ${replanResult.err.message}`);
+        await judgeOps.markTaskAsBlocked(tid);
+        return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+      }
+
+      const newTaskIds = replanResult.val.taskIds;
+      console.log(`  ✅ [${rawTaskId}] Generated ${newTaskIds.length} new tasks from replanning`);
+
+      // 3. 元タスクをREPLACED_BY_REPLANにマーク
+      const maxReplanIterations = 3;
+      const markResult = await markTaskAsReplanned(
+        taskStore,
+        tid,
+        newTaskIds,
+        judgement,
+        maxReplanIterations,
+      );
+
+      if (!markResult.ok) {
+        // 最大リトライ回数超過 → BLOCKED
+        console.log(`  ❌ [${rawTaskId}] ${markResult.err.message}`);
+        await judgeOps.markTaskAsBlocked(tid);
+        return { taskId: tid, status: TaskExecutionStatus.FAILED, workerId: wid };
+      }
+
+      // WHY: 新タスクは次のスケジューリングサイクルで自動ピックアップされる
+      console.log(`  ➡️  [${rawTaskId}] New tasks queued for execution`);
+      return { taskId: tid, status: TaskExecutionStatus.REPLANNED, workerId: wid };
     } else {
       // 完全失敗（shouldContinue=false && shouldReplan=false）
       console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
@@ -318,6 +363,7 @@ export async function executeDynamically(
   initialSchedulerState: SchedulerState,
   initialBlockedTasks: Set<TaskId>,
   baseBranchResolver: BaseBranchResolver,
+  plannerDeps: PlannerDeps,
 ): Promise<DynamicExecutionResult> {
   // 動的スケジューラ状態を初期化
   const dynamicState: DynamicSchedulerState = {
@@ -385,6 +431,7 @@ export async function executeDynamically(
           schedulerState,
           taskStore,
           baseBranchResolver,
+          plannerDeps,
         );
         dynamicState.runningPromises.set(tid, taskPromise);
       }

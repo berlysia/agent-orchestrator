@@ -202,6 +202,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         config: deps.config,
         maxWorkers: deps.maxWorkers ?? 3,
         initialSchedulerState: schedulerState,
+        runnerEffects: deps.runnerEffects,
+        sessionEffects: deps.sessionEffects,
+        appRepoPath: deps.config.appRepoPath,
+        coordRepoPath: deps.config.agentCoordPath,
+        plannerAgentType: deps.config.agents.planner.type,
+        plannerModel: deps.config.agents.planner.model,
+        judgeModel: deps.config.agents.judge.model,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -385,6 +392,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             config: deps.config,
             maxWorkers: deps.maxWorkers ?? 3,
             initialSchedulerState: initialSchedulerState(deps.maxWorkers ?? 3),
+            runnerEffects: deps.runnerEffects,
+            sessionEffects: deps.sessionEffects,
+            appRepoPath: deps.config.appRepoPath,
+            coordRepoPath: deps.config.agentCoordPath,
+            plannerAgentType: deps.config.agents.planner.type,
+            plannerModel: deps.config.agents.planner.model,
+            judgeModel: deps.config.agents.judge.model,
           });
 
           const additionalCompletedIds = additionalPipelineResult.completedTaskIds;
@@ -665,6 +679,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         maxWorkers: deps.maxWorkers ?? 3,
         initialSchedulerState: schedulerState,
         initialBlockedTaskIds,
+        runnerEffects: deps.runnerEffects,
+        sessionEffects: deps.sessionEffects,
+        appRepoPath: deps.config.appRepoPath,
+        coordRepoPath: deps.config.agentCoordPath,
+        plannerAgentType: deps.config.agents.planner.type,
+        plannerModel: deps.config.agents.planner.model,
+        judgeModel: deps.config.agents.judge.model,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -939,6 +960,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           config: deps.config,
           maxWorkers: deps.maxWorkers ?? 3,
           initialSchedulerState: initialSchedulerState(deps.maxWorkers ?? 3),
+          runnerEffects: deps.runnerEffects,
+          sessionEffects: deps.sessionEffects,
+          appRepoPath: deps.config.appRepoPath,
+          coordRepoPath: deps.config.agentCoordPath,
+          plannerAgentType: deps.config.agents.planner.type,
+          plannerModel: deps.config.agents.planner.model,
+          judgeModel: deps.config.agents.judge.model,
         });
 
         allCompletedTaskIds.push(...pipelineResult.completedTaskIds);

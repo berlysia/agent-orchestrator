@@ -17,6 +17,8 @@ import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
 import { truncateSummary } from './utils/log-utils.ts';
+import type { PlannerDeps } from './planner-operations.ts';
+import { replanFailedTask, markTaskAsReplanned } from './replanning-operations.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 
@@ -56,6 +58,7 @@ export interface SerialChainExecutionResult {
  * @param gitEffects Git操作
  * @param schedulerState 現在のスケジューラ状態
  * @param serialChainTaskRetries タスク実行の最大リトライ回数
+ * @param plannerDeps Planner依存関係（再評価に必要）
  * @returns 直列チェーン実行結果
  */
 export async function executeSerialChain(
@@ -67,6 +70,7 @@ export async function executeSerialChain(
   gitEffects: GitEffects,
   schedulerState: SchedulerState,
   serialChainTaskRetries: number,
+  plannerDeps: PlannerDeps,
 ): Promise<SerialChainExecutionResult> {
   const completed: TaskId[] = [];
   const failed: TaskId[] = [];
@@ -247,11 +251,55 @@ export async function executeSerialChain(
           if (judgement.missingRequirements && judgement.missingRequirements.length > 0) {
             console.log(`     Missing: ${judgement.missingRequirements.join(', ')}`);
           }
-          // TODO: Planner再評価機能の実装
-          // 現時点では BLOCKED にマークして、後でPlanner再評価機能を追加する
-          console.log(`  ⚠️  [${rawTaskId}] Planner re-evaluation not yet implemented, marking as blocked`);
-          await judgeOps.markTaskAsBlocked(tid);
-          failed.push(tid);
+
+          // 1. 実行ログを取得
+          const logResult = await plannerDeps.runnerEffects.readLog(runIdForJudgement);
+          if (!logResult.ok) {
+            console.error(`  ❌ [${rawTaskId}] Failed to read log for replanning: ${logResult.err.message}`);
+            await judgeOps.markTaskAsBlocked(tid);
+            failed.push(tid);
+            break;
+          }
+
+          // 2. Planner再評価を呼び出し
+          const replanResult = await replanFailedTask(
+            plannerDeps,
+            claimedTask,
+            logResult.val,
+            judgement,
+          );
+
+          if (!replanResult.ok) {
+            console.error(`  ❌ [${rawTaskId}] Replanning failed: ${replanResult.err.message}`);
+            await judgeOps.markTaskAsBlocked(tid);
+            failed.push(tid);
+            break;
+          }
+
+          const newTaskIds = replanResult.val.taskIds;
+          console.log(`  ✅ [${rawTaskId}] Generated ${newTaskIds.length} new tasks from replanning`);
+
+          // 3. 元タスクをREPLACED_BY_REPLANにマーク
+          const maxReplanIterations = 3;
+          const markResult = await markTaskAsReplanned(
+            taskStore,
+            tid,
+            newTaskIds,
+            judgement,
+            maxReplanIterations,
+          );
+
+          if (!markResult.ok) {
+            // 最大リトライ回数超過 → BLOCKED
+            console.log(`  ❌ [${rawTaskId}] ${markResult.err.message}`);
+            await judgeOps.markTaskAsBlocked(tid);
+            failed.push(tid);
+            break;
+          }
+
+          // WHY: 新タスクは次のスケジューリングサイクルで自動ピックアップされる
+          console.log(`  ➡️  [${rawTaskId}] New tasks queued for execution`);
+          failed.push(tid); // 元タスクは失敗扱い（新タスクに置き換え）
           break; // チェーン実行を中断
         } else {
           // 完全失敗（shouldContinue=false && shouldReplan=false）
