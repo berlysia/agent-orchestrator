@@ -24,6 +24,7 @@ import { executeDynamically } from './dynamic-scheduler.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
+import type { IntegrationWorktreeInfo } from '../../types/integration.ts';
 
 /**
  * Orchestrator依存関係
@@ -411,6 +412,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         }
 
         let codeChanges = '';
+        let integrationWorktreeInfo: IntegrationWorktreeInfo | null = null;
 
         // WHY: 統合後評価を有効化している場合、統合worktree上でコード差分を取得して評価する
         if (deps.config.integration.postIntegrationEvaluation && completedTasks.length > 1) {
@@ -425,6 +427,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             console.warn('  Falling back to regular evaluation without integration...');
           } else {
             const worktreeInfo = worktreeResult.val;
+            integrationWorktreeInfo = worktreeInfo; // Phase 5: 追加タスクループで再利用するため保持
 
             console.log(`  ✅ Integration worktree created: ${worktreeInfo.worktreePath}`);
             console.log(`  🔗 Merging ${completedTasks.length} tasks...`);
@@ -466,14 +469,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               }
             }
 
-            // 統合worktreeをクリーンアップ（Phase 5で最終統合実装時に移動予定）
-            console.log('  🧹 Cleaning up integration worktree...');
-            const cleanupResult = await integrationOps.cleanupIntegrationWorktree(worktreeInfo);
-            if (isErr(cleanupResult)) {
-              console.warn(
-                `  ⚠️  Failed to cleanup integration worktree: ${cleanupResult.err.message}`,
-              );
-            }
+            // Phase 5: クリーンアップは追加タスクループ完了後に移動
           }
         } else {
           // 統合後評価が無効、または単一タスクの場合は通常のdiff取得
@@ -483,7 +479,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         // 最終判定を実行（統合後のコード差分を含む）
         console.log('  📊 Evaluating completion...');
-        const finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
+        let finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
           userInstruction,
           completedTaskDescriptions,
           failedTaskDescriptions,
@@ -491,14 +487,206 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           codeChanges,
         );
 
+        // Phase 5: 追加タスクループ（統合後評価が不完全な場合に自動実行）
+        let iterationsPerformed = 0;
+        const maxIterations = deps.config.integration.maxAdditionalTaskIterations;
+
+        // WHY: 統合worktreeが存在し、評価が不完全な場合のみループを実行
+        while (
+          integrationWorktreeInfo &&
+          !finalJudgement.isComplete &&
+          finalJudgement.missingAspects.length > 0 &&
+          iterationsPerformed < maxIterations
+        ) {
+          iterationsPerformed++;
+          console.log(
+            `\n🔄 Starting additional task iteration ${iterationsPerformed}/${maxIterations}...`,
+          );
+
+          // 追加タスクを生成
+          console.log('  📝 Planning additional tasks...');
+          const additionalTasksResult = await plannerOps.planAdditionalTasks(
+            sessionId,
+            finalJudgement.missingAspects,
+          );
+
+          if (isErr(additionalTasksResult)) {
+            console.error(
+              `  ❌ Failed to plan additional tasks: ${additionalTasksResult.err.message}`,
+            );
+            break;
+          }
+
+          const additionalTaskIds = additionalTasksResult.val.taskIds;
+          console.log(`  ✅ Generated ${additionalTaskIds.length} additional tasks`);
+
+          if (additionalTaskIds.length === 0) {
+            console.log('  ⚠️  No additional tasks generated, stopping loop');
+            break;
+          }
+
+          // 追加タスクを統合ブランチから実行
+          console.log('  🔨 Executing additional tasks from integration branch...');
+          const additionalCompletedIds: string[] = [];
+          const additionalFailedIds: string[] = [];
+
+          for (const rawTaskId of additionalTaskIds) {
+            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+            if (!taskResult.ok) {
+              console.warn(`  ⚠️  Failed to read task ${rawTaskId}: ${taskResult.err.message}`);
+              additionalFailedIds.push(rawTaskId);
+              continue;
+            }
+
+            const task = taskResult.val;
+
+            // 統合ブランチからworktreeをセットアップ
+            const setupResult = await workerOps.setupWorktree(
+              task,
+              integrationWorktreeInfo.integrationBranch,
+            );
+            if (isErr(setupResult)) {
+              console.warn(`  ⚠️  Failed to setup worktree for ${rawTaskId}: ${setupResult.err.message}`);
+              additionalFailedIds.push(rawTaskId);
+              continue;
+            }
+
+            const worktreePath = setupResult.val;
+
+            // タスク実行
+            const execResult = await workerOps.executeTask(task, worktreePath);
+            if (isErr(execResult)) {
+              console.warn(`  ⚠️  Failed to execute task ${rawTaskId}: ${execResult.err.message}`);
+              additionalFailedIds.push(rawTaskId);
+              continue;
+            }
+
+            // 実行結果を確認
+            const updatedTaskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+            if (updatedTaskResult.ok && updatedTaskResult.val.state === TaskState.DONE) {
+              additionalCompletedIds.push(rawTaskId);
+            } else {
+              additionalFailedIds.push(rawTaskId);
+            }
+          }
+
+          console.log(
+            `  ✅ Additional tasks executed: ${additionalCompletedIds.length} succeeded, ${additionalFailedIds.length} failed`,
+          );
+
+          // 完了した追加タスクを統合worktreeに再マージ
+          if (additionalCompletedIds.length > 0) {
+            console.log('  🔗 Merging additional tasks into integration worktree...');
+            const additionalTasks: Task[] = [];
+            for (const rawTaskId of additionalCompletedIds) {
+              const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+              if (taskResult.ok && taskResult.val.state === TaskState.DONE) {
+                additionalTasks.push(taskResult.val);
+              }
+            }
+
+            const mergeResult = await integrationOps.mergeTasksInWorktree(
+              integrationWorktreeInfo,
+              additionalTasks,
+            );
+
+            if (isErr(mergeResult)) {
+              console.warn(`  ⚠️  Failed to merge additional tasks: ${mergeResult.err.message}`);
+            } else {
+              const merge = mergeResult.val;
+              console.log(
+                `  ✅ Merged ${merge.mergedTaskIds.length}/${additionalTasks.length} additional tasks`,
+              );
+
+              if (merge.conflictedTaskIds.length > 0) {
+                console.log(`  ⚠️  ${merge.conflictedTaskIds.length} tasks have conflicts`);
+              }
+            }
+
+            // 再度コード差分を取得
+            const diffResult = await integrationOps.getIntegrationDiff(
+              integrationWorktreeInfo,
+              baseBranch,
+            );
+            if (diffResult.ok) {
+              codeChanges = diffResult.val;
+            }
+          }
+
+          // タスクリストを累積
+          completedTaskIds.push(...additionalCompletedIds);
+          failedTaskIds.push(...additionalFailedIds);
+
+          // 完了タスクの説明とサマリーを更新
+          for (const rawTaskId of additionalCompletedIds) {
+            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+            if (taskResult.ok) {
+              completedTaskDescriptions.push(
+                `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
+              );
+
+              const latestRunId = taskResult.val.latestRunId;
+              if (latestRunId) {
+                const runMetadataResult = await deps.runnerEffects.loadRunMetadata(latestRunId);
+                if (runMetadataResult.ok) {
+                  const run = runMetadataResult.val;
+                  const summary = `[${rawTaskId}] Status: ${run.status}${run.errorMessage ? `, Error: ${run.errorMessage}` : ''}`;
+                  completedTaskRunSummaries.push(summary);
+                }
+              }
+            }
+          }
+
+          // 失敗タスクの説明を更新
+          for (const rawTaskId of additionalFailedIds) {
+            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+            if (taskResult.ok) {
+              failedTaskDescriptions.push(
+                `[${rawTaskId}] ${taskResult.val.acceptance || taskResult.val.branch}`,
+              );
+            }
+          }
+
+          // 再評価
+          console.log('  📊 Re-evaluating completion...');
+          finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
+            userInstruction,
+            completedTaskDescriptions,
+            failedTaskDescriptions,
+            completedTaskRunSummaries,
+            codeChanges,
+          );
+
+          if (finalJudgement.completionScore !== undefined) {
+            console.log(`  Completion score: ${finalJudgement.completionScore}%`);
+          }
+
+          if (finalJudgement.isComplete) {
+            console.log('  ✅ Original instruction fully satisfied after iteration');
+            break;
+          } else {
+            console.log('  ⚠️  Still not complete, continuing loop...');
+          }
+        }
+
+        // ループ終了後の結果表示
         if (finalJudgement.completionScore !== undefined) {
           console.log(`  Completion score: ${finalJudgement.completionScore}%`);
         }
 
         if (finalJudgement.isComplete) {
           console.log('  ✅ Original instruction fully satisfied');
+          if (iterationsPerformed > 0) {
+            console.log(`  🔄 Completed after ${iterationsPerformed} additional iteration(s)`);
+          }
         } else {
           console.log('  ⚠️  Original instruction not fully satisfied');
+
+          if (iterationsPerformed >= maxIterations) {
+            console.log(
+              `  ⚠️  Reached maximum iteration limit (${maxIterations}), stopping additional task loop`,
+            );
+          }
 
           if (finalJudgement.missingAspects.length > 0) {
             console.log('  Missing aspects:');
@@ -514,9 +702,24 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             });
           }
 
-          // 継続実行の提案
-          console.log('\n  💡 Tip: Run the following command to generate additional tasks:');
-          console.log(`\n     agent continue --session ${sessionId}\n`);
+          if (!integrationWorktreeInfo) {
+            // 統合worktreeが無効な場合のみ継続実行の提案
+            console.log('\n  💡 Tip: Run the following command to generate additional tasks:');
+            console.log(`\n     agent continue --session ${sessionId}\n`);
+          }
+        }
+
+        // 統合worktreeのクリーンアップ（Phase 5実装完了）
+        if (integrationWorktreeInfo) {
+          console.log('  🧹 Cleaning up integration worktree...');
+          const cleanupResult = await integrationOps.cleanupIntegrationWorktree(
+            integrationWorktreeInfo,
+          );
+          if (isErr(cleanupResult)) {
+            console.warn(
+              `  ⚠️  Failed to cleanup integration worktree: ${cleanupResult.err.message}`,
+            );
+          }
         }
 
         // 最終判定結果をセッションに保存
