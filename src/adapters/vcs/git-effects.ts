@@ -277,4 +277,12 @@ export interface GitEffects {
     path: RepoPath | WorktreePath,
     filePath: string,
   ): Promise<Result<void, GitError>>;
+
+  /**
+   * 任意のGitコマンドを実行
+   * @param path リポジトリまたは Worktree のパス
+   * @param args Gitコマンドの引数
+   * @returns コマンドの出力
+   */
+  raw?(path: RepoPath | WorktreePath, args: string[]): Promise<Result<string, GitError>>;
 }

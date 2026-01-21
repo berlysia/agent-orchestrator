@@ -122,6 +122,8 @@ export interface ConflictResolutionInfo {
   readonly conflicts: GitConflictInfo[];
   /** コンフリクトの詳細内容 */
   readonly conflictContents: ConflictContent[];
+  /** 依存関係の再インストールが必要か（自動生成ファイルのコンフリクトを解決した場合） */
+  readonly needsReinstall?: boolean;
 }
 
 /**

@@ -6,7 +6,7 @@
  * Worktree 操作は spawn-git-effects.ts を使用すること。
  */
 
-import { simpleGit, type BranchSummary, type StatusResult, GitResponseError } from 'simple-git';
+import { simpleGit, type BranchSummary, type StatusResult } from 'simple-git';
 import { tryCatchIntoResultAsync } from 'option-t/plain_result/try_catch_async';
 import { mapErrForResult } from 'option-t/plain_result/map_err';
 import { createOk, createErr } from 'option-t/plain_result';
@@ -208,36 +208,36 @@ export const createSimpleGitEffects = (): Omit<
 
       return createOk(result);
     } catch (err) {
-      // GitResponseErrorの場合、コンフリクトの可能性がある
-      if (err instanceof GitResponseError) {
-        try {
-          const git = simpleGit(path);
-          const status = await git.status();
+      // 改善: エラー型に関係なく、まずstatusを確認
+      // WHY: simple-gitが返すエラーがGitResponseErrorではない場合があるため
+      try {
+        const git = simpleGit(path);
+        const status = await git.status();
 
-          if (status.conflicted.length > 0) {
-            // コンフリクトが発生している
-            const conflicts: GitConflictInfo[] = status.conflicted.map((filePath) => ({
-              reason: 'merge conflict',
-              filePath,
-              type: 'content' as const,
-            }));
+        if (status.conflicted.length > 0) {
+          // コンフリクトが発生している
+          const conflicts: GitConflictInfo[] = status.conflicted.map((filePath) => ({
+            reason: 'merge conflict',
+            filePath,
+            type: 'content' as const,
+          }));
 
-            const result: MergeResult = {
-              success: false,
-              mergedFiles: [],
-              hasConflicts: true,
-              conflicts,
-              status: 'conflicts',
-            };
+          const result: MergeResult = {
+            success: false,
+            mergedFiles: [],
+            hasConflicts: true,
+            conflicts,
+            status: 'conflicts',
+          };
 
-            return createOk(result);
-          }
-        } catch {
-          // ステータス取得に失敗した場合は通常のエラーとして扱う
+          return createOk(result);
         }
+      } catch (statusErr) {
+        // status取得失敗時のログ出力
+        console.error('Failed to get git status after merge error:', statusErr);
       }
 
-      // その他のエラー
+      // コンフリクトでない場合はエラーとして扱う
       const gitError = toGitError(`merge ${sourceBranch}`)(err);
       return createErr(gitError);
     }
@@ -312,6 +312,14 @@ export const createSimpleGitEffects = (): Omit<
     return mapErrForResult(result, toGitError('markConflictResolved'));
   };
 
+  const raw: NonNullable<GitEffects['raw']> = async (path, args) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      return await git.raw(args);
+    });
+    return mapErrForResult(result, toGitError(`raw ${args.join(' ')}`));
+  };
+
   return {
     createBranch,
     switchBranch,
@@ -331,5 +339,6 @@ export const createSimpleGitEffects = (): Omit<
     getConflictedFiles,
     getConflictContent,
     markConflictResolved,
+    raw,
   };
 };

@@ -1,3 +1,5 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
@@ -95,6 +97,31 @@ export interface OrchestratorError {
  * @returns Orchestrator操作オブジェクト
  */
 export const createOrchestrator = (deps: OrchestrateDeps) => {
+  /**
+   * .gitignore の推奨事項をチェックして警告を出力
+   *
+   * WHY: node_modules/ がgit管理されている場合、並列実行時にマージコンフリクトが発生しやすい
+   */
+  const checkGitignoreRecommendations = async (): Promise<void> => {
+    const gitignorePath = path.join(deps.config.appRepoPath, '.gitignore');
+
+    try {
+      const content = await fs.readFile(gitignorePath, 'utf-8');
+      const hasNodeModules = content.split('\n').some((line) => {
+        const trimmed = line.trim();
+        return trimmed === 'node_modules' || trimmed === 'node_modules/';
+      });
+
+      if (!hasNodeModules) {
+        console.log('  ⚠️  Warning: node_modules/ is not in .gitignore');
+        console.log('      This may cause merge conflicts in parallel execution.');
+        console.log('      Recommendation: Add "node_modules/" to .gitignore');
+      }
+    } catch {
+      // .gitignore が存在しない場合は無視
+    }
+  };
+
   // 各コンポーネントの操作を生成
   const schedulerOps = createSchedulerOperations({ taskStore: deps.taskStore });
   const plannerOps = createPlannerOperations({
@@ -162,6 +189,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
 
     try {
+      // 0. .gitignore の推奨事項をチェック
+      await checkGitignoreRecommendations();
+
       // 1. Planner: タスク分解
       console.log('🔍 Planning tasks...');
       const planningResult = await plannerOps.planTasks(userInstruction);
