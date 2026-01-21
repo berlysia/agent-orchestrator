@@ -544,6 +544,169 @@ describe('Judge Operations', () => {
       assert.strictEqual(result.val.success, true);
       assert.strictEqual(result.val.reason, 'Task completed successfully');
     });
+
+    it('should retry with feedback when JSON parsing fails and then succeed', async () => {
+      const tid = taskId('task-9');
+      const task = createInitialTask({
+        id: tid,
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
+        scopePaths: ['src/'],
+        acceptance: 'Feature works',
+        context: 'Test context',
+        taskType: 'implementation',
+      });
+      task.state = TaskState.RUNNING;
+      const runId = 'run-' + String(task.id) + '-1234567890';
+
+      const mockTaskStore: TaskStore = {
+        readTask: mock.fn(async () => createOk(task)),
+        updateTaskCAS: mock.fn(),
+        listTasks: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
+      };
+
+      let callCount = 0;
+      const prompts: string[] = [];
+
+      const mockRunnerEffects: RunnerEffects = {
+        readLog: mock.fn(async () => createOk('Log content')),
+        runClaudeAgent: mock.fn(async (prompt: string) => {
+          callCount += 1;
+          prompts.push(prompt);
+
+          if (callCount === 1) {
+            // First attempt: return invalid response (no JSON)
+            return createOk({
+              finalResponse: 'I think the task was completed successfully.',
+            });
+          }
+          // Second attempt: return valid JSON after feedback
+          return createOk({
+            finalResponse: JSON.stringify({
+              success: true,
+              reason: 'All acceptance criteria met after retry',
+              missingRequirements: [],
+              shouldContinue: false,
+            }),
+          });
+        }),
+        runCodexAgent: mock.fn(),
+        ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
+        appendLog: mock.fn(),
+        saveRunMetadata: mock.fn(),
+        loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
+      };
+
+      const deps: JudgeDeps = {
+        taskStore: mockTaskStore,
+        runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
+        appRepoPath: '/app',
+        agentType: 'claude',
+        model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
+      };
+
+      const ops = createJudgeOperations(deps);
+      const result = await ops.judgeTask(tid, runId);
+
+      assert(result.ok);
+      assert.strictEqual(callCount, 2, 'Should have retried once');
+      assert.strictEqual(result.val.success, true);
+      assert.strictEqual(result.val.reason, 'All acceptance criteria met after retry');
+
+      // Verify that the second prompt contains feedback
+      assert(prompts[1] !== undefined, 'Second prompt should exist');
+      assert(prompts[1].includes('IMPORTANT FEEDBACK FROM PREVIOUS ATTEMPT'));
+      assert(prompts[1].includes('did not contain any JSON object'));
+    });
+
+    it('should include feedback with invalid JSON syntax error', async () => {
+      const tid = taskId('task-10');
+      const task = createInitialTask({
+        id: tid,
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
+        scopePaths: ['src/'],
+        acceptance: 'Feature works',
+        context: 'Test context',
+        taskType: 'implementation',
+      });
+      task.state = TaskState.RUNNING;
+      const runId = 'run-' + String(task.id) + '-1234567890';
+
+      const mockTaskStore: TaskStore = {
+        readTask: mock.fn(async () => createOk(task)),
+        updateTaskCAS: mock.fn(),
+        listTasks: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
+      };
+
+      let callCount = 0;
+      const prompts: string[] = [];
+
+      const mockRunnerEffects: RunnerEffects = {
+        readLog: mock.fn(async () => createOk('Log content')),
+        runClaudeAgent: mock.fn(async (prompt: string) => {
+          callCount += 1;
+          prompts.push(prompt);
+
+          if (callCount === 1) {
+            // First attempt: return invalid JSON syntax (missing quotes in value)
+            return createOk({
+              finalResponse: '{ "success": true, "reason": incomplete JSON }',
+            });
+          }
+          // Second attempt: return valid JSON
+          return createOk({
+            finalResponse: JSON.stringify({
+              success: true,
+              reason: 'Fixed JSON syntax',
+              missingRequirements: [],
+              shouldContinue: false,
+            }),
+          });
+        }),
+        runCodexAgent: mock.fn(),
+        ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
+        appendLog: mock.fn(),
+        saveRunMetadata: mock.fn(),
+        loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
+      };
+
+      const deps: JudgeDeps = {
+        taskStore: mockTaskStore,
+        runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
+        appRepoPath: '/app',
+        agentType: 'claude',
+        model: 'claude-haiku-4-5',
+        judgeTaskRetries: 3,
+      };
+
+      const ops = createJudgeOperations(deps);
+      const result = await ops.judgeTask(tid, runId);
+
+      assert(result.ok);
+      assert.strictEqual(callCount, 2, 'Should have retried once');
+      assert.strictEqual(result.val.success, true);
+
+      // Verify that the second prompt contains feedback about invalid JSON
+      assert(prompts[1] !== undefined, 'Second prompt should exist');
+      assert(prompts[1].includes('IMPORTANT FEEDBACK FROM PREVIOUS ATTEMPT'));
+      assert(prompts[1].includes('contained invalid JSON syntax'));
+    });
   });
 
   describe('markTaskAsCompleted', () => {

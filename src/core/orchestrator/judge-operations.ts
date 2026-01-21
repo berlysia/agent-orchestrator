@@ -237,37 +237,104 @@ Output only the JSON object, no markdown code blocks or additional text.`;
  * @param output エージェントの生の応答
  * @returns パースされた判定結果（パース失敗時はundefined）
  */
-const parseJudgementResult = (output: string): z.infer<typeof AgentJudgementSchema> | undefined => {
+/**
+ * JSONパース失敗の理由を特定
+ */
+type ParseFailureReason = 'no_json' | 'invalid_json' | 'validation_failed';
+
+interface ParseResult {
+  success: true;
+  data: z.infer<typeof AgentJudgementSchema>;
+}
+
+interface ParseError {
+  success: false;
+  reason: ParseFailureReason;
+  message: string;
+  originalOutput: string;
+}
+
+const parseJudgementResult = (output: string): ParseResult | ParseError => {
+  // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
+  const jsonMatch =
+    output.match(/```(?:json)?\s*\n?([^`]+)\n?```/) || output.match(/(\{[\s\S]*\})/);
+
+  if (!jsonMatch || !jsonMatch[1]) {
+    return {
+      success: false,
+      reason: 'no_json',
+      message: 'No JSON found in response',
+      originalOutput: output,
+    };
+  }
+
+  const jsonStr = jsonMatch[1];
+
   try {
-    // JSONブロックを抽出（マークダウンコードブロックに囲まれている可能性）
-    const jsonMatch =
-      output.match(/```(?:json)?\s*\n?([^`]+)\n?```/) || output.match(/(\{[\s\S]*\})/);
-
-    if (!jsonMatch || !jsonMatch[1]) {
-      console.error('❌ No JSON found in agent response');
-      return undefined;
-    }
-
-    const jsonStr = jsonMatch[1];
     const parsed = JSON.parse(jsonStr.trim());
 
     // Zodスキーマでバリデーション
     const result = AgentJudgementSchema.safeParse(parsed);
 
     if (result.success) {
-      return result.data;
+      return { success: true, data: result.data };
     }
 
-    console.error('❌ Agent judgement validation failed:', JSON.stringify(result.error.format()));
-    return undefined;
+    return {
+      success: false,
+      reason: 'validation_failed',
+      message: `Schema validation failed: ${JSON.stringify(result.error.format())}`,
+      originalOutput: output,
+    };
   } catch (error) {
-    console.error(
-      '❌ Failed to parse agent judgement:',
-      error instanceof Error ? error.message : String(error),
-    );
-    console.error('Output was:', output);
-    return undefined;
+    return {
+      success: false,
+      reason: 'invalid_json',
+      message: error instanceof Error ? error.message : String(error),
+      originalOutput: output,
+    };
   }
+};
+
+/**
+ * JSONパース失敗時のリトライプロンプトを構築
+ *
+ * WHY: エージェントが不正なレスポンスを返した場合、
+ * フィードバックを与えて正しいJSON形式を要求する
+ *
+ * @param originalPrompt 元のプロンプト
+ * @param parseError パースエラー情報
+ * @returns リトライ用プロンプト
+ */
+const buildRetryPrompt = (originalPrompt: string, parseError: ParseError): string => {
+  const feedbackByReason: Record<ParseFailureReason, string> = {
+    no_json: 'Your response did not contain any JSON object.',
+    invalid_json: `Your response contained invalid JSON syntax: ${parseError.message}`,
+    validation_failed: `Your JSON was missing required fields or had invalid types: ${parseError.message}`,
+  };
+
+  const truncatedOutput =
+    parseError.originalOutput.length > 500
+      ? parseError.originalOutput.slice(0, 500) + '...(truncated)'
+      : parseError.originalOutput;
+
+  return `${originalPrompt}
+
+---
+IMPORTANT FEEDBACK FROM PREVIOUS ATTEMPT:
+${feedbackByReason[parseError.reason]}
+
+Your previous response was:
+"""
+${truncatedOutput}
+"""
+
+Please respond ONLY with a valid JSON object. No markdown code blocks, no explanations before or after.
+The JSON must have these required fields: success (boolean), reason (string)
+Optional fields: missingRequirements (string[]), shouldContinue (boolean), shouldReplan (boolean)
+
+Example:
+{"success": false, "reason": "Tests failed due to type errors", "missingRequirements": ["Fix type errors"], "shouldContinue": true, "shouldReplan": false}`;
 };
 
 /**
@@ -397,27 +464,46 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
 
     const attemptLimit = deps.judgeTaskRetries;
     let lastError: unknown;
+    let currentPrompt = judgementPrompt;
 
     for (let attempt = 1; attempt <= attemptLimit; attempt++) {
       const agentResult =
         deps.agentType === 'claude'
-          ? await deps.runnerEffects.runClaudeAgent(judgementPrompt, deps.appRepoPath, deps.model)
-          : await deps.runnerEffects.runCodexAgent(judgementPrompt, deps.appRepoPath, deps.model);
+          ? await deps.runnerEffects.runClaudeAgent(currentPrompt, deps.appRepoPath, deps.model)
+          : await deps.runnerEffects.runCodexAgent(currentPrompt, deps.appRepoPath, deps.model);
 
       if (agentResult.ok) {
-        const parsedJudgement = parseJudgementResult(agentResult.val.finalResponse ?? '');
-        if (!parsedJudgement) {
-          return createErr(validationError('Failed to parse judge response'));
+        const parseResult = parseJudgementResult(agentResult.val.finalResponse ?? '');
+
+        if (parseResult.success) {
+          return createOk({
+            taskId: tid,
+            success: parseResult.data.success,
+            shouldContinue: parseResult.data.shouldContinue,
+            shouldReplan: parseResult.data.shouldReplan,
+            reason: parseResult.data.reason,
+            missingRequirements: parseResult.data.missingRequirements,
+          });
         }
 
-        return createOk({
-          taskId: tid,
-          success: parsedJudgement.success,
-          shouldContinue: parsedJudgement.shouldContinue,
-          shouldReplan: parsedJudgement.shouldReplan,
-          reason: parsedJudgement.reason,
-          missingRequirements: parsedJudgement.missingRequirements,
-        });
+        // JSONパース失敗 - リトライ可能なら再試行
+        if (attempt < attemptLimit) {
+          console.log(
+            `  ⚠️ Judge response was not valid JSON (${parseResult.reason}), retrying... (attempt ${attempt + 1}/${attemptLimit})`,
+          );
+          // フィードバック付きプロンプトで再試行
+          currentPrompt = buildRetryPrompt(judgementPrompt, parseResult);
+          continue;
+        }
+
+        // 最大リトライ回数到達
+        console.error('❌ Failed to parse judge response after all retries');
+        console.error(`   Last error: ${parseResult.reason} - ${parseResult.message}`);
+        return createErr(
+          validationError(
+            `Failed to parse judge response: ${parseResult.reason} - ${parseResult.message}`,
+          ),
+        );
       }
 
       lastError = agentResult.err;
