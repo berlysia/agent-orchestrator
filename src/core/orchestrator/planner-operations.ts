@@ -15,6 +15,60 @@ import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
 
 /**
+ * Levenshtein距離を計算
+ *
+ * WHY: タスクの受け入れ基準の類似度を判定するために使用
+ *
+ * @param str1 文字列1
+ * @param str2 文字列2
+ * @returns Levenshtein距離
+ */
+const calculateLevenshteinDistance = (str1: string, str2: string): number => {
+  const len1 = str1.length;
+  const len2 = str2.length;
+  const matrix: number[][] = [];
+
+  // 初期化
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= len2; j++) {
+    matrix[0]![j] = j;
+  }
+
+  // 距離計算
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[i]![j] = Math.min(
+        matrix[i - 1]![j]! + 1, // 削除
+        matrix[i]![j - 1]! + 1, // 挿入
+        matrix[i - 1]![j - 1]! + cost, // 置換
+      );
+    }
+  }
+
+  return matrix[len1]![len2]!;
+};
+
+/**
+ * 2つの文字列の類似度を計算（0-1の範囲）
+ *
+ * WHY: Levenshtein距離を正規化して類似度として使用
+ *
+ * @param str1 文字列1
+ * @param str2 文字列2
+ * @returns 類似度（0: 完全に異なる, 1: 完全に同じ）
+ */
+const calculateSimilarity = (str1: string, str2: string): number => {
+  const maxLen = Math.max(str1.length, str2.length);
+  if (maxLen === 0) return 1.0;
+
+  const distance = calculateLevenshteinDistance(str1, str2);
+  return 1.0 - distance / maxLen;
+};
+
+/**
  * Planner依存関係
  */
 export interface PlannerDeps {
@@ -690,6 +744,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
    */
   const judgeFinalCompletionWithContext = async (
     userInstruction: string,
+    completedTasks: Task[],
     completedTaskDescriptions: string[],
     failedTaskDescriptions: string[],
     completedTaskRunSummaries: string[],
@@ -697,6 +752,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   ): Promise<FinalCompletionJudgement> => {
     const finalPrompt = buildFinalCompletionPromptWithContext(
       userInstruction,
+      completedTasks,
       completedTaskDescriptions,
       failedTaskDescriptions,
       completedTaskRunSummaries,
@@ -1118,6 +1174,66 @@ Output only the JSON array, no additional text.`;
     }
 
     const taskBreakdowns = parseResult.tasks;
+
+    // WHY: 防御的プログラミング - LLMの理解に依存せず、プログラムで重複を検出
+    /**
+     * 新規タスクが完了済みタスクと重複していないか検証
+     *
+     * @param newTasks 新規タスクリスト
+     * @param completedTasks 完了済みタスクリスト
+     * @returns 検証結果（エラーがあればエラーメッセージのリスト）
+     */
+    const validateNoDuplicates = (
+      newTasks: typeof taskBreakdowns,
+      completedTasks: Task[],
+    ): string[] => {
+      const validationErrors: string[] = [];
+
+      for (const task of newTasks) {
+        // 受け入れ基準の類似度チェック（完全一致または高類似度）
+        const duplicate = completedTasks.find((ct) => {
+          // 完全一致
+          if (ct.acceptance === task.acceptance) return true;
+
+          // 類似度チェック（Levenshtein距離による）
+          const similarity = calculateSimilarity(ct.acceptance, task.acceptance);
+          return similarity > 0.9; // 90%以上類似で重複と判定
+        });
+
+        if (duplicate) {
+          validationErrors.push(
+            `Task "${task.id}" (${task.summary ?? 'no summary'}) appears to duplicate completed task "${duplicate.id}" (${duplicate.summary ?? 'no summary'}). ` +
+              `Acceptance criteria match or are highly similar.`,
+          );
+        }
+
+        // summary必須チェック
+        if (!task.summary || task.summary.trim() === '') {
+          validationErrors.push(`Task "${task.id}" is missing required summary field`);
+        }
+      }
+
+      return validationErrors;
+    };
+
+    // バリデーション実行
+    const validationErrors = validateNoDuplicates(taskBreakdowns, completedTasks);
+    if (validationErrors.length > 0) {
+      await appendPlanningLog(`\n❌ Task validation failed:\n`);
+      for (const error of validationErrors) {
+        await appendPlanningLog(`  - ${error}\n`);
+      }
+
+      const failedRun = {
+        ...planningRun,
+        status: RunStatus.FAILURE,
+        finishedAt: new Date().toISOString(),
+        errorMessage: `Task validation failed: ${validationErrors.join('; ')}`,
+      };
+      await deps.runnerEffects.saveRunMetadata(failedRun);
+
+      return createErr(ioError('planAdditionalTasks.validation', validationErrors.join('; ')));
+    }
 
     // タスクをTaskStoreに保存
     const taskIds: string[] = [];
@@ -1882,18 +1998,31 @@ export const parseAgentOutputWithErrors = (output: string): ParseResult => {
  */
 export const buildFinalCompletionPromptWithContext = (
   userInstruction: string,
+  completedTasks: Task[],
   completedTaskDescriptions: string[],
   failedTaskDescriptions: string[],
   completedTaskRunSummaries: string[],
   codeChanges: string,
 ): string => {
+  // WHY: 完了タスクの詳細情報をプロンプトに含めることで、
+  //      既に完了している機能を不足として誤検出するのを防ぐ
+  const completedTaskDetails =
+    completedTasks.length > 0
+      ? completedTasks
+          .map((t, idx) => `${idx + 1}. [${t.id}] ${t.summary || 'N/A'}\n   Acceptance: ${t.acceptance}`)
+          .join('\n')
+      : '(No tasks completed)';
+
   return `You are evaluating whether the original user instruction has been fully satisfied.
 
 ORIGINAL INSTRUCTION:
 ${userInstruction}
 
-COMPLETED TASKS:
-${completedTaskDescriptions.length > 0 ? completedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks completed)'}
+COMPLETED TASKS (detailed):
+${completedTaskDetails}
+
+TASK DESCRIPTIONS:
+${completedTaskDescriptions.length > 0 ? completedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No task descriptions available)'}
 
 TASK EXECUTION SUMMARIES:
 ${completedTaskRunSummaries.length > 0 ? completedTaskRunSummaries.map((summary, idx) => `${idx + 1}. ${summary}`).join('\n') : '(No execution summaries available)'}
@@ -1903,6 +2032,11 @@ ${codeChanges || '(No code changes detected)'}
 
 FAILED TASKS:
 ${failedTaskDescriptions.length > 0 ? failedTaskDescriptions.map((desc, idx) => `${idx + 1}. ${desc}`).join('\n') : '(No tasks failed)'}
+
+IMPORTANT:
+- Review COMPLETED TASKS carefully before identifying missing aspects
+- If a feature is already implemented (listed in COMPLETED TASKS), do NOT suggest recreating it
+- Only identify truly missing aspects that are NOT covered by completed tasks
 
 Evaluate based on:
 1. Do the completed tasks cover all aspects of the original instruction?

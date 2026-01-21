@@ -319,6 +319,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         console.log('  📊 Evaluating completion...');
         let finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
           userInstruction,
+          completedTasks,
           completedTaskDescriptions,
           failedTaskDescriptions,
           completedTaskRunSummaries,
@@ -476,6 +477,14 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           completedTaskIds.push(...additionalCompletedIds);
           failedTaskIds.push(...additionalFailedIds);
 
+          // 完了タスクオブジェクトを更新
+          for (const rawTaskId of additionalCompletedIds) {
+            const taskResult = await deps.taskStore.readTask(taskId(rawTaskId));
+            if (taskResult.ok && taskResult.val.state === TaskState.DONE) {
+              completedTasks.push(taskResult.val);
+            }
+          }
+
           // 完了タスクの説明とサマリーを更新
           const additionalCompletedSummary = await collectCompletedTaskSummaries(
             additionalCompletedIds,
@@ -496,6 +505,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           console.log('  📊 Re-evaluating completion...');
           finalJudgement = await plannerOps.judgeFinalCompletionWithContext(
             userInstruction,
+            completedTasks,
             completedTaskDescriptions,
             failedTaskDescriptions,
             completedTaskRunSummaries,

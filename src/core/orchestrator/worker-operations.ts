@@ -6,22 +6,28 @@
  */
 
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
-import { createInitialTask } from '../../types/task.ts';
 import type { TaskId, WorktreePath, RepoPath, BranchName } from '../../types/branded.ts';
-import { runId, repoPath, taskId } from '../../types/branded.ts';
+import { runId, repoPath } from '../../types/branded.ts';
 import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
 import type { OrchestratorError } from '../../types/errors.ts';
-import { conflictResolutionRequired } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
 import type { Config } from '../../types/config.ts';
-import type { ConflictContent } from '../../types/integration.ts';
+import type { ConflictContent, ConflictResolutionInfo } from '../../types/integration.ts';
 import type { BaseBranchResolution } from './base-branch-resolver.ts';
+
+/**
+ * Worktree作成結果
+ *
+ * WHY: コンフリクトがある場合も worktree は作成されるため、エラーではなく状態として返す
+ */
+export type WorktreeSetupResult =
+  | { type: 'success'; worktreePath: WorktreePath }
+  | { type: 'with_conflicts'; worktreePath: WorktreePath; conflictInfo: ConflictResolutionInfo };
 
 /**
  * Worker依存関係
@@ -133,87 +139,28 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   };
 
   /**
-   * コンフリクト解消タスクを生成してタスクストアに追加
+   * コンフリクト解消プロンプトを構築（インライン解決用）
    *
-   * WHY: コンフリクトが発生した場合、エージェントに解消させるための専用タスクを作成
+   * WHY: Worker実行中にその場でコンフリクトを解決するためのプロンプト
    *
-   * @param parentTask 親タスク（コンフリクトが発生したタスク）
    * @param conflictInfo コンフリクト情報
-   * @returns 作成されたコンフリクト解消タスク
-   */
-  const createAndStoreConflictResolutionTask = async (
-    parentTask: Task,
-    conflictInfo: {
-      tempBranch: BranchName;
-      mergedBranches: BranchName[];
-      conflicts: Array<{ filePath: string; reason: string }>;
-    },
-  ): Promise<Result<Task, OrchestratorError>> => {
-    const { tempBranch, mergedBranches, conflicts } = conflictInfo;
-
-    // コンフリクト内容を取得
-    const conflictDetails: ConflictContent[] = [];
-    for (const conflict of conflicts) {
-      const contentResult = await deps.gitEffects.getConflictContent(
-        deps.appRepoPath,
-        conflict.filePath,
-      );
-      if (contentResult.ok) {
-        conflictDetails.push(contentResult.val);
-      }
-    }
-
-    // プロンプト生成
-    const prompt = buildConflictResolutionPrompt(parentTask, mergedBranches, conflictDetails);
-
-    // コンフリクト解消タスクを作成
-    const conflictTaskId = taskId(`conflict-resolution-${randomUUID()}`);
-    const conflictTask = createInitialTask({
-      id: conflictTaskId,
-      repo: parentTask.repo,
-      branch: tempBranch, // コンフリクト状態の一時ブランチをそのまま使用
-      scopePaths: conflicts.map((c) => c.filePath),
-      acceptance: `All merge conflicts in ${conflicts.map((c) => c.filePath).join(', ')} are resolved. The code compiles and tests pass.`,
-      taskType: 'integration',
-      context: prompt,
-      dependencies: [], // 親タスクの依存は既に完了済み
-    });
-
-    // タスクストアに保存
-    const saveResult = await deps.taskStore.createTask(conflictTask);
-    if (isErr(saveResult)) {
-      return createErr(saveResult.err);
-    }
-
-    return createOk(conflictTask);
-  };
-
-  /**
-   * コンフリクト解消プロンプトを構築
-   *
-   * WHY: 解決タスクにコンフリクトの詳細情報を提供し、自動解決を支援
-   *
-   * @param parentTask 親タスク
-   * @param mergedBranches マージされたブランチリスト
-   * @param conflictDetails コンフリクトの詳細内容
    * @returns プロンプト文字列
    */
-  const buildConflictResolutionPrompt = (
-    parentTask: Task,
-    mergedBranches: BranchName[],
-    conflictDetails: ConflictContent[],
-  ): string => {
+  const buildConflictResolutionPromptInline = (conflictInfo: ConflictResolutionInfo): string => {
     const lines: string[] = [
-      '# Merge Conflict Resolution',
+      '# ⚠️  Merge Conflict Resolution Required',
       '',
-      `Task: ${parentTask.id}`,
-      `Merging branches: ${mergedBranches.join(', ')}`,
+      'Before executing your main task, you must resolve merge conflicts that occurred',
+      'while merging dependency branches.',
       '',
-      'The following merge conflicts occurred while preparing the base branch:',
+      `Source branch: ${conflictInfo.sourceBranch}`,
+      `Target branch: ${conflictInfo.targetBranch}`,
+      '',
+      'The following merge conflicts must be resolved:',
       '',
     ];
 
-    for (const detail of conflictDetails) {
+    for (const detail of conflictInfo.conflictContents) {
       lines.push(`## File: ${detail.filePath}`);
       lines.push(`Conflicting branch: ${detail.theirBranch}`);
       lines.push('');
@@ -238,13 +185,15 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     lines.push('## Instructions');
     lines.push('');
-    lines.push('1. Resolve all merge conflicts in the listed files');
-    lines.push('2. Ensure the code compiles and tests pass');
-    lines.push('3. Commit the resolved changes');
-    lines.push('');
+    lines.push('1. Analyze both versions and understand the intent of each change');
+    lines.push('2. Resolve conflicts by choosing appropriate content or merging both changes');
+    lines.push('3. Edit the conflicted files to resolve all conflicts');
     lines.push(
-      'Note: This is a temporary merge branch. Once conflicts are resolved, the parent task will continue.',
+      '4. Ensure the resolved code compiles and maintains functionality from both versions',
     );
+    lines.push('5. DO NOT commit - the orchestrator will commit after resolution');
+    lines.push('');
+    lines.push('After resolving all conflicts, your main task will be executed.');
 
     return lines.join('\n');
   };
@@ -255,14 +204,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * WHY: メインリポジトリのHEADを変更せず、worktree内でマージを実行することで
    *      並列実行時のGit操作競合を防ぐ
    *
+   * WHY: コンフリクト発生時も worktree は作成されているため、エラーではなく
+   *      コンフリクト情報付きの結果として返す
+   *
    * @param task タスク
    * @param dependencyBranches 依存ブランチのリスト
-   * @returns worktreeのパス、またはConflictResolutionRequiredエラー
+   * @returns worktree作成結果（コンフリクト情報を含む可能性あり）
    */
   const setupWorktreeWithMerge = async (
     task: Task,
     dependencyBranches: readonly BranchName[],
-  ): Promise<Result<WorktreePath, OrchestratorError>> => {
+  ): Promise<Result<WorktreeSetupResult, OrchestratorError>> => {
     if (dependencyBranches.length === 0) {
       return createErr({
         type: 'ValidationError',
@@ -282,7 +234,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 依存が1つだけの場合はマージ不要
     if (dependencyBranches.length === 1) {
-      return createOk(worktreePath);
+      return createOk({ type: 'success', worktreePath });
     }
 
     const mergedBranches: BranchName[] = [firstBranch];
@@ -302,32 +254,39 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       const merge = mergeResult.val;
 
       if (merge.hasConflicts) {
-        // コンフリクト発生: 解消タスクを生成
-        const conflictTaskResult = await createAndStoreConflictResolutionTask(task, {
-          tempBranch: task.branch, // タスクのブランチをそのまま使用
-          mergedBranches: [...mergedBranches, branchToMerge],
-          conflicts: merge.conflicts,
-        });
-
-        if (isErr(conflictTaskResult)) {
-          // 解消タスク生成失敗: マージを中断し、worktreeをクリーンアップしてエラーを返す
-          await deps.gitEffects.abortMerge(repoPath(worktreePath));
-          await cleanupWorktree(task.id);
-          return createErr(conflictTaskResult.err);
+        // コンフリクト発生: 情報を収集して返す
+        // WHY: Worker自身がその場で解決することで、タスク失敗→依存ブロックの連鎖を防ぐ
+        const conflictDetails: ConflictContent[] = [];
+        for (const conflict of merge.conflicts) {
+          const contentResult = await deps.gitEffects.getConflictContent(
+            repoPath(worktreePath),
+            conflict.filePath,
+          );
+          if (contentResult.ok) {
+            conflictDetails.push(contentResult.val);
+          }
         }
 
-        // ConflictResolutionRequiredエラーを返す
-        // WHY: マージは中断せず、コンフリクト状態のworktreeを解消タスクに引き継ぐ
-        return createErr(
-          conflictResolutionRequired(task.id, conflictTaskResult.val.id, task.branch),
-        );
+        const conflictInfo: ConflictResolutionInfo = {
+          taskId: task.id,
+          sourceBranch: branchToMerge,
+          targetBranch: task.branch,
+          conflicts: merge.conflicts,
+          conflictContents: conflictDetails,
+        };
+
+        return createOk({
+          type: 'with_conflicts',
+          worktreePath,
+          conflictInfo,
+        });
       }
 
       mergedBranches.push(branchToMerge);
     }
 
     // 全てのマージが成功
-    return createOk(worktreePath);
+    return createOk({ type: 'success', worktreePath });
   };
 
   /**
@@ -398,7 +357,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 - Your working directory is: ${worktreePath}
 - DO NOT use 'cd ..' or navigate outside this directory
 - All work must be done within this directory
-- The worktree is properly configured with the correct branch`;
+- The worktree is properly configured with the correct branch
+
+⚠️  IMPORTANT: DO NOT create report files in the repository
+- DO NOT create VERIFICATION_REPORT.md or any other report files
+- Output verification results directly to logs (stdout/stderr)
+- Use console.log, console.error for verification output
+- Reports are automatically saved to the runs/ directory by the orchestrator`;
 
     // フィードバックがある場合は追加（継続実行のため）
     // WHY: 前回の判定で指摘された問題を明示することで、エージェントが適切に対処できる
@@ -651,7 +616,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 - Your working directory is: ${worktreePath}
 - DO NOT use 'cd ..' or navigate outside this directory
 - All work must be done within this directory
-- The worktree is properly configured with the correct branch`;
+- The worktree is properly configured with the correct branch
+
+⚠️  IMPORTANT: DO NOT create report files in the repository
+- DO NOT create VERIFICATION_REPORT.md or any other report files
+- Output verification results directly to logs (stdout/stderr)
+- Use console.log, console.error for verification output
+- Reports are automatically saved to the runs/ directory by the orchestrator`;
 
     if (previousFeedback) {
       agentPrompt += `\n\nPrevious task feedback:\n${previousFeedback}`;
@@ -728,9 +699,10 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
    * タスクを実行（全体のオーケストレーション）
    *
    * 1. worktreeを作成（依存関係に応じた処理）
-   * 2. Workerエージェントを起動
-   * 3. 変更をコミット
-   * 4. リモートにpush
+   * 2. コンフリクトがある場合は、その場で解決
+   * 3. Workerエージェントを起動
+   * 4. 変更をコミット
+   * 5. リモートにpush
    *
    * @param task 実行するタスク
    * @param resolution ベースブランチ解決結果（依存関係のパターン）
@@ -742,55 +714,122 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
   ): Promise<Result<WorkerResult, OrchestratorError>> => {
     try {
       // 1. Worktreeを作成（resolutionの型に応じて処理を分岐）
-      let worktreeResult: Result<WorktreePath, OrchestratorError>;
+      let setupResult: Result<WorktreeSetupResult, OrchestratorError>;
 
       switch (resolution.type) {
-        case 'none':
+        case 'none': {
           // 依存なし: HEADから分岐
-          worktreeResult = await setupWorktree(task);
+          const noneResult = await setupWorktree(task);
+          setupResult = noneResult.ok
+            ? createOk({ type: 'success', worktreePath: noneResult.val })
+            : noneResult;
           break;
-        case 'single':
+        }
+        case 'single': {
           // 単一依存: 依存先ブランチから分岐
-          worktreeResult = await setupWorktree(task, resolution.baseBranch);
+          const singleResult = await setupWorktree(task, resolution.baseBranch);
+          setupResult = singleResult.ok
+            ? createOk({ type: 'success', worktreePath: singleResult.val })
+            : singleResult;
           break;
+        }
         case 'multi':
           // 複数依存: worktree内でマージ
-          worktreeResult = await setupWorktreeWithMerge(task, resolution.dependencyBranches);
+          setupResult = await setupWorktreeWithMerge(task, resolution.dependencyBranches);
           break;
       }
 
-      if (isErr(worktreeResult)) {
-        return createErr(worktreeResult.err);
+      if (isErr(setupResult)) {
+        return createErr(setupResult.err);
       }
 
-      const worktreePath = worktreeResult.val;
+      const result = setupResult.val;
+      let worktreePath: WorktreePath;
 
-      // 2. タスクを実行
+      // 2. コンフリクトがある場合は、その場で解決
+      // WHY: Worker自身が解決することで、タスク失敗→依存ブロックの連鎖を防ぐ
+      if (result.type === 'with_conflicts') {
+        worktreePath = result.worktreePath;
+        const { conflictInfo } = result;
+
+        console.log(`  ⚠️  Merge conflicts detected in ${conflictInfo.conflicts.length} file(s)`);
+
+        // コンフリクト解決プロンプトを構築
+        const conflictPrompt = buildConflictResolutionPromptInline(conflictInfo);
+
+        // Claudeにコンフリクト解決を依頼
+        const resolutionResult =
+          deps.agentType === 'claude'
+            ? await deps.runnerEffects.runClaudeAgent(
+                conflictPrompt,
+                worktreePath as string,
+                deps.model!,
+              )
+            : await deps.runnerEffects.runCodexAgent(
+                conflictPrompt,
+                worktreePath as string,
+                deps.model,
+              );
+
+        if (isErr(resolutionResult)) {
+          // コンフリクト解決失敗
+          console.log(
+            `  ❌ Failed to resolve merge conflicts: ${resolutionResult.err.message}`,
+          );
+          await deps.gitEffects.abortMerge(repoPath(worktreePath));
+          await cleanupWorktree(task.id);
+          return createErr(resolutionResult.err);
+        }
+
+        // コンフリクト解決成功: 変更をステージングしてコミット
+        const stageResult = await deps.gitEffects.stageAll(worktreePath);
+        if (isErr(stageResult)) {
+          await cleanupWorktree(task.id);
+          return createErr(stageResult.err);
+        }
+
+        const commitResult = await deps.gitEffects.commit(
+          worktreePath,
+          'Resolve merge conflicts from dependencies',
+          { noGpgSign: !deps.config.commit.autoSignature },
+        );
+
+        if (isErr(commitResult)) {
+          await cleanupWorktree(task.id);
+          return createErr(commitResult.err);
+        }
+
+        console.log(`  ✅ Merge conflicts resolved`);
+      } else {
+        worktreePath = result.worktreePath;
+      }
+
+      // 3. タスクを実行
       const runResult = await executeTask(task, worktreePath);
       if (isErr(runResult)) {
         return createErr(runResult.err);
       }
 
-      const result = runResult.val;
+      const workerResult = runResult.val;
 
-      if (!result.success) {
+      if (!workerResult.success) {
         // エージェント実行失敗時はWorkerResultをそのまま返す
-        return createOk(result);
+        return createOk(workerResult);
       }
 
-      // 3. 変更をコミット
+      // 4. 変更をコミット
       const commitResult = await commitChanges(task, worktreePath);
       if (isErr(commitResult)) {
         return createErr(commitResult.err);
       }
 
-      // 4. リモートにpush
+      // 5. リモートにpush
       const pushResult = await pushChanges(worktreePath);
       if (isErr(pushResult)) {
         return createErr(pushResult.err);
       }
 
-      return createOk(result);
+      return createOk(workerResult);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return createOk({
