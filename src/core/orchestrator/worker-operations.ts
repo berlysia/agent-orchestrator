@@ -615,8 +615,14 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 ⚠️  CRITICAL: You must IMPLEMENT the task, not just verify it.
 - CREATE or MODIFY the files listed above
 - If files already exist, verify they meet requirements OR update them
-- Ensure your changes are saved and ready to be committed
 - The "VERIFY" section describes how to validate completion, not the entire task
+
+⚠️  CRITICAL: After implementing, you MUST commit your changes:
+1. Stage your changes: git add <files>
+2. Commit your changes: git commit -m "<type>: <description>"
+   - Use conventional commit format (feat:, fix:, refactor:, etc.)
+   - Example: git commit -m "feat: add GitHubError type definition"
+3. If you don't commit, the task will be marked as failed
 
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}
@@ -724,12 +730,30 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     }
 
     // 変更がステージングされているか確認
-    const statusResult = await deps.gitEffects.getStatus(worktreePath);
+    let statusResult = await deps.gitEffects.getStatus(worktreePath);
     if (isErr(statusResult)) {
       return createErr(statusResult.err);
     }
 
+    // WHY: フォールバック処理 - scopePathsでステージしても変更がない場合
+    //      Workerが変更したファイルがscopePaths外にある可能性があるため、stageAllを試みる
+    if (statusResult.val.staged.length === 0 && task.scopePaths.length > 0) {
+      console.log(`  ℹ️  No changes in scopePaths, trying stageAll as fallback...`);
+      const stageAllResult = await deps.gitEffects.stageAll(worktreePath);
+      if (isErr(stageAllResult)) {
+        return createErr(stageAllResult.err);
+      }
+
+      // 再度ステータスを確認
+      statusResult = await deps.gitEffects.getStatus(worktreePath);
+      if (isErr(statusResult)) {
+        return createErr(statusResult.err);
+      }
+    }
+
     if (statusResult.val.staged.length === 0) {
+      // WHY: Workerがすでにコミットした場合、ここでは変更なしになる（正常）
+      //      Workerがファイルを変更しなかった場合も同様（Judgeが判定する）
       console.warn(
         `  ⚠️  No changes staged for commit (scopePaths: ${task.scopePaths.join(', ') || 'none'})`,
       );
@@ -805,7 +829,9 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     const taskResult = await deps.taskStore.readTask(taskId);
 
     // 通常のworktreeを削除
-    const removeResult = await deps.gitEffects.removeWorktree(deps.appRepoPath, taskId);
+    // WHY: force=true で未コミットファイルがあっても削除できるようにする
+    //      タスク失敗時のworktreeには価値のない未コミットファイルが残っている可能性がある
+    const removeResult = await deps.gitEffects.removeWorktree(deps.appRepoPath, taskId, true);
 
     // 統合ブランチ用のworktree（存在する場合）も削除
     if (taskResult.ok && taskResult.val.integrationRetried) {
@@ -813,6 +839,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
       const removeIntegrationResult = await deps.gitEffects.removeWorktree(
         deps.appRepoPath,
         integrationWorktreeName,
+        true,
       );
 
       if (isErr(removeIntegrationResult)) {
@@ -903,8 +930,14 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 ⚠️  CRITICAL: You must IMPLEMENT the task, not just verify it.
 - CREATE or MODIFY the files listed above
 - If files already exist, verify they meet requirements OR update them
-- Ensure your changes are saved and ready to be committed
 - The "VERIFY" section describes how to validate completion, not the entire task
+
+⚠️  CRITICAL: After implementing, you MUST commit your changes:
+1. Stage your changes: git add <files>
+2. Commit your changes: git commit -m "<type>: <description>"
+   - Use conventional commit format (feat:, fix:, refactor:, etc.)
+   - Example: git commit -m "feat: add GitHubError type definition"
+3. If you don't commit, the task will be marked as failed
 
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}

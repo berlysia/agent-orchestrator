@@ -958,11 +958,21 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     const allTasks = allTasksResult.val;
 
+    // WHY: session.sessionId から sessionShort を抽出し、現在のセッションのタスクのみをフィルタリング
+    //      これにより、過去のオーケストレーション実行からの無関係なタスクが混入するのを防ぐ
+    const sessionShort = extractSessionShort(session.sessionId);
+    const sessionTaskPrefix = `task-${sessionShort}-`;
+
     // 再実行対象タスクの抽出
     // WHY: 5.2 エッジケース - 再実行対象タスクが多数ある場合の制限
     const MAX_RETRY_TASKS = 5;
 
     const candidateRetryTasks = allTasks.filter(task => {
+      // WHY: 現在のセッションのタスクのみを対象にする
+      if (!String(task.id).startsWith(sessionTaskPrefix)) {
+        return false;
+      }
+
       // NEEDS_CONTINUATION は常に再実行対象
       if (task.state === TaskState.NEEDS_CONTINUATION) {
         return true;
@@ -1043,8 +1053,13 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join('\n\n');
 
-    // 完了タスク情報を収集（統合ブランチには完了タスクが全てマージ済み）
-    const completedTasks = allTasks.filter(task => task.state === TaskState.DONE);
+    // 完了タスク情報を収集（現在のセッションのタスクのみ）
+    // WHY: 統合ブランチには完了タスクがマージ済みだが、他のセッションのタスクを含めると
+    //      Planner が混乱し、重複検出が誤作動する
+    const completedTasks = allTasks.filter(task =>
+      task.state === TaskState.DONE &&
+      String(task.id).startsWith(sessionTaskPrefix)
+    );
     const completedTaskInfo = completedTasks.map(t => ({
       id: String(t.id),
       summary: t.summary || 'N/A',
@@ -1174,23 +1189,40 @@ Output only the JSON array, no additional text.`;
       }
 
       if (parseResult.tasks.length === 0) {
-        const errorMsg =
-          parseResult.errors.length > 0
-            ? `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`
-            : 'No valid task breakdowns found in agent output';
+        // WHY: 空配列には2つのケースがある
+        // 1. パースエラーがある場合: JSONパースに失敗した（エラー）
+        // 2. パースエラーがない場合: エージェントが「追加タスクなし」と判断した（正常）
+        if (parseResult.errors.length > 0) {
+          const errorMsg = `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`;
+          await appendPlanningLog(`\n❌ ${errorMsg}\n`);
 
-        await appendPlanningLog(`\n❌ ${errorMsg}\n`);
+          // パース失敗の場合は即座に終了（リトライ不要）
+          const failedRun = {
+            ...planningRun,
+            status: RunStatus.FAILURE,
+            finishedAt: new Date().toISOString(),
+            errorMessage: errorMsg,
+          };
+          await deps.runnerEffects.saveRunMetadata(failedRun);
 
-        // パース失敗の場合は即座に終了（リトライ不要）
-        const failedRun = {
+          return createErr(ioError('planAdditionalTasks.parseOutput', errorMsg));
+        }
+
+        // エージェントが「追加タスクなし」と判断した場合は正常終了
+        await appendPlanningLog(`\n✅ No additional tasks needed (agent returned empty array)\n`);
+
+        const successRun = {
           ...planningRun,
-          status: RunStatus.FAILURE,
+          status: RunStatus.SUCCESS,
           finishedAt: new Date().toISOString(),
-          errorMessage: errorMsg,
         };
-        await deps.runnerEffects.saveRunMetadata(failedRun);
+        await deps.runnerEffects.saveRunMetadata(successRun);
 
-        return createErr(ioError('planAdditionalTasks.parseOutput', errorMsg));
+        // WHY: 再実行対象タスクのみを返す（追加タスクはゼロ）
+        return createOk({
+          taskIds: preparedRetryTasks.map(t => String(t.id)),
+          runId: additionalRunId,
+        });
       }
 
       taskBreakdowns = parseResult.tasks;
@@ -1285,11 +1317,12 @@ Output only the JSON array, no additional text.`;
     const errors: string[] = [];
 
     // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
-    const sessionShort = extractSessionShort(additionalRunId);
+    // WHY: 追加タスクは additionalRunId から sessionShort を抽出（元の session.sessionId とは異なる）
+    const additionalSessionShort = extractSessionShort(additionalRunId);
 
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
-      const uniqueTaskId = makeUniqueTaskId(rawTaskId, sessionShort);
+      const uniqueTaskId = makeUniqueTaskId(rawTaskId, additionalSessionShort);
       const task = createInitialTask({
         id: taskId(uniqueTaskId),
         repo: repoPath(deps.appRepoPath),
@@ -1308,8 +1341,8 @@ Output only the JSON array, no additional text.`;
           }
 
           // 短縮形（task-N）の場合は新規タスク間の依存
-          // 現在のセッションIDで変換
-          return taskId(makeUniqueTaskId(depId, sessionShort));
+          // 追加タスクのセッションIDで変換
+          return taskId(makeUniqueTaskId(depId, additionalSessionShort));
         }),
         summary: breakdown.summary ?? null,
         plannerRunId: additionalRunId,
