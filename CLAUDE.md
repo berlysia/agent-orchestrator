@@ -4,10 +4,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
+### TypeScript Type Checking
+
+**CRITICAL: This project uses `tsgo` instead of `tsc` for type checking.**
+
+- ❌ **DO NOT use `tsc`, `npx tsc`, or `pnpm exec tsc`** - The project blocks direct tsc usage
+- ✅ **Use `pnpm typecheck`** - Type check entire project (src/ and tests/)
+- ✅ **Use `pnpm build`** - Build src/ directory only (also performs type checking)
+
+**Type Checking Individual Files:**
+
+DO NOT run type check commands on individual files. TypeScript projects have complex cross-file dependencies, and checking individual files produces misleading errors.
+
+**Correct workflow:**
+1. Make your changes
+2. Run `pnpm typecheck` to check the entire project
+3. Review errors - focus on FIRST error (use `2>&1 | head -50`)
+
 ### Build & Test
 
 ```bash
-# Type check (src/ and tests/) internally uses `tsgo` not `tsc`
+# Type check entire project
 pnpm typecheck
 
 # Build TypeScript (src/ only, output to dist/)
