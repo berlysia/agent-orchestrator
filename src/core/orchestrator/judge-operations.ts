@@ -1,8 +1,9 @@
 import type { TaskStore } from '../task-store/interface.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
+import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { Task } from '../../types/task.ts';
 import { TaskState, BlockReason } from '../../types/task.ts';
-import type { TaskId } from '../../types/branded.ts';
+import type { TaskId, WorktreePath } from '../../types/branded.ts';
 import type { TaskStoreError } from '../../types/errors.ts';
 import { validationError } from '../../types/errors.ts';
 import type { AgentType } from '../../types/config.ts';
@@ -92,6 +93,7 @@ const getRetryAfterSeconds = (err: unknown): number | undefined => {
 export interface JudgeDeps {
   readonly taskStore: TaskStore;
   readonly runnerEffects: RunnerEffects;
+  readonly gitEffects: GitEffects;
   readonly appRepoPath: string;
   readonly agentType: AgentType;
   readonly model: string;
@@ -128,34 +130,64 @@ const AgentJudgementSchema = z.object({
 });
 
 /**
+ * Git変更情報
+ */
+interface GitChangeInfo {
+  /** git diffの出力（変更があるかどうか） */
+  hasDiff: boolean;
+  /** 変更されたファイル一覧 */
+  changedFiles: string[];
+  /** コミットされた変更があるか */
+  hasCommittedChanges: boolean;
+  /** エラーがあった場合のメッセージ */
+  error?: string;
+}
+
+/**
  * 判定プロンプトを構築
  *
  * WHY: タスクのacceptance criteriaと実行ログを組み合わせて、
  * エージェントが判定に必要な情報を提供する
  *
+ * WHY: git変更情報を追加することで、Workerが「検証のみ」を行い
+ * 実際には何も変更しなかったケースを検出できる
+ *
  * @param task タスク情報
  * @param runLog 実行ログ内容
+ * @param gitChangeInfo Git変更情報
  * @returns 判定プロンプト
  */
-const buildJudgementPrompt = (task: Task, runLog: string): string => {
+const buildJudgementPrompt = (task: Task, runLog: string, gitChangeInfo: GitChangeInfo): string => {
+  const gitSection = `
+GIT CHANGE INFORMATION:
+- Has uncommitted changes: ${gitChangeInfo.hasDiff}
+- Has committed changes in this branch: ${gitChangeInfo.hasCommittedChanges}
+- Changed files: ${gitChangeInfo.changedFiles.length > 0 ? gitChangeInfo.changedFiles.join(', ') : '(none)'}
+${gitChangeInfo.error ? `- Git check error: ${gitChangeInfo.error}` : ''}
+`;
+
   return `You are a task completion judge for a multi-agent development system.
 
 TASK INFORMATION:
 - Branch: ${task.branch}
 - Type: ${task.taskType}
 - Context: ${task.context}
+- Expected files: ${task.scopePaths.length > 0 ? task.scopePaths.join(', ') : '(not specified)'}
 
 TASK ACCEPTANCE CRITERIA:
 ${task.acceptance}
-
+${gitSection}
 EXECUTION LOG:
 ${runLog}
 
 Your task:
 1. Determine if the acceptance criteria were fully met based on the execution log
-2. Check if the implementation is complete and functional
-3. Identify any missing requirements or issues
-4. Decide if the task should continue, be replanned, or fail
+2. **CRITICAL**: Check if actual changes were made (git info above)
+   - If the task requires creating/modifying files but no git changes exist, the task is NOT complete
+   - "Verification passed" without actual file changes means the worker only verified existing files
+3. Check if the implementation is complete and functional
+4. Identify any missing requirements or issues
+5. Decide if the task should continue, be replanned, or fail
 
 Output (JSON only, no additional text):
 {
@@ -167,7 +199,8 @@ Output (JSON only, no additional text):
 }
 
 Rules:
-- success=true only if ALL acceptance criteria are met
+- success=true only if ALL acceptance criteria are met AND actual changes were made (if required)
+- **IMPORTANT**: If scopePaths specifies files to create but git shows no changes, success=false
 - missingRequirements should list specific unmet criteria
 
 - shouldContinue=true if the worker can fix issues in next iteration:
@@ -177,6 +210,7 @@ Rules:
   * Missing error handling or edge cases (can be added)
   * Code quality issues (can be improved)
   * Partial implementation that can be finished
+  * **Worker only verified but did not implement** (can implement in next iteration)
 
 - shouldContinue=false && shouldReplan=true if task needs restructuring:
   * Task scope is too large for single iteration
@@ -244,6 +278,62 @@ const parseJudgementResult = (output: string): z.infer<typeof AgentJudgementSche
  */
 export const createJudgeOperations = (deps: JudgeDeps) => {
   /**
+   * Git変更情報を取得
+   *
+   * WHY: Workerが「検証のみ」を行い実際には何も変更しなかったケースを検出するため
+   *
+   * @param worktreePath worktreeのパス
+   * @param task タスク情報（依存関係のチェック用）
+   * @returns Git変更情報
+   */
+  const getGitChangeInfo = async (
+    worktreePath: WorktreePath,
+    task: Task,
+  ): Promise<GitChangeInfo> => {
+    try {
+      // 1. 未コミットの変更があるか確認（git status --porcelain）
+      const statusResult = await deps.gitEffects.getStatus(worktreePath);
+      let hasDiff = false;
+      let changedFiles: string[] = [];
+
+      if (statusResult.ok) {
+        const status = statusResult.val;
+        // staged, modified, untrackedを結合して変更ファイル一覧を取得
+        changedFiles = [...status.staged, ...status.modified, ...status.untracked];
+        hasDiff = changedFiles.length > 0;
+      }
+
+      // 2. このブランチで新しいコミットが作成されたか確認
+      //    依存ブランチとの差分をチェック（依存がない場合はHEAD~1との比較）
+      let hasCommittedChanges = false;
+
+      if (task.dependencies.length > 0) {
+        // 依存タスクがある場合：最初の依存ブランチとの差分を確認
+        // （複数依存の場合、マージコミットがあるため単純な比較は難しい）
+        const diffResult = await deps.gitEffects.getDiff(worktreePath, ['--stat', 'HEAD~1']);
+        hasCommittedChanges = diffResult.ok ? diffResult.val.trim().length > 0 : false;
+      } else {
+        // 依存なしの場合：直近のコミットで変更があるか確認
+        const diffResult = await deps.gitEffects.getDiff(worktreePath, ['--stat', 'HEAD~1']);
+        hasCommittedChanges = diffResult.ok ? diffResult.val.trim().length > 0 : false;
+      }
+
+      return {
+        hasDiff,
+        changedFiles,
+        hasCommittedChanges,
+      };
+    } catch (error) {
+      return {
+        hasDiff: false,
+        changedFiles: [],
+        hasCommittedChanges: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  /**
    * タスクの完了を判定
    *
    * WHY: Worker実行後のタスクを評価し、完了/継続/停止を判断
@@ -251,11 +341,13 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
    *
    * @param tid 判定するタスクのID
    * @param runIdToRead 判定対象の実行ログRunID（実行結果から受け取る）
+   * @param worktreePath worktreeのパス（git変更情報の取得用）
    * @returns 判定結果（Result型）
    */
   const judgeTask = async (
     tid: TaskId,
     runIdToRead: string,
+    worktreePath?: WorktreePath,
   ): Promise<Result<JudgementResult, TaskStoreError>> => {
     const taskResult = await deps.taskStore.readTask(tid);
 
@@ -289,8 +381,19 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
     }
     const runLog = logResult.val;
 
+    // Git変更情報を取得（worktreePathが指定されている場合のみ）
+    let gitChangeInfo: GitChangeInfo = {
+      hasDiff: false,
+      changedFiles: [],
+      hasCommittedChanges: true, // デフォルトはtrue（後方互換性のため）
+    };
+
+    if (worktreePath) {
+      gitChangeInfo = await getGitChangeInfo(worktreePath, task);
+    }
+
     // エージェントに判定を依頼
-    const judgementPrompt = buildJudgementPrompt(task, runLog);
+    const judgementPrompt = buildJudgementPrompt(task, runLog, gitChangeInfo);
 
     const attemptLimit = deps.judgeTaskRetries;
     let lastError: unknown;

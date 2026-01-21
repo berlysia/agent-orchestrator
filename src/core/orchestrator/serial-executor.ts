@@ -209,8 +209,13 @@ export async function executeSerialChain(
         }
 
         // Judge判定
+        // WHY: worktreePathを渡すことで、Judgeがgit変更情報を取得できる
         console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-        const judgementResult = await judgeOps.judgeTask(tid, runIdForJudgement);
+        const judgementResult = await judgeOps.judgeTask(
+          tid,
+          runIdForJudgement,
+          worktreePath ?? undefined,
+        );
         if (isErr(judgementResult)) {
           console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);
           await schedulerOps.blockTask(tid);

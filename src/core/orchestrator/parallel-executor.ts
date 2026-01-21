@@ -1,9 +1,10 @@
+import path from 'node:path';
 import type { TaskId, BranchName } from '../../types/branded.ts';
 import type { DependencyGraph } from './dependency-graph.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
 import type { JudgeOperations } from './judge-operations.ts';
 import type { SchedulerState } from './scheduler-state.ts';
-import { workerId } from '../../types/branded.ts';
+import { workerId, worktreePath } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 import { removeRunningWorker } from './scheduler-state.ts';
 import type { createWorkerOperations } from './worker-operations.ts';
@@ -196,7 +197,11 @@ export async function executeLevelParallel(
 
         // 3. Judge: 完了判定
         console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-        const judgementResult = await judgeOps.judgeTask(tid, result.runId);
+        // WHY: worktreePathを渡すことで、Judgeがgit変更情報を取得できる
+        const taskWorktreePath = worktreePath(
+          path.join(claimedTask.repo, '.git', 'worktree', String(tid)),
+        );
+        const judgementResult = await judgeOps.judgeTask(tid, result.runId, taskWorktreePath);
 
         if (isErr(judgementResult)) {
           console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);

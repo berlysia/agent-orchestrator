@@ -1,5 +1,6 @@
+import path from 'node:path';
 import type { TaskId, WorkerId } from '../../types/branded.ts';
-import { workerId, taskId, branchName } from '../../types/branded.ts';
+import { workerId, taskId, branchName, worktreePath } from '../../types/branded.ts';
 import type { DependencyGraph } from './dependency-graph.ts';
 import type { SchedulerOperations } from './scheduler-operations.ts';
 import type { JudgeOperations } from './judge-operations.ts';
@@ -213,7 +214,12 @@ async function executeTaskAsync(
 
     // 4. Judge: 完了判定
     console.log(`  ⚖️  [${rawTaskId}] Judging task...`);
-    const judgementResult = await judgeOps.judgeTask(tid, result.runId);
+    // WHY: worktreePathを渡すことで、Judgeがgit変更情報を取得できる
+    //      Workerが「検証のみ」を行い実際には何も変更しなかったケースを検出するため
+    const taskWorktreePath = worktreePath(
+      path.join(claimedTask.repo, '.git', 'worktree', String(tid)),
+    );
+    const judgementResult = await judgeOps.judgeTask(tid, result.runId, taskWorktreePath);
 
     if (isErr(judgementResult)) {
       console.log(`  ❌ [${rawTaskId}] Failed to judge task: ${judgementResult.err.message}`);

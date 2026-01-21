@@ -11,6 +11,41 @@ import { createOk, createErr } from 'option-t/plain_result';
 import { agentExecutionError, logWriteError } from '../../../../src/types/errors.ts';
 import type { TaskStore } from '../../../../src/core/task-store/interface.ts';
 import type { RunnerEffects } from '../../../../src/core/runner/runner-effects.ts';
+import type { GitEffects } from '../../../../src/adapters/vcs/git-effects.ts';
+
+import { worktreePath } from '../../../../src/types/branded.ts';
+
+/**
+ * 最小限のGitEffectsモックを生成
+ * WHY: Judge判定ではgitEffectsの呼び出しはworktreePathが渡された場合のみなので、
+ *      最小限のモックで十分
+ */
+const createMockGitEffects = (): GitEffects => ({
+  getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+  listBranches: mock.fn(async () => createOk([])),
+  createBranch: mock.fn(async () => createOk(branchName('feature/test'))),
+  deleteBranch: mock.fn(async () => createOk(undefined)),
+  switchBranch: mock.fn(async () => createOk(undefined)),
+  createWorktree: mock.fn(),
+  removeWorktree: mock.fn(async () => createOk(undefined)),
+  pruneWorktrees: mock.fn(async () => createOk(undefined)),
+  listWorktrees: mock.fn(async () => createOk([])),
+  getWorktreePath: mock.fn(async () => createOk(worktreePath('/tmp/worktree'))),
+  stageAll: mock.fn(async () => createOk(undefined)),
+  commit: mock.fn(async () => createOk(undefined)),
+  push: mock.fn(async () => createOk(undefined)),
+  pull: mock.fn(async () => createOk(undefined)),
+  hasRemote: mock.fn(async () => createOk(true)),
+  merge: mock.fn(),
+  rebase: mock.fn(async () => createOk(undefined)),
+  abortMerge: mock.fn(async () => createOk(undefined)),
+  getStatus: mock.fn(async () => createOk({ staged: [], modified: [], untracked: [], currentBranch: branchName('main') })),
+  getDiff: mock.fn(async () => createOk('')),
+  getConflictContent: mock.fn(),
+  getConflictedFiles: mock.fn(async () => createOk([])),
+  markConflictResolved: mock.fn(async () => createOk(undefined)),
+  raw: mock.fn(async () => createOk('')),
+});
 
 describe('Judge Operations', () => {
   describe('judgeTask - Agent-based judgement', () => {
@@ -66,6 +101,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -132,6 +168,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -186,6 +223,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -238,6 +276,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -294,6 +333,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -351,6 +391,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -421,6 +462,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -487,6 +529,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -543,6 +586,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',
@@ -599,6 +643,7 @@ describe('Judge Operations', () => {
       const deps: JudgeDeps = {
         taskStore: mockTaskStore,
         runnerEffects: mockRunnerEffects,
+        gitEffects: createMockGitEffects(),
         appRepoPath: '/app',
         agentType: 'claude',
         model: 'claude-haiku-4-5',

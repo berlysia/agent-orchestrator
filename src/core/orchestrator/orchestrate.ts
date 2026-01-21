@@ -153,6 +153,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
   const judgeOps = createJudgeOperations({
     taskStore: deps.taskStore,
     runnerEffects: deps.runnerEffects,
+    gitEffects: deps.gitEffects,
     appRepoPath: deps.config.appRepoPath,
     agentType: getAgentType(deps.config, 'judge'),
     model: getModel(deps.config, 'judge'),
@@ -598,8 +599,45 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
-        // 統合worktreeのクリーンアップ（Phase 5実装完了）
+        // 統合worktreeのクリーンアップと最終マージ情報出力
         if (integrationWorktreeInfo) {
+          // WHY: クリーンアップ前に統合ブランチの情報を出力し、ユーザーがマージできるようにする
+          const integrationBranch = integrationWorktreeInfo.integrationBranch;
+
+          if (finalJudgement.isComplete) {
+            // 統合完了時：マージ方法を案内
+            console.log('\n  📦 Integration branch ready for merge');
+            console.log(`     Branch: ${integrationBranch}`);
+
+            if (deps.config.integration.method === 'auto') {
+              // 自動マージを試行
+              console.log('  🔄 Attempting automatic merge to base branch...');
+              const finalizeResult = await integrationOps.finalizeIntegration(
+                integrationBranch,
+                baseBranch,
+                { method: 'auto' },
+              );
+
+              if (finalizeResult.ok && finalizeResult.val.method === 'auto') {
+                console.log(`  ✅ Successfully merged to ${baseBranch}`);
+              } else {
+                // 自動マージ失敗時はコマンドを出力
+                console.log('  ⚠️  Automatic merge failed, please merge manually:');
+                console.log(`\n     git checkout ${baseBranch} && git merge ${integrationBranch}\n`);
+              }
+            } else {
+              // method === 'command' or 'pr'
+              console.log('\n  📝 To merge the changes, run:');
+              console.log(`\n     git checkout ${baseBranch} && git merge ${integrationBranch}\n`);
+            }
+          } else {
+            // 統合未完了時：ブランチ情報のみ出力
+            console.log('\n  📦 Integration branch (incomplete):');
+            console.log(`     Branch: ${integrationBranch}`);
+            console.log(`\n  📝 To review the partial changes, run:`);
+            console.log(`\n     git checkout ${integrationBranch}\n`);
+          }
+
           console.log('  🧹 Cleaning up integration worktree...');
           const cleanupResult = await integrationOps.cleanupIntegrationWorktree(
             integrationWorktreeInfo,

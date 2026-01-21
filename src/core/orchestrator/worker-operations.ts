@@ -590,7 +590,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 5. エージェントを実行
     // WHY: 役割ごとに最適なモデルを使用（Config から取得）
+    // WHY: task.context には詳細な実装指示が含まれるため、必ずプロンプトに含める
     let agentPrompt = `Execute task: ${task.acceptance}
+
+${task.context ? `## IMPLEMENTATION DETAILS\n${task.context}\n` : ''}
+${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.join('\n')}\n` : ''}
+
+⚠️  CRITICAL: You must IMPLEMENT the task, not just verify it.
+- CREATE or MODIFY the files listed above
+- If files already exist, verify they meet requirements OR update them
+- Ensure your changes are saved and ready to be committed
+- The "VERIFY" section describes how to validate completion, not the entire task
 
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}
@@ -849,7 +859,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     }
 
     // 5. エージェントを実行（プロンプトにフィードバックを追加）
+    // WHY: task.context には詳細な実装指示が含まれるため、必ずプロンプトに含める
     let agentPrompt = `Execute task: ${task.acceptance}
+
+${task.context ? `## IMPLEMENTATION DETAILS\n${task.context}\n` : ''}
+${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.join('\n')}\n` : ''}
+
+⚠️  CRITICAL: You must IMPLEMENT the task, not just verify it.
+- CREATE or MODIFY the files listed above
+- If files already exist, verify they meet requirements OR update them
+- Ensure your changes are saved and ready to be committed
+- The "VERIFY" section describes how to validate completion, not the entire task
 
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}
