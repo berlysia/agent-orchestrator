@@ -2,7 +2,7 @@ import { describe, it, mock } from 'node:test';
 import assert from 'node:assert';
 import { createIntegrationOperations } from '../../../../src/core/orchestrator/integration-operations.ts';
 import type { Task } from '../../../../src/types/task.ts';
-import { createInitialTask, TaskState } from '../../../../src/types/task.ts';
+import { createInitialTask } from '../../../../src/types/task.ts';
 import { taskId, repoPath, branchName } from '../../../../src/types/branded.ts';
 import { createOk, createErr } from 'option-t/plain_result';
 import type { MergeResult } from '../../../../src/types/integration.ts';
@@ -12,7 +12,7 @@ describe('Integration Operations', () => {
     it('should successfully integrate tasks without conflicts', async () => {
       // モックの依存関係
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
         readTask: mock.fn(async (id) =>
           createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
         ),
@@ -101,7 +101,7 @@ describe('Integration Operations', () => {
     it('should detect conflicts and create resolution task', async () => {
       // モックの依存関係
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
         readTask: mock.fn(async (id) =>
           createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
         ),
@@ -122,7 +122,7 @@ describe('Integration Operations', () => {
         }),
         abortMerge: mock.fn(async () => createOk(undefined)),
         getConflictedFiles: mock.fn(async () => createOk(['src/shared.ts'])),
-        getConflictContent: mock.fn(async (path, filePath) => {
+        getConflictContent: mock.fn(async (_path, filePath) => {
           return createOk({
             filePath,
             oursContent: 'const x = 1;',
@@ -188,7 +188,7 @@ describe('Integration Operations', () => {
   describe('buildConflictResolutionPrompt', () => {
     it('should build a comprehensive conflict resolution prompt', async () => {
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
 
       const mockGitEffects = {
@@ -244,7 +244,7 @@ describe('Integration Operations', () => {
   describe('finalizeIntegration', () => {
     it('should return command when method is "command"', async () => {
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
 
       const mockGitEffects = {
@@ -282,7 +282,7 @@ describe('Integration Operations', () => {
 
     it('should return command when method is "auto" and no remote', async () => {
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
 
       const mockGitEffects = {
@@ -330,7 +330,7 @@ describe('Integration Operations', () => {
 
     it('should return error when method is "pr" but no remote', async () => {
       const mockTaskStore = {
-        createTask: mock.fn(async (task: Task) => createOk(undefined)),
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
 
       const mockGitEffects = {

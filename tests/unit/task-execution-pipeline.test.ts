@@ -1,9 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { executeTaskPipeline } from '../../src/core/orchestrator/task-execution-pipeline.ts';
-import { createInitialTask } from '../../src/types/task.ts';
-import { taskId, repoPath, branchName } from '../../src/types/branded.ts';
-import { initialSchedulerState } from '../../src/core/orchestrator/scheduler-state.ts';
+import { repoPath } from '../../src/types/branded.ts';
 import type { TaskStore } from '../../src/core/task-store/interface.ts';
 import { createSchedulerOperations } from '../../src/core/orchestrator/scheduler-operations.ts';
 import { createWorkerOperations } from '../../src/core/orchestrator/worker-operations.ts';
@@ -42,7 +40,16 @@ test('task-execution-pipeline', async (t) => {
       baseBranchResolver: mockBaseBranchResolver,
       config: mockConfig,
       maxWorkers: 3,
-      initialSchedulerState: initialSchedulerState(3),
+      initialSchedulerState: { runningWorkers: new Set(), maxWorkers: 3 },
+      initialBlockedTaskIds: new Set(),
+      globalTaskIds: new Set(),
+      runnerEffects: {} as any,
+      sessionEffects: {} as any,
+      appRepoPath: repoPath('/app'),
+      coordRepoPath: repoPath('/coord'),
+      plannerAgentType: 'claude',
+      plannerModel: 'claude-opus-4-5',
+      judgeModel: 'claude-haiku-4-5',
     });
 
     assert.strictEqual(result.completedTaskIds.length, 0);

@@ -116,6 +116,8 @@ describe('PlannerSessionEffects', () => {
       assert.strictEqual(loaded.sessionId, 'session-3');
       assert.strictEqual(loaded.instruction, 'Original instruction');
       assert.strictEqual(loaded.conversationHistory.length, 2);
+      assert(loaded.conversationHistory[0]);
+      assert(loaded.conversationHistory[1]);
       assert.strictEqual(loaded.conversationHistory[0].role, 'user');
       assert.strictEqual(loaded.conversationHistory[0].content, 'User message');
       assert.strictEqual(loaded.conversationHistory[1].role, 'assistant');

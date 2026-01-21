@@ -16,7 +16,6 @@ import {
   TaskTypeEnum,
   type TaskBreakdown,
   type TaskQualityJudgement,
-  type FinalCompletionJudgement,
 } from '../../../../src/core/orchestrator/planner-operations.ts';
 
 describe('Planner Operations', () => {
@@ -83,6 +82,7 @@ describe('Planner Operations', () => {
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].description, 'Implement user authentication');
       assert.strictEqual(result[0].branch, 'feature/auth');
       assert.deepStrictEqual(result[0].scopePaths, ['src/auth/']);
@@ -116,6 +116,7 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].description, 'Add login form');
       assert.strictEqual(result[0].type, 'implementation');
     });
@@ -139,6 +140,7 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].summary, 'JWT認証の実装');
     });
 
@@ -160,6 +162,7 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].summary, undefined);
     });
 
@@ -210,6 +213,7 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].description, 'Valid task');
     });
 
@@ -229,6 +233,7 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 1);
+      assert(result[0]);
       assert.strictEqual(result[0].description, 'Single task');
     });
 
@@ -269,6 +274,8 @@ This is the recommended approach.`;
       const result = parseAgentOutput(output);
 
       assert.strictEqual(result.length, 2);
+      assert(result[0]);
+      assert(result[1]);
       assert.strictEqual(result[0].description, 'Create database schema');
       assert.strictEqual(result[1].description, 'Implement API endpoints');
     });
@@ -288,6 +295,7 @@ This is the recommended approach.`;
 
       assert.strictEqual(result.tasks.length, 0);
       assert.strictEqual(result.errors.length > 0, true);
+      assert(result.errors[0]);
       assert(result.errors[0].includes('type'));
     });
 
@@ -311,6 +319,7 @@ This is the recommended approach.`;
 
         const result = parseAgentOutput(output);
         assert.strictEqual(result.length, 1);
+        assert(result[0]);
         assert.strictEqual(result[0].type, type);
       });
     });
@@ -332,6 +341,7 @@ This is the recommended approach.`;
 
       assert.strictEqual(result.tasks.length, 0);
       assert(result.errors.length > 0);
+      assert(result.errors[0]);
       assert(result.errors[0].includes('type'));
     });
 
@@ -409,6 +419,7 @@ This is the recommended approach.`;
         const userInstruction = 'Build a TODO app';
         const tasks: TaskBreakdown[] = [
           {
+            id: 'task-1',
             description: 'Test task',
             branch: 'feature/test',
             scopePaths: ['src/'],
@@ -416,6 +427,7 @@ This is the recommended approach.`;
             type: 'implementation',
             estimatedDuration: 1.0,
             context: 'Test context',
+            dependencies: [],
           },
         ];
         const feedback = 'Acceptance criteria are too vague';
@@ -734,6 +746,7 @@ Suggestions:
 
         const cycles = detectCircularDependencies(tasks);
         assert.strictEqual(cycles.length, 1);
+        assert(cycles[0]);
         assert(cycles[0].includes('task-1'));
         assert(cycles[0].includes('task-2'));
       });
@@ -777,6 +790,7 @@ Suggestions:
 
         const cycles = detectCircularDependencies(tasks);
         assert.strictEqual(cycles.length, 1);
+        assert(cycles[0]);
         assert(cycles[0].includes('task-1'));
         assert(cycles[0].includes('task-2'));
         assert(cycles[0].includes('task-3'));
@@ -842,6 +856,7 @@ Suggestions:
 
         const errors = validateTaskDependencies(tasks);
         assert.strictEqual(errors.length, 1);
+        assert(errors[0]);
         assert(errors[0].includes('non-existent task'));
         assert(errors[0].includes('task-999'));
       });

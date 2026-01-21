@@ -6,9 +6,9 @@ import {
 } from '../../../../src/core/orchestrator/judge-operations.ts';
 import { createInitialTask } from '../../../../src/types/task.ts';
 import { TaskState } from '../../../../src/types/task.ts';
-import { taskId } from '../../../../src/types/branded.ts';
+import { taskId, branchName, runId as createRunId, repoPath } from '../../../../src/types/branded.ts';
 import { createOk, createErr } from 'option-t/plain_result';
-import { agentExecutionError } from '../../../../src/types/errors.ts';
+import { agentExecutionError, logWriteError } from '../../../../src/types/errors.ts';
 import type { TaskStore } from '../../../../src/core/task-store/interface.ts';
 import type { RunnerEffects } from '../../../../src/core/runner/runner-effects.ts';
 
@@ -18,8 +18,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-1');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works correctly',
         context: 'Test context',
@@ -32,8 +32,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -54,9 +56,11 @@ describe('Judge Operations', () => {
         ),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -82,8 +86,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-2');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works correctly with all edge cases handled',
         context: 'Test context',
@@ -96,8 +100,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -116,9 +122,11 @@ describe('Judge Operations', () => {
         ),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -143,8 +151,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-3');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -157,18 +165,22 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
-        readLog: mock.fn(async () => createErr({ type: 'IO_ERROR', message: 'Log not found' })),
+        readLog: mock.fn(async () => createErr(logWriteError(createRunId(runId), 'Log not found'))),
         runClaudeAgent: mock.fn(),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -191,8 +203,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-4');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -205,20 +217,22 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
         readLog: mock.fn(async () => createOk('Log content')),
-        runClaudeAgent: mock.fn(async () =>
-          createErr({ type: 'AGENT_EXECUTION_ERROR', message: 'Agent failed' }),
-        ),
+        runClaudeAgent: mock.fn(async () => createErr(agentExecutionError('claude', 'Agent failed'))),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -241,8 +255,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-5');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -255,8 +269,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -268,9 +284,11 @@ describe('Judge Operations', () => {
         ),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -293,8 +311,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-8');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -307,8 +325,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const rateLimitError = agentExecutionError('claude', {
@@ -321,9 +341,11 @@ describe('Judge Operations', () => {
         runClaudeAgent: mock.fn(async () => createErr(rateLimitError)),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -364,8 +386,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-6');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -378,8 +400,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -387,9 +411,11 @@ describe('Judge Operations', () => {
         runClaudeAgent: mock.fn(),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -413,8 +439,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-7');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -427,8 +453,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -449,9 +477,11 @@ describe('Judge Operations', () => {
         ),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -477,8 +507,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-1');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -492,8 +522,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(async () => createOk(updatedTask)),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -501,9 +533,11 @@ describe('Judge Operations', () => {
         runClaudeAgent: mock.fn(),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {
@@ -529,8 +563,8 @@ describe('Judge Operations', () => {
       const tid = taskId('task-1');
       const task = createInitialTask({
         id: tid,
-        description: 'Implement feature',
-        branch: 'feature/test',
+        repo: repoPath('/app'),
+        branch: branchName('feature/test'),
         scopePaths: ['src/'],
         acceptance: 'Feature works',
         context: 'Test context',
@@ -544,8 +578,10 @@ describe('Judge Operations', () => {
         readTask: mock.fn(async () => createOk(task)),
         updateTaskCAS: mock.fn(async () => createOk(updatedTask)),
         listTasks: mock.fn(),
-        listTasksByState: mock.fn(),
-        updateTask: mock.fn(),
+        createTask: mock.fn(),
+        deleteTask: mock.fn(),
+        writeRun: mock.fn(),
+        writeCheck: mock.fn(),
       };
 
       const mockRunnerEffects: RunnerEffects = {
@@ -553,9 +589,11 @@ describe('Judge Operations', () => {
         runClaudeAgent: mock.fn(),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
+        initializeLogFile: mock.fn(),
         appendLog: mock.fn(),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
+        listRunLogs: mock.fn(),
       };
 
       const deps: JudgeDeps = {

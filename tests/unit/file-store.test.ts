@@ -5,7 +5,7 @@ import path from 'path';
 import { createFileStore } from '../../src/core/task-store/file-store.ts';
 import { createInitialTask, TaskState } from '../../src/types/task.ts';
 import { assertOk, assertErr } from '../mocks/effects.ts';
-import { taskId, repoPath, branchName } from '../../src/types/branded.ts';
+import { taskId, repoPath, branchName, workerId } from '../../src/types/branded.ts';
 
 const TEST_BASE_PATH = path.join(process.cwd(), '.tmp', 'test-store');
 
@@ -29,11 +29,14 @@ test('FileStore: CRUD operations', async (t) => {
     });
 
     const createResult = await store.createTask(task);
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(createResult);
 
     const readResult = await store.readTask(taskId('task-1'));
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(readResult);
     const retrieved = readResult.val;
+    assert(retrieved);
     assert.strictEqual(retrieved.id, taskId('task-1'));
     assert.strictEqual(retrieved.state, TaskState.READY);
     assert.strictEqual(retrieved.version, 0);
@@ -51,7 +54,9 @@ test('FileStore: CRUD operations', async (t) => {
     });
 
     const result = await store.createTask(task);
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertErr(result);
+    assert(result.err);
     assert.strictEqual(result.err.type, 'TaskAlreadyExistsError');
   });
 
@@ -67,11 +72,14 @@ test('FileStore: CRUD operations', async (t) => {
     });
 
     const createResult = await store.createTask(task2);
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(createResult);
 
     const listResult = await store.listTasks();
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(listResult);
     const tasks = listResult.val;
+    assert(tasks);
     assert.strictEqual(tasks.length, 2);
     const ids = tasks.map((t) => t.id).sort();
     assert.deepStrictEqual(ids, [taskId('task-1'), taskId('task-2')]);
@@ -81,13 +89,15 @@ test('FileStore: CRUD operations', async (t) => {
     const updateResult = await store.updateTaskCAS(taskId('task-1'), 0, (task) => ({
       ...task,
       state: TaskState.RUNNING,
-      owner: 'worker-1',
+      owner: workerId('worker-1'),
     }));
 
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(updateResult);
     const updated = updateResult.val;
+    assert(updated);
     assert.strictEqual(updated.state, TaskState.RUNNING);
-    assert.strictEqual(updated.owner, 'worker-1');
+    assert.strictEqual(updated.owner, workerId('worker-1'));
     assert.strictEqual(updated.version, 1);
   });
 
@@ -97,16 +107,21 @@ test('FileStore: CRUD operations', async (t) => {
       state: TaskState.DONE,
     }));
 
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertErr(result);
+    assert(result.err);
     assert.strictEqual(result.err.type, 'ConcurrentModificationError');
   });
 
   await t.test('deleteTask - should delete a task', async () => {
     const deleteResult = await store.deleteTask(taskId('task-2'));
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertOk(deleteResult);
 
     const readResult = await store.readTask(taskId('task-2'));
+    // @ts-expect-error - TypeScript assertion inference limitation
     assertErr(readResult);
+    assert(readResult.err);
     assert.strictEqual(readResult.err.type, 'TaskNotFoundError');
   });
 
