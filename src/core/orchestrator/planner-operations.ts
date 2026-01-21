@@ -987,13 +987,29 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       .map((msg) => `${msg.role}: ${msg.content}`)
       .join('\n\n');
 
-    // 完了タスク数のカウント（統合ブランチには完了タスクが全てマージ済み）
-    const completedTaskCount = allTasks.filter(task => task.state === TaskState.DONE).length;
+    // 完了タスク情報を収集（統合ブランチには完了タスクが全てマージ済み）
+    const completedTasks = allTasks.filter(task => task.state === TaskState.DONE);
+    const completedTaskInfo = completedTasks.map(t => ({
+      id: String(t.id),
+      summary: t.summary || 'N/A',
+      acceptance: t.acceptance,
+    }));
+
+    // WHY: 完了タスクの具体的な内容をPlannerに伝えることで、同じタスクの再生成を防ぐ
+    const completedTaskSection = completedTaskInfo.length > 0
+      ? `\n✅ COMPLETED TASKS (DO NOT RECREATE - already in codebase):
+${completedTaskInfo.map(t => `- ${t.id}: ${t.summary}\n  Acceptance: ${t.acceptance}`).join('\n')}
+
+CRITICAL: These tasks are ALREADY DONE and merged into the integration branch.
+DO NOT recreate any of these tasks or their functionality.
+Only create NEW tasks for missing aspects identified below.
+`
+      : '';
 
     // WHY: Phase 2 - 未完了タスク情報をプロンプトに含める
     //      Plannerが未完了タスクを参照・依存できるようにする
     const incompleteTaskSection = incompleteTaskInfo.length > 0
-      ? `\nINCOMPLETE TASKS (can be used as dependencies or for context):
+      ? `\n🔄 INCOMPLETE TASKS (can be used as dependencies or for context):
 ${incompleteTaskInfo.map(t => `- ${t.id} (${t.state}): ${t.acceptance}\n  Last error: ${t.lastError}`).join('\n')}
 
 NOTE: These incomplete tasks will be retried from the integration branch alongside your new tasks.
@@ -1009,16 +1025,15 @@ ${conversationContext}
 
 IMPORTANT CONTEXT:
 - Your new tasks will be executed from the integration branch, which includes ALL completed work.
-- ${completedTaskCount} tasks have been successfully completed and merged into the integration branch.
-- DO NOT create dependencies on any previously completed tasks - they are already in the codebase.
+- ${completedTaskInfo.length} tasks have been successfully completed and merged into the integration branch.
 - Your new tasks should start from task-1 (unique IDs will be assigned automatically).
 - Only create dependencies on other NEW tasks you generate in this session (e.g., task-2 depends on task-1).
-${incompleteTaskSection}
+${completedTaskSection}${incompleteTaskSection}
 Based on the above context, the following aspects are still missing:
 ${missingAspects.map((aspect, i) => `${i + 1}. ${aspect}`).join('\n')}
 
-Generate additional tasks to address these missing aspects.
-Follow the same format and guidelines as before.
+Generate additional tasks to address ONLY these missing aspects.
+DO NOT recreate any completed tasks listed above.
 
 Output format (JSON array):
 [
@@ -1031,12 +1046,16 @@ Output format (JSON array):
     "type": "implementation|documentation|investigation|integration",
     "estimatedDuration": 2.5,
     "context": "Complete context for task execution",
-    "dependencies": []
+    "dependencies": [],
+    "summary": "Short task summary (30-50 chars)"
   }
 ]
 
-CRITICAL: Dependencies should ONLY reference NEW tasks (task-1, task-2, etc.) you generate in this session.
-Do NOT depend on any previous tasks - they are already merged into the integration branch.
+CRITICAL RULES:
+1. DO NOT recreate any tasks from the "COMPLETED TASKS" list above
+2. Dependencies should ONLY reference NEW tasks (task-1, task-2, etc.) or INCOMPLETE tasks (with full IDs)
+3. Focus ONLY on the missing aspects listed above
+4. REQUIRED: Every task MUST have a summary field (30-50 characters)
 
 Output only the JSON array, no additional text.`;
 
@@ -1131,6 +1150,7 @@ Output only the JSON array, no additional text.`;
           // 現在のセッションIDで変換
           return taskId(makeUniqueTaskId(depId, sessionShort));
         }),
+        summary: breakdown.summary ?? null,
         plannerRunId: additionalRunId,
         plannerLogPath: additionalPlannerLogPath,
         plannerMetadataPath: additionalPlannerMetadataPath,

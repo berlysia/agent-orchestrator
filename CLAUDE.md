@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build & Test
 
 ```bash
-# Type check (src/ and tests/)
+# Type check (src/ and tests/) internally uses `tsgo` not `tsc`
 pnpm typecheck
 
 # Build TypeScript (src/ only, output to dist/)
