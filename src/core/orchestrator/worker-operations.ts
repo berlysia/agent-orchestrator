@@ -400,8 +400,8 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     const agentResult =
       deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!)
-        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
+        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!, theRunId)
+        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model, theRunId);
 
     // 6. 結果をログに記録
     if (isErr(agentResult)) {
@@ -615,8 +615,8 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     const agentResult =
       deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!)
-        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model);
+        ? await deps.runnerEffects.runClaudeAgent(agentPrompt, worktreePath as string, deps.model!, theRunId)
+        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model, theRunId);
 
     // 6. 結果をログに記録
     if (isErr(agentResult)) {
