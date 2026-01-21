@@ -1446,8 +1446,11 @@ export const formatFeedbackForRetry = (
  */
 export const formatFeedbackForLog = (feedback: string): string => {
   // "Previous Response" セクションを省略表示に置き換え
+  // WHY: 正規表現を改善して確実にマッチするように修正
+  //      - (?:json)? の後の \n をオプショナルにして、改行がない場合にも対応
+  //      - 最後の ``` の前の \n もオプショナルにして、より柔軟にマッチ
   return feedback.replace(
-    /Previous (?:Response|Output) \(for reference and modification\):\n```(?:json)?\n[\s\S]*?\n```/,
+    /Previous (?:Response|Output) \(for reference and modification\):\n```(?:json)?\n?[\s\S]*?\n?```/,
     '<< Previous Response Omitted (included in prompt for agent context) >>',
   );
 };
