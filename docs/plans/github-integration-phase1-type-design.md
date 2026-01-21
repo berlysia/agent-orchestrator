@@ -229,7 +229,7 @@ export const githubUnknownError = (
 ### `src/types/github.ts` （新規作成）
 
 ```typescript
-import type { Result } from 'option-t/result';
+import type { Result } from 'option-t/plain_result';
 import type { GitHubConfig } from './config.ts';
 import type { GitHubError } from './errors.ts';
 
@@ -348,7 +348,7 @@ if (response.status === 404) {
 
 ```typescript
 import { githubEffects } from './adapters/github/index.ts';
-import { unwrapOrElse } from 'option-t/result';
+import { isErr } from 'option-t/plain_result';
 
 const result = await githubEffects.createPullRequest({
   config: githubConfig,
@@ -358,13 +358,10 @@ const result = await githubEffects.createPullRequest({
   base: 'main',
 });
 
-const prUrl = unwrapOrElse(result, (error) => {
-  console.error(`PR作成失敗: ${error.type} - ${error.message}`);
-  return null;
-});
-
-if (prUrl) {
-  console.log(`PR作成成功: ${prUrl.url}`);
+if (isErr(result)) {
+  console.error(`PR作成失敗: ${result.err.type} - ${result.err.message}`);
+} else {
+  console.log(`PR作成成功: ${result.val.url}`);
 }
 ```
 

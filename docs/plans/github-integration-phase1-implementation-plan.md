@@ -79,7 +79,7 @@ src/
 ### `src/types/github.ts`
 
 ```typescript
-import type { Result } from 'option-t/result';
+import type { Result } from 'option-t/plain_result';
 
 /**
  * GitHub設定（.agent/config.jsonのgithubセクション）
@@ -246,7 +246,7 @@ export interface AgentConfig {
 ```typescript
 import { Octokit } from '@octokit/rest';
 import type { GitHubConfig } from '../../types/github.ts';
-import { createErr, createOk, type Result } from 'option-t/result';
+import { createErr, createOk, type Result } from 'option-t/plain_result';
 import type { GitHubError } from '../../types/errors.ts';
 
 /**
@@ -258,7 +258,7 @@ export function createGitHubClient(config: GitHubConfig): Result<Octokit, GitHub
 
   if (!token) {
     return createErr({
-      kind: 'GitHubAuthFailed',
+      type: 'GitHubAuthFailedError',
       message: `環境変数 ${config.auth.tokenEnvName} が設定されていません`,
       missingEnvName: config.auth.tokenEnvName,
     });
@@ -278,7 +278,7 @@ export function createGitHubClient(config: GitHubConfig): Result<Octokit, GitHub
 ```typescript
 import type { Octokit } from '@octokit/rest';
 import type { CreatePullRequestInput, PullRequest } from '../../types/github.ts';
-import { createErr, createOk, type Result } from 'option-t/result';
+import { createErr, createOk, type Result } from 'option-t/plain_result';
 import type { GitHubError } from '../../types/errors.ts';
 import { classifyGitHubError } from './error.ts';
 
@@ -338,7 +338,7 @@ export function classifyGitHubError(error: unknown): GitHubError {
     // 認証失敗
     if (statusCode === 401 || statusCode === 403) {
       return {
-        kind: 'GitHubAuthFailed',
+        type: 'GitHubAuthFailedError',
         message: `認証に失敗しました: ${message}`,
       };
     }
@@ -364,7 +364,7 @@ export function classifyGitHubError(error: unknown): GitHubError {
       }
 
       return {
-        kind: 'GitHubRateLimited',
+        type: 'GitHubRateLimitedError',
         message: `レート制限に達しました: ${message}`,
         resetAt,
         remaining,
@@ -374,7 +374,7 @@ export function classifyGitHubError(error: unknown): GitHubError {
     // リソース未存在
     if (statusCode === 404) {
       return {
-        kind: 'GitHubNotFound',
+        type: 'GitHubNotFoundError',
         message: `リソースが見つかりません: ${message}`,
         resourceType: 'repository', // デフォルト
       };
@@ -383,14 +383,14 @@ export function classifyGitHubError(error: unknown): GitHubError {
     // 入力検証エラー
     if (statusCode === 422) {
       return {
-        kind: 'GitHubValidationError',
+        type: 'GitHubValidationError',
         message: `入力が不正です: ${message}`,
       };
     }
 
     // その他のエラー
     return {
-      kind: 'GitHubUnknownError',
+      type: 'GitHubUnknownError',
       message: `予期しないエラーが発生しました: ${message}`,
       statusCode,
       originalError: message,
@@ -399,7 +399,7 @@ export function classifyGitHubError(error: unknown): GitHubError {
 
   // 型不明のエラー
   return {
-    kind: 'GitHubUnknownError',
+    type: 'GitHubUnknownError',
     message: `予期しないエラーが発生しました: ${String(error)}`,
     originalError: String(error),
   };
@@ -412,7 +412,7 @@ export function classifyGitHubError(error: unknown): GitHubError {
 import type { GitHubEffects } from '../../types/github.ts';
 import { createGitHubClient } from './client.ts';
 import { createPullRequest as createPR } from './pull-request.ts';
-import { andThen } from 'option-t/result';
+import { andThenAsync } from 'option-t/plain_result/and_then_async';
 
 /**
  * GitHubEffectsの実装
@@ -421,7 +421,7 @@ export const githubEffects: GitHubEffects = {
   async createPullRequest(input) {
     // クライアント生成 → PR作成
     const clientResult = createGitHubClient(input.config);
-    return andThen(clientResult, (octokit) => createPR(octokit, input));
+    return andThenAsync(clientResult, (octokit) => createPR(octokit, input));
   },
 };
 ```
@@ -430,53 +430,209 @@ export const githubEffects: GitHubEffects = {
 
 ## Orchestrator統合
 
-### `src/core/orchestrator/integration-operations.ts`
+### `src/types/errors.ts`への追加
 
-既存の`finalizeIntegration`関数内で、PR作成処理を実装します。
+`GitHubError`を`OrchestratorError`に統合します。
 
 ```typescript
-import { githubEffects } from '../../adapters/github/index.ts';
-import { unwrapOrElse } from 'option-t/result';
-import type { GitHubConfig } from '../../types/github.ts';
-import type { IntegrationFinalResult } from '../../types/integration.ts';
+// OrchestratorErrorのユニオンにGitHubErrorを追加
+export type OrchestratorError =
+  | TaskStoreError
+  | GitError
+  | RunnerError
+  | WorkerCapacityError
+  | TaskClaimError
+  | ConflictResolutionRequiredError
+  | GitHubError;  // 追加
+```
 
-export async function finalizeIntegration(
-  config: AgentConfig,
-  // ... 他のパラメータ
-): Promise<IntegrationFinalResult> {
-  // ... 既存の処理
+### `src/core/orchestrator/integration-operations.ts`
 
-  // GitHub連携が設定されている場合、PR作成
-  if (config.github && config.integration?.method === 'pull-request') {
-    const githubConfig: GitHubConfig = config.github;
+#### 1. IntegrationDepsにGitHubEffectsを追加
 
-    const prResult = await githubEffects.createPullRequest({
+```typescript
+import type { GitHubEffects } from '../../adapters/github/index.ts';
+
+export interface IntegrationDeps {
+  readonly taskStore: TaskStore;
+  readonly gitEffects: GitEffects;
+  readonly appRepoPath: string;
+  readonly config: Config;
+  readonly githubEffects?: GitHubEffects;  // 追加（オプショナル）
+}
+```
+
+#### 2. PR作成に必要な情報を渡すための型定義
+
+```typescript
+/**
+ * PR作成用の追加情報
+ */
+export interface PullRequestInfo {
+  /** PRタイトル */
+  readonly title: string;
+  /** PR本文 */
+  readonly body: string;
+}
+```
+
+#### 3. finalizeIntegrationの修正（行728付近）
+
+```typescript
+const finalizeIntegration = async (
+  integrationBranch: BranchName,
+  baseBranch: BranchName,
+  config: IntegrationConfig,
+  prInfo?: PullRequestInfo,  // 追加: PR作成用情報
+): Promise<Result<IntegrationFinalResult, OrchestratorError>> => {
+  const repo = repoPath(appRepoPath);
+
+  // リモートの有無を確認
+  const hasRemoteResult = await gitEffects.hasRemote(repo, 'origin');
+  if (isErr(hasRemoteResult)) {
+    return createErr(hasRemoteResult.err);
+  }
+  const hasRemote = hasRemoteResult.val;
+
+  if (config.method === 'pr') {
+    if (!hasRemote) {
+      return createErr(
+        ioError('finalizeIntegration', new Error('PR creation requires a remote repository')),
+      );
+    }
+
+    // GitHub設定の確認
+    const githubConfig = deps.config.github;
+    if (!githubConfig) {
+      return createErr(
+        ioError('finalizeIntegration', new Error('GitHub config is required for PR creation')),
+      );
+    }
+
+    // GitHubEffectsの確認
+    if (!deps.githubEffects) {
+      return createErr(
+        ioError('finalizeIntegration', new Error('GitHubEffects is not configured')),
+      );
+    }
+
+    // 1. 統合ブランチをリモートにプッシュ
+    const pushResult = await gitEffects.push(repo, 'origin', integrationBranch);
+    if (isErr(pushResult)) {
+      return createErr(pushResult.err);
+    }
+
+    // 2. PR作成
+    const prResult = await deps.githubEffects.createPullRequest({
       config: githubConfig,
-      title: `${taskName} - Agent Orchestrator`,
-      body: generatePRBody(/* ... */),
-      head: currentBranch,
-      base: config.integration.baseBranch ?? 'main',
+      title: prInfo?.title ?? `Integration: ${integrationBranch}`,
+      body: prInfo?.body ?? 'Auto-generated by Agent Orchestrator',
+      head: integrationBranch,
+      base: baseBranch,
       draft: false,
     });
 
-    const prUrl = unwrapOrElse(prResult, (error) => {
-      // エラー時はログ出力し、prUrlはnullのまま
-      console.error(`PR作成に失敗しました: ${error.kind} - ${error.message}`);
-      return null;
+    if (isErr(prResult)) {
+      // GitHubErrorをそのまま返す（OrchestratorErrorに含まれる）
+      return createErr(prResult.err);
+    }
+
+    // 成功時のみ method: 'pr' を返す
+    return createOk({
+      method: 'pr',
+      prUrl: prResult.val.url,
     });
-
-    return {
-      // ... 既存のフィールド
-      prUrl: prUrl?.url ?? null,
-    };
   }
+  // ... 以下、'command' と 'auto' の処理は既存のまま
+};
+```
 
-  // GitHub連携なしの場合
+### `src/core/orchestrator/orchestrate.ts`
+
+#### 1. 早期設定検証
+
+orchestrate開始時に、PRモードが指定されているのにGitHub設定がない場合は即座にエラーとします。
+
+```typescript
+// orchestrate関数の冒頭で設定の整合性を検証
+if (config.integration.method === 'pr' && !config.github) {
+  return createErr(
+    ioError('orchestrate', new Error('Integration method is "pr" but github config is not provided'))
+  );
+}
+```
+
+#### 2. GitHubEffectsの初期化
+
+GitHubEffectsのインスタンスを生成し、IntegrationDepsに渡します。
+
+```typescript
+import { createGitHubEffects } from '../../adapters/github/index.ts';
+
+// orchestrate関数内で
+const githubEffects = config.github ? createGitHubEffects() : undefined;
+
+const integrationDeps: IntegrationDeps = {
+  taskStore,
+  gitEffects,
+  appRepoPath: config.appRepoPath,
+  config,
+  githubEffects,  // 追加
+};
+```
+
+#### 3. PullRequestInfo生成ロジック
+
+統合結果からPRタイトルと本文を構築します。
+
+```typescript
+import type { PullRequestInfo } from './integration-operations.ts';
+import type { IntegrationResult } from '../../types/integration.ts';
+
+/**
+ * 統合結果からPR情報を生成
+ */
+function buildPullRequestInfo(
+  integrationResult: IntegrationResult,
+  userInstruction: string,
+): PullRequestInfo {
+  const taskCount = integrationResult.integratedTaskIds.length;
+  const taskList = integrationResult.mergeDetails
+    .map((d) => `- ${d.taskId}: ${d.sourceBranch}`)
+    .join('\n');
+
   return {
-    // ... 既存のフィールド
-    prUrl: null,
+    title: `[Agent Orchestrator] ${taskCount} task(s) completed`,
+    body: `## Summary
+
+This PR integrates ${taskCount} task(s) completed by Agent Orchestrator.
+
+## Original Instruction
+
+${userInstruction}
+
+## Integrated Tasks
+
+${taskList}
+
+## Integration Branch
+
+\`${integrationResult.integrationBranch}\`
+
+---
+*Auto-generated by Agent Orchestrator*
+`,
   };
 }
+
+// finalizeIntegration呼び出し時
+const prInfo = buildPullRequestInfo(integrationResult, userInstruction);
+const finalResult = await integrationOps.finalizeIntegration(
+  integrationResult.integrationBranch,
+  baseBranch,
+  config.integration,
+  prInfo,
+);
 ```
 
 ---
@@ -515,34 +671,37 @@ export GITHUB_TOKEN="ghp_your_personal_access_token_here"
 
 ```mermaid
 sequenceDiagram
-  participant Orchestrator as Orchestrator
-  participant Effects as GitHubEffects
-  participant Client as createGitHubClient
+  participant Finalize as finalizeIntegration
+  participant Git as GitEffects
+  participant GH as GitHubEffects
   participant Octokit as Octokit
   participant API as GitHub API
 
-  Orchestrator->>Effects: createPullRequest(input)
-  Effects->>Client: createGitHubClient(config)
-  Client->>Client: 環境変数からトークン取得
-  alt トークンなし
-    Client-->>Effects: Err(GitHubAuthFailed)
-    Effects-->>Orchestrator: Err(GitHubAuthFailed)
-  else トークンあり
-    Client->>Octokit: new Octokit(auth, baseUrl)
-    Client-->>Effects: Ok(octokit)
-    Effects->>Octokit: pulls.create(...)
-    Octokit->>API: POST /repos/{owner}/{repo}/pulls
-    alt API成功
-      API-->>Octokit: PullRequest data
-      Octokit-->>Effects: response.data
-      Effects-->>Orchestrator: Ok(PullRequest)
-      Orchestrator->>Orchestrator: prUrl = PullRequest.url
-    else API失敗
-      API-->>Octokit: Error (401/404/422/429/5xx)
-      Octokit-->>Effects: RequestError
-      Effects->>Effects: classifyGitHubError(error)
-      Effects-->>Orchestrator: Err(GitHubError)
-      Orchestrator->>Orchestrator: prUrl = null, ログ出力
+  Finalize->>Git: push(repo, origin, integrationBranch)
+  alt プッシュ失敗
+    Git-->>Finalize: Err(GitError)
+  else プッシュ成功
+    Git-->>Finalize: Ok(void)
+    Finalize->>GH: createPullRequest(input)
+    GH->>GH: 環境変数からトークン取得
+    alt トークンなし
+      GH-->>Finalize: Err(GitHubAuthFailedError)
+    else トークンあり
+      GH->>Octokit: new Octokit(auth, baseUrl)
+      GH->>Octokit: pulls.create(...)
+      Octokit->>API: POST /repos/{owner}/{repo}/pulls
+      alt API成功
+        API-->>Octokit: PullRequest data
+        Octokit-->>GH: response.data
+        GH-->>Finalize: Ok(PullRequest)
+        Finalize-->>Finalize: return Ok({ method: 'pr', prUrl })
+      else API失敗
+        API-->>Octokit: Error (401/404/422/429/5xx)
+        Octokit-->>GH: RequestError
+        GH->>GH: classifyGitHubError(error)
+        GH-->>Finalize: Err(GitHubError)
+        Finalize-->>Finalize: return Err(GitHubError)
+      end
     end
   end
 ```
@@ -553,18 +712,20 @@ sequenceDiagram
 
 ### エラー種別と対応
 
-| エラー種別              | 発生タイミング             | HTTPステータス | 対応方針                                     |
-| ----------------------- | -------------------------- | -------------- | -------------------------------------------- |
-| `GitHubAuthFailed`      | トークン未設定、認証失敗   | 401, 403       | ログ出力、`prUrl=null`                       |
-| `GitHubRateLimited`     | レート制限到達             | 429            | ログ出力、`prUrl=null`（リトライは将来対応） |
-| `GitHubNotFound`        | リポジトリ・ブランチ未存在 | 404            | ログ出力、`prUrl=null`                       |
-| `GitHubValidationError` | PR作成パラメータ不正       | 422            | ログ出力、`prUrl=null`                       |
-| `GitHubUnknownError`    | その他のエラー             | 5xx等          | ログ出力、`prUrl=null`                       |
+| エラー種別                | 発生タイミング             | HTTPステータス | 対応方針                       |
+| ------------------------- | -------------------------- | -------------- | ------------------------------ |
+| `GitHubAuthFailedError`   | トークン未設定、認証失敗   | 401, 403       | `Result.Err`で返却             |
+| `GitHubRateLimitedError`  | レート制限到達             | 429            | `Result.Err`で返却（リトライは将来対応） |
+| `GitHubNotFoundError`     | リポジトリ・ブランチ未存在 | 404            | `Result.Err`で返却             |
+| `GitHubValidationError`   | PR作成パラメータ不正       | 422            | `Result.Err`で返却             |
+| `GitHubUnknownError`      | その他のエラー             | 5xx等          | `Result.Err`で返却             |
 
 ### エラー時の挙動
 
-- フェーズ1では**PR作成失敗時でもOrchestrator全体は継続**する
-- `IntegrationFinalResult.prUrl` は `null` となる
+- `finalizeIntegration`は`Result<IntegrationFinalResult, OrchestratorError>`を返す
+- PR作成失敗時は`Result.Err(GitHubError)`を返す
+- **`IntegrationFinalResult.prUrl`は必須フィールド**のため、成功時のみ`{ method: 'pr', prUrl }`を返す
+- 呼び出し元（orchestrate.ts）でエラーをハンドリングし、`method: 'command'`へのフォールバックを検討
 - エラー詳細はコンソールログに出力し、後続処理に影響を与えない
 - 将来のフェーズでリトライ機構を追加する可能性を考慮
 

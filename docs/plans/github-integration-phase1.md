@@ -69,31 +69,33 @@ src/adapters/github/
 
 ### Step 3: Orchestrator統合
 
+**ファイル: `src/types/errors.ts`**
+
+- `OrchestratorError`のユニオンに`GitHubError`を追加
+
 **ファイル: `src/core/orchestrator/integration-operations.ts`**
 
-修正箇所（行354付近）:
+修正箇所（行728付近）:
 
 1. `IntegrationDeps`に`githubEffects?: GitHubEffects`を追加
-2. `finalizeIntegration`でGitHubEffectsがあればPR作成を実行
-3. エラー時は`ioError`でラップするか、GitHubErrorをOrchestratorErrorに変換
+2. `PullRequestInfo`型を追加（title, body を渡すため）
+3. `finalizeIntegration`の処理フロー:
+   - リモートプッシュ（`gitEffects.push`）
+   - PR作成（`githubEffects.createPullRequest`）
+   - 成功時のみ`{ method: 'pr', prUrl }`を返却
+   - エラー時は`Result.Err`（`GitHubError`）を返却
 
-修正ロジック:
-
-```
-if (config.method === 'pr' || config.method === 'auto') {
-  if (deps.githubEffects && hasRemote) {
-    const prResult = await deps.githubEffects.createPullRequest(...);
-    // Result処理...
-  }
-}
-```
+**重要**: `IntegrationFinalResult`の`method: 'pr'`は`prUrl`が必須フィールドのため、
+PR作成失敗時は`Result.Err`で返す（nullableにしない）
 
 **ファイル: `src/core/orchestrator/orchestrate.ts`**
 
 修正箇所:
 
-1. GitHubEffectsのインスタンス生成（configにgithubがある場合のみ）
-2. `IntegrationDeps`にgithubEffectsを渡す
+1. **早期設定検証**: `method: 'pr'`なのに`config.github`未設定の場合、即座にエラー
+2. GitHubEffectsのインスタンス生成（configにgithubがある場合のみ）
+3. `IntegrationDeps`にgithubEffectsを渡す
+4. **PullRequestInfo生成**: 統合結果からPRタイトル・本文を構築する`buildPullRequestInfo()`を追加
 
 ### Step 4: パッケージ追加
 
@@ -103,18 +105,18 @@ pnpm add @octokit/rest
 
 ## 修正対象ファイル一覧
 
-| ファイル                                          | 操作                         |
-| ------------------------------------------------- | ---------------------------- |
-| `src/types/errors.ts`                             | 追記（GitHubError型）        |
-| `src/types/config.ts`                             | 追記（GitHubConfigスキーマ） |
-| `src/types/github.ts`                             | 新規作成                     |
-| `src/adapters/github/index.ts`                    | 新規作成                     |
-| `src/adapters/github/client.ts`                   | 新規作成                     |
-| `src/adapters/github/pull-request.ts`             | 新規作成                     |
-| `src/adapters/github/error.ts`                    | 新規作成                     |
-| `src/core/orchestrator/integration-operations.ts` | 修正（PR作成実装）           |
-| `src/core/orchestrator/orchestrate.ts`            | 修正（GitHubEffects初期化）  |
-| `package.json`                                    | 追記（@octokit/rest）        |
+| ファイル                                          | 操作                                        |
+| ------------------------------------------------- | ------------------------------------------- |
+| `src/types/errors.ts`                             | 追記（GitHubError型、OrchestratorError拡張）|
+| `src/types/config.ts`                             | 追記（GitHubConfigスキーマ）                |
+| `src/types/github.ts`                             | 新規作成                                    |
+| `src/adapters/github/index.ts`                    | 新規作成                                    |
+| `src/adapters/github/client.ts`                   | 新規作成                                    |
+| `src/adapters/github/pull-request.ts`             | 新規作成                                    |
+| `src/adapters/github/error.ts`                    | 新規作成                                    |
+| `src/core/orchestrator/integration-operations.ts` | 修正（IntegrationDeps拡張、PR作成実装）     |
+| `src/core/orchestrator/orchestrate.ts`            | 修正（GitHubEffects初期化）                 |
+| `package.json`                                    | 追記（@octokit/rest）                       |
 
 ## 検証方法
 
