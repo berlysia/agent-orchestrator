@@ -392,7 +392,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
 
     // 5. エージェントを実行
     // WHY: 役割ごとに最適なモデルを使用（Config から取得）
-    let agentPrompt = `Execute task: ${task.acceptance}`;
+    let agentPrompt = `Execute task: ${task.acceptance}
+
+⚠️  IMPORTANT: You are working in an isolated worktree directory.
+- Your working directory is: ${worktreePath}
+- DO NOT use 'cd ..' or navigate outside this directory
+- All work must be done within this directory
+- The worktree is properly configured with the correct branch`;
 
     // フィードバックがある場合は追加（継続実行のため）
     // WHY: 前回の判定で指摘された問題を明示することで、エージェントが適切に対処できる
@@ -639,7 +645,13 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     }
 
     // 5. エージェントを実行（プロンプトにフィードバックを追加）
-    let agentPrompt = `Execute task: ${task.acceptance}`;
+    let agentPrompt = `Execute task: ${task.acceptance}
+
+⚠️  IMPORTANT: You are working in an isolated worktree directory.
+- Your working directory is: ${worktreePath}
+- DO NOT use 'cd ..' or navigate outside this directory
+- All work must be done within this directory
+- The worktree is properly configured with the correct branch`;
 
     if (previousFeedback) {
       agentPrompt += `\n\nPrevious task feedback:\n${previousFeedback}`;
