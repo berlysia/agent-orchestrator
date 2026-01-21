@@ -22,7 +22,9 @@
     "failureMode": "block"
   },
   "integration": {
-    "method": "auto"
+    "method": "auto",
+    "postIntegrationEvaluation": true,
+    "maxAdditionalTaskIterations": 3
   },
   "planning": {
     "qualityThreshold": 60,
