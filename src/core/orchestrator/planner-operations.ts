@@ -352,8 +352,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       // WHY: 役割ごとに最適なモデルを使用（Config から取得）
       const runResult =
         deps.agentType === 'claude'
-          ? await deps.runnerEffects.runClaudeAgent(planningPrompt, deps.appRepoPath, deps.model!)
-          : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model);
+          ? await deps.runnerEffects.runClaudeAgent(planningPrompt, deps.appRepoPath, deps.model!, plannerRunId)
+          : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model, plannerRunId);
 
       // 2. エージェント実行結果の確認
       if (isErr(runResult)) {
@@ -881,8 +881,8 @@ Output only the JSON array, no additional text.`;
     // エージェントを実行
     const runResult =
       deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(additionalPrompt, deps.appRepoPath, deps.model!)
-        : await deps.runnerEffects.runCodexAgent(additionalPrompt, deps.appRepoPath, deps.model);
+        ? await deps.runnerEffects.runClaudeAgent(additionalPrompt, deps.appRepoPath, deps.model!, additionalRunId)
+        : await deps.runnerEffects.runCodexAgent(additionalPrompt, deps.appRepoPath, deps.model, additionalRunId);
 
     if (isErr(runResult)) {
       await appendPlanningLog(`\n=== Planner Agent Error ===\n`);
