@@ -840,6 +840,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       return createErr(ioError('planAdditionalTasks.initializeLogFile', initLogResult.err));
     }
 
+    console.log(`📝 Additional task planning started`);
+    console.log(`🆔 Additional Planner Run ID: ${additionalRunId}`);
+    console.log(`📄 Additional Planner Log Path: ${additionalPlannerLogPath}`);
+    console.log(`🗂️  Additional Planner Metadata Path: ${additionalPlannerMetadataPath}`);
+
     // 会話履歴を含めたプロンプトを構築
     const conversationContext = session.conversationHistory
       .map((msg) => `${msg.role}: ${msg.content}`)
