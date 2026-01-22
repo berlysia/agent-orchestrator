@@ -10,6 +10,7 @@ import type { AgentType } from '../../types/config.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr } from 'option-t/plain_result';
 import { z } from 'zod';
+import { truncateLogForJudge } from './utils/log-utils.ts';
 
 /**
  * 指定された秒数だけ待機するPromise
@@ -446,7 +447,17 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
       // RunnerErrorをTaskStoreErrorに変換
       return createErr(validationError(`Failed to read log: ${logResult.err.message}`));
     }
-    const runLog = logResult.val;
+    const rawRunLog = logResult.val;
+
+    // WHY: 600KB超のログをJudge（claude-haiku）に渡すとno_jsonエラーが発生するため、
+    // ログをtruncateして適切なサイズに制限する
+    const runLog = truncateLogForJudge(rawRunLog);
+    const logTruncated = runLog !== rawRunLog;
+    if (logTruncated) {
+      const originalKB = Math.round(Buffer.byteLength(rawRunLog, 'utf-8') / 1024);
+      const truncatedKB = Math.round(Buffer.byteLength(runLog, 'utf-8') / 1024);
+      console.log(`  📄 Log truncated for Judge: ${originalKB}KB → ${truncatedKB}KB`);
+    }
 
     // Git変更情報を取得（worktreePathが指定されている場合のみ）
     let gitChangeInfo: GitChangeInfo = {
@@ -473,7 +484,15 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
           : await deps.runnerEffects.runCodexAgent(currentPrompt, deps.appRepoPath, deps.model);
 
       if (agentResult.ok) {
-        const parseResult = parseJudgementResult(agentResult.val.finalResponse ?? '');
+        const judgeResponse = agentResult.val.finalResponse ?? '';
+
+        // WHY: Judgeレスポンスをログに記録することで、no_jsonエラー時のデバッグを容易にする
+        await deps.runnerEffects.appendLog(
+          runIdToRead,
+          `\n[JUDGE_RESPONSE attempt=${attempt}/${attemptLimit}]\n${judgeResponse}\n[/JUDGE_RESPONSE]\n`,
+        );
+
+        const parseResult = parseJudgementResult(judgeResponse);
 
         if (parseResult.success) {
           return createOk({
