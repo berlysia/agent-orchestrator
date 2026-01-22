@@ -295,6 +295,7 @@ test('E2E: Integration Evaluation', async (t) => {
         method: 'auto',
         postIntegrationEvaluation: true, // 統合後評価を有効化
         maxAdditionalTaskIterations: 2,
+        mergeStrategy: 'ff-prefer',
       },
       planning: {
         qualityThreshold: 50,
@@ -367,6 +368,7 @@ test('E2E: Integration Evaluation', async (t) => {
         method: 'auto',
         postIntegrationEvaluation: true,
         maxAdditionalTaskIterations: 1,
+        mergeStrategy: 'ff-prefer',
       },
       planning: {
         qualityThreshold: 50,
@@ -427,6 +429,7 @@ test('E2E: Integration Evaluation', async (t) => {
         method: 'auto',
         postIntegrationEvaluation: false, // 統合後評価を無効化
         maxAdditionalTaskIterations: 3,
+        mergeStrategy: 'ff-prefer',
       },
       planning: {
         qualityThreshold: 50,
@@ -487,6 +490,7 @@ test('E2E: Integration Evaluation', async (t) => {
         method: 'auto',
         postIntegrationEvaluation: true,
         maxAdditionalTaskIterations: 1,
+        mergeStrategy: 'ff-prefer',
       },
       planning: {
         qualityThreshold: 50,

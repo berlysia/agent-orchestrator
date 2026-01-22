@@ -64,8 +64,20 @@ const IntegrationConfigSchema = z
     postIntegrationEvaluation: z.boolean().default(true),
     /** 追加タスクループの最大反復回数（評価が不完全な場合に追加タスクを生成） */
     maxAdditionalTaskIterations: z.number().int().min(1).max(10).default(3),
+    /**
+     * マージ戦略
+     * WHY: タスク数が多いとマージコミットでグラフが複雑化する。
+     * 'ff-prefer': fast-forward可能ならff、できない場合のみマージコミット作成
+     * 'no-ff': 常にマージコミット作成（各タスクの変更を明示的に記録）
+     */
+    mergeStrategy: z.enum(['ff-prefer', 'no-ff']).default('ff-prefer'),
   })
-  .default({ method: 'auto', postIntegrationEvaluation: true, maxAdditionalTaskIterations: 3 });
+  .default({
+    method: 'auto',
+    postIntegrationEvaluation: true,
+    maxAdditionalTaskIterations: 3,
+    mergeStrategy: 'ff-prefer',
+  });
 
 /**
  * コミット設定のスキーマ
@@ -285,6 +297,7 @@ export function createDefaultConfig(params: {
       method: 'auto',
       postIntegrationEvaluation: true,
       maxAdditionalTaskIterations: 3,
+      mergeStrategy: 'ff-prefer',
     },
     planning: {
       qualityThreshold: 60,

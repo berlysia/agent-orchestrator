@@ -24,7 +24,8 @@
   "integration": {
     "method": "auto",
     "postIntegrationEvaluation": true,
-    "maxAdditionalTaskIterations": 3
+    "maxAdditionalTaskIterations": 3,
+    "mergeStrategy": "ff-prefer"
   },
   "planning": {
     "qualityThreshold": 60,

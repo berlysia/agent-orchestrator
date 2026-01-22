@@ -529,8 +529,12 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const conflictedTaskIds: TaskId[] = [];
     const failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }> = [];
 
-    // 署名設定に基づいてマージオプションを構築
-    const worktreeMergeOptions: string[] = ['--no-ff', '--no-commit'];
+    // マージ戦略に基づいてオプションを構築
+    // WHY: 'ff-prefer' はグラフ簡素化のためff可能ならff、'no-ff' は各タスクを明示的に記録
+    const worktreeMergeOptions: string[] = ['--no-commit'];
+    if (deps.config.integration.mergeStrategy === 'no-ff') {
+      worktreeMergeOptions.push('--no-ff');
+    }
     if (!deps.config.commit.integrationSignature) {
       worktreeMergeOptions.push('--no-gpg-sign');
     }
@@ -539,7 +543,6 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     for (const task of completedTasks) {
       const sourceBranch = task.branch;
 
-      // WHY: --no-ff でマージコミットを作成し、各タスクの変更を明示的に記録
       const mergeResult = await gitEffects.merge(repo, sourceBranch, worktreeMergeOptions);
 
       if (isErr(mergeResult)) {
