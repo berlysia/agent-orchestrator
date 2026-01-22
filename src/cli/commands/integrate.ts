@@ -150,52 +150,69 @@ async function showIntegrationCommands(params: {
     console.log(`✅ Merged ${task.branch}`);
   }
 
-  // 統合ブランチをベースブランチに対してrebase（署名付き）
-  console.log('\n🔏 Applying signatures to all commits...');
+  // 署名設定に基づいて後続の処理を分岐
+  // WHY: GPG署名にはユーザー認証（pinentry等）が必要で、タイムアウトする可能性がある
+  //      そのため、署名が必要な場合はコマンドを出力して手動実行を促す
   const gpgSign = config.commit.integrationSignature;
-  const rebaseResult = await gitEffects.rebase(repo, currentBranch, { gpgSign });
-  if (isErr(rebaseResult)) {
-    console.error(`❌ Failed to rebase integration branch: ${rebaseResult.err.message}`);
-    process.exit(1);
-  }
+
   if (gpgSign) {
-    console.log('✅ All commits signed');
-  }
+    // 署名が必要な場合はrebase-signコマンドを出力
+    console.log('\n📦 Integration branch ready:');
+    console.log(`   Branch: ${integrationBranch}`);
+    console.log(`   Base: ${currentBranch}`);
 
-  // ベースブランチに切り替え
-  const switchBackResult = await gitEffects.switchBranch(repo, currentBranch);
-  if (isErr(switchBackResult)) {
-    console.error(`❌ Failed to switch back to base branch: ${switchBackResult.err.message}`);
-    process.exit(1);
-  }
+    console.log('\n🔏 To rebase and sign all commits before merging:');
+    console.log(`\n   agent rebase-sign --base ${currentBranch} --branch ${integrationBranch}\n`);
 
-  // Fast-forward merge
-  console.log('\n🔀 Merging integration branch...');
-  const finalMergeResult = await gitEffects.merge(repo, integrationBranch, ['--ff-only']);
-  if (isErr(finalMergeResult)) {
-    console.error(`❌ Failed to merge integration branch: ${finalMergeResult.err.message}`);
-    process.exit(1);
-  }
+    console.log('📝 To merge without signing:');
+    console.log(`\n   git checkout ${currentBranch} && git merge ${integrationBranch}\n`);
 
-  if (!finalMergeResult.val.success) {
-    console.error('❌ Fast-forward merge failed');
-    process.exit(1);
-  }
+    console.log('🗑️  To delete the integration branch after merging:');
+    console.log(`\n   git branch -d ${integrationBranch}\n`);
+  } else {
+    // 署名不要の場合は自動でrebase & merge
+    console.log('\n🔄 Rebasing integration branch...');
+    const rebaseResult = await gitEffects.rebase(repo, currentBranch, { gpgSign: false });
+    if (isErr(rebaseResult)) {
+      console.error(`❌ Failed to rebase integration branch: ${rebaseResult.err.message}`);
+      process.exit(1);
+    }
 
-  // 統合ブランチを削除
-  const deleteBranchResult = await gitEffects.deleteBranch(repo, integrationBranch);
-  if (isErr(deleteBranchResult)) {
-    console.warn(`⚠️  Failed to delete integration branch: ${deleteBranchResult.err.message}`);
-  }
+    // ベースブランチに切り替え
+    const switchBackResult = await gitEffects.switchBranch(repo, currentBranch);
+    if (isErr(switchBackResult)) {
+      console.error(`❌ Failed to switch back to base branch: ${switchBackResult.err.message}`);
+      process.exit(1);
+    }
 
-  console.log('\n✅ Integration complete');
-  console.log(`Merged into: ${currentBranch}`);
-  console.log(`Tasks merged: ${mergedTaskIds.length}`);
+    // Fast-forward merge
+    console.log('\n🔀 Merging integration branch...');
+    const finalMergeResult = await gitEffects.merge(repo, integrationBranch, ['--ff-only']);
+    if (isErr(finalMergeResult)) {
+      console.error(`❌ Failed to merge integration branch: ${finalMergeResult.err.message}`);
+      process.exit(1);
+    }
 
-  if (requestedTaskIds) {
-    console.log('\nIncluded tasks:');
-    for (const task of selectedTasks) {
-      console.log(`- ${task.id} (${task.branch})`);
+    if (!finalMergeResult.val.success) {
+      console.error('❌ Fast-forward merge failed');
+      process.exit(1);
+    }
+
+    // 統合ブランチを削除
+    const deleteBranchResult = await gitEffects.deleteBranch(repo, integrationBranch);
+    if (isErr(deleteBranchResult)) {
+      console.warn(`⚠️  Failed to delete integration branch: ${deleteBranchResult.err.message}`);
+    }
+
+    console.log('\n✅ Integration complete');
+    console.log(`Merged into: ${currentBranch}`);
+    console.log(`Tasks merged: ${mergedTaskIds.length}`);
+
+    if (requestedTaskIds) {
+      console.log('\nIncluded tasks:');
+      for (const task of selectedTasks) {
+        console.log(`- ${task.id} (${task.branch})`);
+      }
     }
   }
 }

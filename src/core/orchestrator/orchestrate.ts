@@ -646,7 +646,6 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
             if (deps.config.integration.method === 'auto') {
               // 自動マージを試行
-              console.log('  🔄 Attempting automatic merge to base branch...');
               const finalizeResult = await integrationOps.finalizeIntegration(
                 integrationBranch,
                 baseBranch,
@@ -656,6 +655,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
               if (finalizeResult.ok && finalizeResult.val.method === 'auto') {
                 console.log(`  ✅ Successfully merged to ${baseBranch}`);
+              } else if (finalizeResult.ok && finalizeResult.val.method === 'command') {
+                // 署名が必要な場合はrebase-signコマンドを出力
+                // WHY: GPG署名にはユーザー認証が必要なため、遅延実行を可能にする
+                console.log('\n  🔏 To rebase and sign all commits before merging:');
+                console.log(`\n     ${finalizeResult.val.mergeCommand}\n`);
+                console.log('  📝 To merge without signing:');
+                console.log(`\n     git checkout ${baseBranch} && git merge ${integrationBranch}\n`);
               } else {
                 // 自動マージ失敗時はコマンドを出力
                 console.log('  ⚠️  Automatic merge failed, please merge manually:');

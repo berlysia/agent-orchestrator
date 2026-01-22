@@ -45,6 +45,6 @@
   },
   "commit": {
     "autoSignature": false,
-    "integrationSignature": false
+    "integrationSignature": true
   }
 }

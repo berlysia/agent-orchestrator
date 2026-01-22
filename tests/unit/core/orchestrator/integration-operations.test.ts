@@ -280,7 +280,46 @@ describe('Integration Operations', () => {
       }
     });
 
-    it('should return command when method is "auto" and no remote', async () => {
+    it('should return command with rebase-sign when method is "auto" and integrationSignature is true', async () => {
+      const mockTaskStore = {
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
+      };
+
+      const mockGitEffects = {
+        getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+        hasRemote: mock.fn(async () => createOk(false)),
+      };
+
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
+      const integrationOps = createIntegrationOperations({
+        taskStore: mockTaskStore as any,
+        gitEffects: mockGitEffects as any,
+        appRepoPath: '/test/repo',
+        config: mockConfig as any,
+      });
+
+      const result = await integrationOps.finalizeIntegration(
+        branchName('integration/merge-123'),
+        branchName('main'),
+        { method: 'auto' },
+      );
+
+      assert.strictEqual(result.ok, true);
+      if (result.ok) {
+        // WHY: integrationSignature=true の場合、GPG署名のタイムアウト問題を回避するため
+        //      自動rebaseではなくコマンド出力に切り替わる
+        assert.strictEqual(result.val.method, 'command');
+        assert(result.val.mergeCommand?.includes('rebase-sign'));
+      }
+    });
+
+    it('should return auto merge when method is "auto" and integrationSignature is false', async () => {
       const mockTaskStore = {
         createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
@@ -304,7 +343,7 @@ describe('Integration Operations', () => {
       const mockConfig = {
         commit: {
           autoSignature: false,
-          integrationSignature: true,
+          integrationSignature: false,
         },
       };
 

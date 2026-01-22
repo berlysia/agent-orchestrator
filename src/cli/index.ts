@@ -9,6 +9,7 @@ import { createResumeCommand } from './commands/resume.ts';
 import { createContinueCommand } from './commands/continue.ts';
 import { createInfoCommand } from './commands/info.ts';
 import { createIntegrateCommand } from './commands/integrate.ts';
+import { createRebaseSignCommand } from './commands/rebase-sign.ts';
 import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
@@ -27,5 +28,6 @@ program.addCommand(createResumeCommand());
 program.addCommand(createContinueCommand());
 program.addCommand(createInfoCommand());
 program.addCommand(createIntegrateCommand());
+program.addCommand(createRebaseSignCommand());
 
 program.parse(process.argv);

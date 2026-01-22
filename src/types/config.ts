@@ -89,7 +89,16 @@ const CommitConfigSchema = z
   .object({
     /** Worker実行時の自動コミットでGPG署名を有効化 */
     autoSignature: z.boolean().default(false),
-    /** Integration時の最終コミットでGPG署名を有効化 */
+    /**
+     * Integration完了時の署名コマンド案内を有効化
+     *
+     * WHY: GPG署名にはユーザー認証（pinentry等）が必要で、長時間オーケストレーション後に
+     *      ユーザーが不在だと認証タイムアウトで失敗する。そのため、自動rebaseではなく
+     *      `agent rebase-sign` コマンドを案内して遅延実行を可能にする。
+     *
+     * - true (default): 署名付きrebaseコマンド (`agent rebase-sign`) を案内
+     * - false: 自動的にrebase & mergeを実行（署名なし）
+     */
     integrationSignature: z.boolean().default(true),
   })
   .default({ autoSignature: false, integrationSignature: true });

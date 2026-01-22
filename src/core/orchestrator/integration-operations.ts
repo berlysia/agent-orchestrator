@@ -822,18 +822,29 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
       });
     } else {
       // auto: 自動統合を実行
-      // WHY: 統合ブランチをrebase --gpg-signでベースブランチに対してrebaseし、
-      //      全コミットに署名を付けた後、fast-forward mergeでベースブランチに統合
+      // WHY: integrationSignature=true の場合、GPG署名にはユーザー認証が必要なため、
+      //      自動rebaseではなくコマンド出力に切り替えてユーザーが手動で署名できるようにする
 
+      if (deps.config.commit.integrationSignature) {
+        // 署名が必要な場合はコマンド出力に切り替え
+        // WHY: 長時間オーケストレーション後にユーザーが不在の場合、
+        //      pinentry等の認証がタイムアウトするため、遅延実行を可能にする
+        const mergeCommand = `agent rebase-sign --base ${baseBranch} --branch ${integrationBranch}`;
+        return createOk({
+          method: 'command',
+          mergeCommand,
+        });
+      }
+
+      // 署名不要の場合は自動マージを実行
       // 統合ブランチに切り替え
       const switchToIntegrationResult = await gitEffects.switchBranch(repo, integrationBranch);
       if (isErr(switchToIntegrationResult)) {
         return createErr(switchToIntegrationResult.err);
       }
 
-      // 統合ブランチをベースブランチに対してrebase（署名付き）
-      const gpgSign = deps.config.commit.integrationSignature;
-      const rebaseResult = await gitEffects.rebase(repo, baseBranch, { gpgSign });
+      // 統合ブランチをベースブランチに対してrebase（署名なし）
+      const rebaseResult = await gitEffects.rebase(repo, baseBranch, { gpgSign: false });
       if (isErr(rebaseResult)) {
         return createErr(rebaseResult.err);
       }
