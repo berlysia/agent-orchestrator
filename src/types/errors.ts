@@ -171,6 +171,91 @@ export const gitMergeConflict = (
   message: `Merge conflict when merging ${sourceBranch}: ${conflicts.length} file(s) conflicted`,
 });
 
+// ===== GitHub API Errors =====
+
+export type GitHubError =
+  | GitHubAuthFailedError
+  | GitHubRateLimitedError
+  | GitHubNotFoundError
+  | GitHubValidationError
+  | GitHubUnknownError;
+
+export interface GitHubAuthFailedError {
+  readonly type: 'GitHubAuthFailedError';
+  readonly missingEnvName?: string;
+  readonly message: string;
+}
+
+export interface GitHubRateLimitedError {
+  readonly type: 'GitHubRateLimitedError';
+  readonly resetAt?: number;
+  readonly remaining?: number;
+  readonly message: string;
+}
+
+export interface GitHubNotFoundError {
+  readonly type: 'GitHubNotFoundError';
+  readonly resourceType: 'repository' | 'branch' | 'pullRequest';
+  readonly message: string;
+}
+
+export interface GitHubValidationError {
+  readonly type: 'GitHubValidationError';
+  readonly field?: string;
+  readonly message: string;
+}
+
+export interface GitHubUnknownError {
+  readonly type: 'GitHubUnknownError';
+  readonly statusCode?: number;
+  readonly originalError?: string;
+  readonly message: string;
+}
+
+// GitHubError コンストラクタ
+export const githubAuthFailed = (message: string, missingEnvName?: string): GitHubAuthFailedError => ({
+  type: 'GitHubAuthFailedError',
+  missingEnvName,
+  message,
+});
+
+export const githubRateLimited = (
+  message: string,
+  resetAt?: number,
+  remaining?: number,
+): GitHubRateLimitedError => ({
+  type: 'GitHubRateLimitedError',
+  resetAt,
+  remaining,
+  message,
+});
+
+export const githubNotFound = (
+  resourceType: 'repository' | 'branch' | 'pullRequest',
+  message: string,
+): GitHubNotFoundError => ({
+  type: 'GitHubNotFoundError',
+  resourceType,
+  message,
+});
+
+export const githubValidationError = (message: string, field?: string): GitHubValidationError => ({
+  type: 'GitHubValidationError',
+  field,
+  message,
+});
+
+export const githubUnknownError = (
+  message: string,
+  statusCode?: number,
+  originalError?: string,
+): GitHubUnknownError => ({
+  type: 'GitHubUnknownError',
+  statusCode,
+  originalError,
+  message,
+});
+
 // ===== Runner Errors =====
 
 export type RunnerError = AgentExecutionError | LogWriteError | CheckExecutionError;
@@ -226,7 +311,8 @@ export type OrchestratorError =
   | RunnerError
   | WorkerCapacityError
   | TaskClaimError
-  | ConflictResolutionRequiredError;
+  | ConflictResolutionRequiredError
+  | GitHubError;
 
 export interface WorkerCapacityError {
   readonly type: 'WorkerCapacityError';
