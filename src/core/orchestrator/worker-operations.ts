@@ -238,14 +238,8 @@ Branch: ${task.branch}
  * Worker操作を生成するファクトリ関数
  */
 export const createWorkerOperations = (deps: WorkerDeps) => {
-  const toRelativePath = (targetPath: string): string => {
-    const absolutePath = path.resolve(targetPath);
-    const relativePath = path.relative(process.cwd(), absolutePath);
-    return relativePath === '' ? '.' : relativePath;
-  };
-
   const getRunDisplayPath = (runIdValue: string, ext: 'log' | 'json'): string => {
-    return toRelativePath(path.join(deps.agentCoordPath, 'runs', `${runIdValue}.${ext}`));
+    return path.resolve(deps.agentCoordPath, 'runs', `${runIdValue}.${ext}`);
   };
 
   /**
