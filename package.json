@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.4",
+    "@octokit/rest": "22.0.1",
     "@openai/codex-sdk": "0.80.0",
     "commander": "14.0.2",
     "option-t": "55.1.0",
