@@ -2409,3 +2409,256 @@ export const validateStructure = (
     details: details.length > 0 ? details.join('; ') : undefined,
   };
 };
+
+/**
+ * フィードバックを含む再計画プロンプトを構築
+ *
+ * WHY: 現在のタスク一覧とフィードバック（issues/suggestions）を含めることで
+ *      LLMが問題点を理解し改善されたタスク分解を生成できる
+ *
+ * @param currentTasks 現在のタスク一覧
+ * @param feedback フィードバック（問題点と改善提案）
+ * @returns 再計画用プロンプト
+ */
+export const buildFeedbackPrompt = (
+  currentTasks: Task[],
+  feedback: { issues: string[]; suggestions: string[] },
+): string => {
+  const lines: string[] = [];
+
+  // 現在のタスク一覧をJSON形式で表示
+  const taskBreakdowns = currentTasks.map((task) => ({
+    id: task.id,
+    description: task.acceptance, // acceptanceを説明として使用
+    branch: task.branch,
+    scopePaths: task.scopePaths,
+    acceptance: task.acceptance,
+    type: task.taskType,
+    estimatedDuration: 4, // デフォルト値（元のタスクには保存されていない）
+    context: task.context,
+    dependencies: task.dependencies,
+    summary: task.summary ?? undefined,
+  }));
+
+  lines.push('Current Task Plan:');
+  lines.push('```json');
+  lines.push(JSON.stringify(taskBreakdowns, null, 2));
+  lines.push('```');
+
+  // Issues（問題点）
+  if (feedback.issues.length > 0) {
+    lines.push('\nIssues Found:');
+    feedback.issues.forEach((issue: string, idx: number) => {
+      lines.push(`${idx + 1}. ${issue}`);
+    });
+  }
+
+  // Suggestions（改善提案）
+  if (feedback.suggestions.length > 0) {
+    lines.push('\nSuggestions for Improvement:');
+    feedback.suggestions.forEach((suggestion: string, idx: number) => {
+      lines.push(`${idx + 1}. ${suggestion}`);
+    });
+  }
+
+  lines.push('\nPlease revise the task plan to address all issues and incorporate suggestions.');
+
+  return lines.join('\n');
+};
+
+/**
+ * 個別タスクフォールバック処理
+ *
+ * WHY: 構造検証失敗時に、変更されていないタスクは前回版を維持することで
+ *      部分的な改善を取り込みつつ安定性を確保する
+ *
+ * @param _originalTasks 元のタスク一覧（基準）※現在未使用だが将来の拡張のため保持
+ * @param currentTasks 現在のタスク一覧（前回計画）
+ * @param newTasks 新しいタスク一覧（再計画結果）
+ * @returns フォールバック適用後のタスク一覧
+ */
+export const applyIndividualFallback = (
+  _originalTasks: Task[],
+  currentTasks: Task[],
+  newTasks: Task[],
+): Task[] => {
+  // タスクIDでマッピング
+  const currentMap = new Map(currentTasks.map((t) => [t.id, t]));
+  const newMap = new Map(newTasks.map((t) => [t.id, t]));
+
+  const fallbackTasks: Task[] = [];
+
+  // 現在のタスクをベースに処理
+  for (const currentTask of currentTasks) {
+    const newTask = newMap.get(currentTask.id);
+
+    if (!newTask) {
+      // 新計画に存在しない → 前回版を維持
+      fallbackTasks.push(currentTask);
+      continue;
+    }
+
+    // 受け入れ基準の類似度を計算
+    const similarity = calculateSimilarity(currentTask.acceptance, newTask.acceptance);
+
+    // 類似度が高い（0.7以上）なら新版を採用、低いなら前回版を維持
+    if (similarity >= 0.7) {
+      fallbackTasks.push(newTask);
+    } else {
+      fallbackTasks.push(currentTask);
+    }
+  }
+
+  // 新計画で追加されたタスクを追加
+  for (const newTask of newTasks) {
+    if (!currentMap.has(newTask.id)) {
+      fallbackTasks.push(newTask);
+    }
+  }
+
+  return fallbackTasks;
+};
+
+/**
+ * フィードバックに基づく再計画処理
+ *
+ * WHY: タスク実行中に発見された問題や改善提案を反映し、
+ *      より良いタスク分解を生成する。Result<T,E>で例外をthrowせず安全に処理。
+ *
+ * ARCHITECTURE: Result<T,E>パターンを使用し、never throw
+ *
+ * FLOW:
+ * 1. フィードバックプロンプト構築（現在のタスク + issues + suggestions）
+ * 2. LLM呼び出しでタスク再生成
+ * 3. 構造検証（validateStructure）
+ * 4. 検証失敗時、enableIndividualFallback=trueなら個別タスクフォールバック
+ * 5. フォールバック後も検証失敗なら前回タスクを使用
+ * 6. 成功時は新しいタスクリストを返す
+ *
+ * @param params 再計画パラメータ
+ * @param params.originalTasks 元のタスク一覧（構造検証の基準）
+ * @param params.currentTasks 現在のタスク一覧（前回計画）
+ * @param params.feedback フィードバック（issues/suggestions）
+ * @param params.config 再計画設定
+ * @param params.deps Planner依存関係（LLM呼び出し等）
+ * @returns Result<再計画結果, エラーメッセージ>
+ */
+export async function replanWithFeedback(params: {
+  originalTasks: Task[];
+  currentTasks: Task[];
+  feedback: { issues: string[]; suggestions: string[] };
+  config: RefinementConfig;
+  deps: PlannerDeps;
+}): Promise<
+  Result<
+    {
+      tasks: Task[];
+      structureValidation: StructureValidation;
+    },
+    string
+  >
+> {
+  const { originalTasks, currentTasks, feedback, config, deps } = params;
+
+  // 1. フィードバックプロンプト構築
+  const feedbackPrompt = buildFeedbackPrompt(currentTasks, feedback);
+
+  // 2. LLM呼び出し（既存のplanTasksと同様のパターン）
+  // NOTE: 仮想的なユーザー指示を構築（実際には元の指示を使うべきだが、ここでは簡易版）
+  const userInstruction = `Revise the task plan based on feedback`;
+  const maxTaskDuration = deps.maxTaskDuration ?? 4;
+  const maxTasks = deps.maxTasks ?? 5;
+
+  const planningPrompt = buildPlanningPromptWithFeedback(
+    userInstruction,
+    feedbackPrompt,
+    maxTaskDuration,
+    maxTasks,
+  );
+
+  // LLM呼び出し
+  const agentType = deps.agentType;
+  const appRepoPath = deps.appRepoPath;
+  const model = deps.model;
+  const sessionId = currentTasks[0]?.sessionId ?? 'replan-session';
+
+  const runResult =
+    agentType === 'claude'
+      ? await deps.runnerEffects.runClaudeAgent(planningPrompt, appRepoPath, model ?? 'claude-3-5-sonnet-20241022', sessionId)
+      : await deps.runnerEffects.runCodexAgent(planningPrompt, appRepoPath, model, sessionId);
+
+  if (isErr(runResult)) {
+    return createErr(`LLM call failed: ${runResult.err.message}`);
+  }
+
+  const agentOutput = runResult.val;
+
+  // AgentOutputからfinalResponseを取得
+  const outputText = agentOutput.finalResponse;
+  if (!outputText) {
+    return createErr('No finalResponse from LLM');
+  }
+
+  // 3. パース処理
+  const parseResult = parseAgentOutputWithErrors(outputText);
+  if (parseResult.errors.length > 0) {
+    return createErr(`Parse errors: ${parseResult.errors.join('; ')}`);
+  }
+
+  const taskBreakdowns = parseResult.tasks;
+
+  if (taskBreakdowns.length === 0) {
+    return createErr('No tasks generated from LLM output');
+  }
+
+  // 4. TaskBreakdown → Task変換
+  // NOTE: 簡易版として、currentTasksのメタデータを引き継ぐ
+  const sessionShort = extractSessionShort(sessionId);
+  const newTasks: Task[] = taskBreakdowns.map((breakdown) => {
+    const uniqueTaskId = makeUniqueTaskId(breakdown.id, sessionShort);
+    return createInitialTask({
+      id: taskId(uniqueTaskId),
+      repo: currentTasks[0]?.repo ?? repoPath(appRepoPath),
+      branch: branchName(makeBranchNameWithTaskId(breakdown.branch, uniqueTaskId)),
+      scopePaths: breakdown.scopePaths,
+      acceptance: breakdown.acceptance,
+      taskType: breakdown.type,
+      context: breakdown.context,
+      dependencies: breakdown.dependencies.map((depId) => taskId(makeUniqueTaskId(depId, sessionShort))),
+      summary: breakdown.summary ?? null,
+      sessionId: sessionId,
+      parentSessionId: null,
+      rootSessionId: sessionId,
+      plannerLogPath: currentTasks[0]?.plannerLogPath ?? null,
+      plannerMetadataPath: currentTasks[0]?.plannerMetadataPath ?? null,
+    });
+  });
+
+  // 5. 構造検証
+  const structureValidation = validateStructure(originalTasks, newTasks, config);
+
+  // 6. フォールバック処理
+  if (!structureValidation.isValid && config.enableIndividualFallback) {
+    const fallbackTasks = applyIndividualFallback(originalTasks, currentTasks, newTasks);
+    const fallbackValidation = validateStructure(originalTasks, fallbackTasks, config);
+
+    return createOk({
+      tasks: fallbackTasks,
+      structureValidation: fallbackValidation,
+    });
+  }
+
+  // 7. フォールバック失敗時は前回タスクを使用
+  if (!structureValidation.isValid) {
+    return createOk({
+      tasks: currentTasks,
+      structureValidation,
+    });
+  }
+
+  // 8. 成功時は新しいタスクリストを返す
+  return createOk({
+    tasks: newTasks,
+    structureValidation,
+  });
+}
