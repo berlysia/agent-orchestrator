@@ -16,16 +16,22 @@ import { taskId, branchName, repoPath } from '../../../../src/types/branded.ts';
 function createTestTask(id: string, deps: string[] = []): Task {
   return {
     id: taskId(id),
-    description: `Test task ${id}`,
+    summary: `Test task ${id}`,
     acceptance: `Acceptance criteria for ${id}`,
     branch: branchName(`feature/${id}`),
     scopePaths: ['src/'],
     dependencies: deps.map((d) => taskId(d)),
-    state: TaskState.PENDING,
+    state: TaskState.READY,
     blockReason: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    repoPath: repoPath('/test/repo'),
+    repo: repoPath('/test/repo'),
+    version: 0,
+    owner: null,
+    taskType: 'implementation',
+    context: `Context for ${id}`,
+    check: null,
+    integrationRetried: false,
   };
 }
 

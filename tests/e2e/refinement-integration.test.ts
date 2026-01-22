@@ -4,7 +4,7 @@ import { executeRefinementLoop, type QualityJudge } from '../../src/core/orchest
 import type { Task } from '../../src/types/task.ts';
 import type { PlannerDeps } from '../../src/core/orchestrator/planner-operations.ts';
 import type { RefinementConfig } from '../../src/types/planner-session.ts';
-import type { TaskStore } from '../../src/types/task-store.ts';
+import type { TaskStore } from '../../src/core/task-store/interface.ts';
 import type { RunnerEffects } from '../../src/core/runner/runner-effects.ts';
 import type { PlannerSessionEffects } from '../../src/core/orchestrator/planner-session-effects.ts';
 import { createOk } from 'option-t/plain_result';
@@ -84,7 +84,7 @@ class MockQualityJudge implements QualityJudge {
 /**
  * ヘルパー: テスト用のタスクを生成
  */
-function createTestTask(id: string, description: string): Task {
+function createTestTask(id: string, summary: string): Task {
   return {
     id: id as any,
     state: 'READY',
@@ -93,26 +93,15 @@ function createTestTask(id: string, description: string): Task {
     repo: '/test/repo' as any,
     branch: `feature/${id}` as any,
     scopePaths: ['src/'],
-    acceptance: `${description} completed`,
+    acceptance: `${summary} completed`,
     taskType: 'implementation',
-    estimatedDuration: 2.0,
-    context: `Context for ${description}`,
+    context: `Context for ${summary}`,
     dependencies: [],
-    description,
-    retries: 0,
-    maxRetries: 3,
+    check: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    startedAt: null,
-    completedAt: null,
-    judgeState: 'PENDING',
-    judgeHistory: [],
-    workerLogs: [],
-    continuationCount: 0,
-    blockReason: null,
-    judgeFailureReasons: [],
-    workerError: null,
-    checkResults: [],
+    summary,
+    integrationRetried: false,
   };
 }
 
@@ -121,12 +110,13 @@ function createTestTask(id: string, description: string): Task {
  */
 function createMockPlannerDeps(llmClient: MockLLMClient): PlannerDeps {
   const mockTaskStore: TaskStore = {
-    saveTask: async () => createOk(undefined),
-    getTask: async () => createOk(null as any),
-    updateTask: async () => createOk(undefined),
+    createTask: async () => createOk(undefined),
+    readTask: async () => createOk(null as any),
+    updateTaskCAS: async () => createOk(null as any),
     deleteTask: async () => createOk(undefined),
     listTasks: async () => createOk([]),
-    listTaskIds: async () => createOk([]),
+    writeRun: async () => createOk(undefined),
+    writeCheck: async () => createOk(undefined),
   };
 
   const mockRunnerEffects: RunnerEffects = {
@@ -140,12 +130,11 @@ function createMockPlannerDeps(llmClient: MockLLMClient): PlannerDeps {
       return createOk({
         finalResponse: JSON.stringify(tasks.map((t) => ({
           id: t.id,
-          description: t.description,
+          summary: t.summary,
           branch: t.branch,
           scopePaths: t.scopePaths,
           acceptance: t.acceptance,
           type: t.taskType,
-          estimatedDuration: t.estimatedDuration,
           context: t.context,
           dependencies: t.dependencies,
         }))),
