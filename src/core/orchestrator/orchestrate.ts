@@ -139,6 +139,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     strictContextValidation: deps.config.planning.strictContextValidation,
     maxTaskDuration: deps.config.planning.maxTaskDuration,
     maxTasks: deps.config.planning.maxTasks,
+    planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
+    planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,
@@ -266,6 +268,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         plannerAgentType: deps.config.agents.planner.type,
         plannerModel: deps.config.agents.planner.model,
         judgeModel: deps.config.agents.judge.model,
+        planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
+        planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -482,6 +486,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             plannerAgentType: deps.config.agents.planner.type,
             plannerModel: deps.config.agents.planner.model,
             judgeModel: deps.config.agents.judge.model,
+            planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
+            planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
           });
 
           const additionalCompletedIds = additionalPipelineResult.completedTaskIds;
@@ -836,6 +842,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         plannerAgentType: deps.config.agents.planner.type,
         plannerModel: deps.config.agents.planner.model,
         judgeModel: deps.config.agents.judge.model,
+        planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
+        planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -1124,6 +1132,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           plannerAgentType: deps.config.agents.planner.type,
           plannerModel: deps.config.agents.planner.model,
           judgeModel: deps.config.agents.judge.model,
+          planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
+          planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
         });
 
         allCompletedTaskIds.push(...pipelineResult.completedTaskIds);

@@ -85,6 +85,16 @@ export interface PlannerDeps {
   readonly strictContextValidation?: boolean;
   readonly maxTaskDuration?: number;
   readonly maxTasks?: number;
+  /**
+   * Plan品質評価用Judgeのエージェントタイプ（オプショナル）
+   * 設定がなければ `agentType` にフォールバック
+   */
+  readonly planQualityJudgeAgentType?: 'claude' | 'codex';
+  /**
+   * Plan品質評価用Judgeのモデル（オプショナル）
+   * 設定がなければ `judgeModel` にフォールバック
+   */
+  readonly planQualityJudgeModel?: string;
 }
 
 /**
@@ -305,12 +315,16 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       previousFeedback,
     );
 
-    // Judge用エージェントを実行
-    // WHY: Plannerとは別のモデル（軽量なHaikuなど）を使用してコスト削減
+    // Plan品質評価用モデルの選択
+    // WHY: planQualityJudge設定がある場合はそちらを優先し、
+    //      なければ通常のJudge設定にフォールバック
+    const judgeAgentType = deps.planQualityJudgeAgentType ?? deps.agentType;
+    const judgeModelToUse = deps.planQualityJudgeModel ?? deps.judgeModel;
+
     const runResult =
-      deps.agentType === 'claude'
-        ? await deps.runnerEffects.runClaudeAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel)
-        : await deps.runnerEffects.runCodexAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel);
+      judgeAgentType === 'claude'
+        ? await deps.runnerEffects.runClaudeAgent(qualityPrompt, deps.appRepoPath, judgeModelToUse)
+        : await deps.runnerEffects.runCodexAgent(qualityPrompt, deps.appRepoPath, judgeModelToUse);
 
     if (isErr(runResult)) {
       console.warn(`⚠️  Quality judge failed: ${runResult.err.message}, accepting by default`);

@@ -67,6 +67,10 @@ export interface TaskExecutionPipelineInput {
   readonly plannerModel: string;
   /** Judgeモデル */
   readonly judgeModel: string;
+  /** Plan品質評価用Judgeのエージェントタイプ（オプショナル） */
+  readonly planQualityJudgeAgentType?: 'claude' | 'codex';
+  /** Plan品質評価用Judgeのモデル（オプショナル） */
+  readonly planQualityJudgeModel?: string;
 }
 
 /**
@@ -122,6 +126,8 @@ export async function executeTaskPipeline(
     plannerAgentType,
     plannerModel,
     judgeModel,
+    planQualityJudgeAgentType,
+    planQualityJudgeModel,
   } = input;
 
   // WHY: Planner再評価に必要な依存関係を構築
@@ -134,6 +140,8 @@ export async function executeTaskPipeline(
     agentType: plannerAgentType,
     model: plannerModel,
     judgeModel,
+    planQualityJudgeAgentType,
+    planQualityJudgeModel,
   };
 
   const completedTaskIds: string[] = [];

@@ -98,6 +98,14 @@ const PlanningConfigSchema = z
     maxTaskDuration: z.number().min(0.5).max(8).default(4),
     /** 1回の計画で生成する最大タスク数 */
     maxTasks: z.number().int().min(1).max(20).default(5),
+    /**
+     * Plan品質評価用Judge設定（オプショナル）
+     *
+     * WHY: Plannerが生成したタスク分解の品質評価に、通常のJudgeモデルとは
+     *      別のモデル（より高度なモデル）を指定可能にする。
+     *      設定がなければ agents.judge の設定にフォールバック。
+     */
+    planQualityJudge: AgentConfigSchema.optional(),
   })
   .default({
     qualityThreshold: 60,
