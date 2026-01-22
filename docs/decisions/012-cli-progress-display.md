@@ -126,6 +126,36 @@ pnpm dev run "..." 2>&1 | cat
 pnpm dev run "..." > output.txt  # output.txtに進捗が含まれない
 ```
 
+## teeコマンドとの互換性
+
+### 挙動
+
+| コマンド | stderr状態 | 進捗表示 | ファイル内容 |
+|----------|-----------|----------|-------------|
+| `cmd \| tee file` | TTY接続 | 進捗バー（ターミナル） | stdoutのみ |
+| `cmd 2>&1 \| tee file` | パイプ | 簡易ログ | stdout + 進捗ログ |
+
+### 詳細
+
+**`command | tee file.txt`**:
+- stdoutだけがteeに流れる
+- stderrはTTYに直接接続されたまま → `process.stderr.isTTY = true`
+- 進捗バーはターミナルに表示される（意図通りの動作）
+
+**`command 2>&1 | tee file.txt`**:
+- stderrがstdoutにリダイレクトされてパイプに流れる
+- `process.stderr.isTTY = false` になる
+- 非TTYモードにフォールバック（簡易ログ形式）
+
+### 実装上の注意
+
+非TTYモードでは**ANSIエスケープシーケンスを完全に無効化**する必要がある。`2>&1 | tee`でファイルにANSI制御文字が混入するのを防ぐため。
+
+```typescript
+// tty-renderer.ts での実装例
+const useAnsi = stream.isTTY && !process.env.NO_COLOR;
+```
+
 ## レビューフィードバック
 
 本設計は以下のレビューを経て決定:
