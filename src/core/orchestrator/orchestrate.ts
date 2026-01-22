@@ -142,6 +142,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     maxTasks: deps.config.planning.maxTasks,
     planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
     planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
+    refinementConfig: deps.config.refinement,
   });
   const workerDeps: WorkerDeps = {
     gitEffects: deps.gitEffects,

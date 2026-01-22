@@ -104,6 +104,30 @@ export const PlannerSessionSchema = z.object({
       SessionStatus.FAILED,
     ])
     .optional(),
+  /**
+   * Refinement履歴
+   *
+   * WHY: プラン生成時のrefinementループの履歴を保存し、
+   *      品質改善プロセスの透明性と追跡可能性を提供する
+   */
+  refinementHistory: z
+    .array(
+      z.object({
+        decision: z.enum(['accept', 'replan', 'reject']),
+        reason: z.string(),
+        feedback: z
+          .object({
+            issues: z.array(z.string()),
+            suggestions: z.array(z.string()),
+          })
+          .optional(),
+        previousScore: z.number().optional(),
+        currentScore: z.number().optional(),
+        attemptCount: z.number().int(),
+        suggestionReplanCount: z.number().int(),
+      }),
+    )
+    .optional(),
 });
 
 export type PlannerSession = z.infer<typeof PlannerSessionSchema>;

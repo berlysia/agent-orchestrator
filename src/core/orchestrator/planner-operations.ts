@@ -102,6 +102,11 @@ export interface PlannerDeps {
    * 設定がなければ `judgeModel` にフォールバック
    */
   readonly planQualityJudgeModel?: string;
+  /**
+   * Refinement設定（オプショナル）
+   * 設定がなければrefinementをスキップ
+   */
+  readonly refinementConfig?: import('../../types/planner-session.ts').RefinementConfig;
 }
 
 /**
@@ -540,8 +545,125 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       }
 
       if (isQualityAcceptable) {
-        // 品質OK → タスク保存へ進む
+        // 品質OK → refinementチェックまたはタスク保存へ進む
         await appendPlanningLog(`\n✅ Quality check passed\n`);
+
+        // Refinement loop integration (if configured)
+        if (deps.refinementConfig) {
+          await appendPlanningLog(`\n=== Refinement Process ===\n`);
+
+          // Convert TaskBreakdown to Task-like structure for refinement
+          const initialTasks: Task[] = taskBreakdowns.map((breakdown) => {
+            const sessionShort = extractSessionShort(sessionId);
+            const uniqueTaskId = makeUniqueTaskId(breakdown.id, sessionShort);
+            return createInitialTask({
+              id: taskId(uniqueTaskId),
+              repo: repoPath(deps.appRepoPath),
+              branch: branchName(makeBranchNameWithTaskId(breakdown.branch, uniqueTaskId)),
+              scopePaths: breakdown.scopePaths,
+              acceptance: breakdown.acceptance,
+              taskType: breakdown.type,
+              context: breakdown.context,
+              dependencies: breakdown.dependencies.map((depId) =>
+                taskId(makeUniqueTaskId(depId, sessionShort)),
+              ),
+              summary: breakdown.summary ?? null,
+              sessionId: sessionId,
+              parentSessionId: null,
+              rootSessionId: sessionId,
+              plannerLogPath: plannerLogPath,
+              plannerMetadataPath: plannerMetadataPath,
+            });
+          });
+
+          // Create QualityJudge adapter
+          const qualityJudge: QualityJudge = {
+            evaluate: async (tasks: Task[]) => {
+              // Convert tasks back to TaskBreakdown for existing quality evaluation
+              const breakdowns: TaskBreakdown[] = tasks.map((task) => ({
+                id: String(task.id).split('-').slice(0, -1).join('-'), // Remove session suffix
+                description: task.acceptance, // Use acceptance as description
+                branch: String(task.branch),
+                scopePaths: task.scopePaths,
+                acceptance: task.acceptance,
+                type: task.taskType,
+                estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
+                context: task.context,
+                dependencies: task.dependencies.map((dep) => String(dep).split('-').slice(0, -1).join('-')),
+                summary: task.summary ?? undefined,
+              }));
+
+              const result = await judgeTaskQuality(userInstruction, breakdowns, accumulatedFeedback);
+              return {
+                isAcceptable: result.isAcceptable,
+                score: result.overallScore,
+                issues: result.issues,
+                suggestions: result.suggestions,
+              };
+            },
+          };
+
+          // Execute refinement loop
+          const refinementResult = await executeRefinementLoop({
+            initialTasks,
+            qualityJudge,
+            config: deps.refinementConfig,
+            deps,
+          });
+
+          // Handle refinement result
+          if (isErr(refinementResult)) {
+            await appendPlanningLog(`\n❌ Refinement failed: ${refinementResult.err.reason}\n`);
+            await appendPlanningLog(`Refinement history:\n`);
+            for (const [idx, entry] of refinementResult.err.refinementHistory.entries()) {
+              await appendPlanningLog(
+                `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}\n`,
+              );
+            }
+
+            // Return error with refinement history
+            const failedRun = {
+              ...planningRun,
+              status: RunStatus.FAILURE,
+              finishedAt: new Date().toISOString(),
+              errorMessage: `Refinement failed: ${refinementResult.err.reason}`,
+            };
+            await deps.runnerEffects.saveRunMetadata(failedRun);
+
+            return createErr(
+              ioError('planTasks.refinement', `Refinement failed: ${refinementResult.err.reason}`),
+            );
+          }
+
+          // Success: use refined tasks
+          await appendPlanningLog(`\n✅ Refinement succeeded\n`);
+          await appendPlanningLog(`Refinement history:\n`);
+          for (const [idx, entry] of refinementResult.val.refinementHistory.entries()) {
+            await appendPlanningLog(
+              `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}, Score: ${entry.currentScore ?? 'N/A'}\n`,
+            );
+          }
+
+          // Convert refined tasks back to TaskBreakdown
+          taskBreakdowns = refinementResult.val.finalTasks.map((task) => ({
+            id: String(task.id).split('-').slice(0, -1).join('-'), // Remove session suffix
+            description: task.acceptance, // Use acceptance as description
+            branch: String(task.branch),
+            scopePaths: task.scopePaths,
+            acceptance: task.acceptance,
+            type: task.taskType,
+            estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
+            context: task.context,
+            dependencies: task.dependencies.map((dep) => String(dep).split('-').slice(0, -1).join('-')),
+            summary: task.summary ?? undefined,
+          }));
+
+          // Store refinement history for session
+          const refinementHistory = refinementResult.val.refinementHistory;
+          // Will be saved to session later
+          (planningRun as any).refinementHistory = refinementHistory;
+        }
+
         break;
       }
 
@@ -662,6 +784,12 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           content: JSON.stringify(taskBreakdowns, null, 2),
           timestamp: new Date().toISOString(),
         });
+      }
+
+      // Add refinement history if it exists
+      if ((planningRun as any).refinementHistory) {
+        session.refinementHistory = (planningRun as any).refinementHistory;
+        await appendPlanningLog(`\n📊 Refinement history saved to session\n`);
       }
 
       const saveSessionResult = await deps.sessionEffects.saveSession(session);
