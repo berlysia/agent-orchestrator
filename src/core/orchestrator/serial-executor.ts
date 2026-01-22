@@ -349,14 +349,6 @@ export async function executeSerialChain(
     }
   }
 
-  // 最後にpush
-  if (completed.length > 0 && worktreePath) {
-    const pushResult = await workerOps.pushChanges(worktreePath);
-    if (isErr(pushResult)) {
-      console.warn(`  ⚠️  Failed to push changes: ${pushResult.err.message}`);
-    }
-  }
-
   return {
     completed,
     failed,

@@ -860,47 +860,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
   };
 
   /**
-   * リモートにpush
-   *
-   * WHY: worktreeの現在のブランチ名を取得してpushすることで、serial chain実行時の
-   *      ブランチ名の不一致を防ぐ（最初のタスクのブランチ名を使用）
-   * WHY: リモートが存在しない場合はpushをスキップ（ローカル開発環境への対応）
-   *
-   * @param worktreePath worktreeのパス
-   * @returns Result型
-   */
-  const pushChanges = async (
-    worktreePath: WorktreePath,
-  ): Promise<Result<void, OrchestratorError>> => {
-    // リモートの存在を確認
-    const hasRemoteResult = await deps.gitEffects.hasRemote(worktreePath, 'origin');
-    if (isErr(hasRemoteResult)) {
-      return createErr(hasRemoteResult.err);
-    }
-
-    if (!hasRemoteResult.val) {
-      // リモートが存在しない場合は警告を表示してスキップ
-      console.warn(`  ⚠️  Remote 'origin' not found, skipping push`);
-      return createOk(undefined);
-    }
-
-    // worktreeの現在のブランチ名を取得
-    const currentBranchResult = await deps.gitEffects.getCurrentBranch(repoPath(worktreePath));
-    if (isErr(currentBranchResult)) {
-      return createErr(currentBranchResult.err);
-    }
-
-    const currentBranch = currentBranchResult.val;
-    const pushResult = await deps.gitEffects.push(worktreePath, 'origin', currentBranch);
-
-    if (isErr(pushResult)) {
-      return createErr(pushResult.err);
-    }
-
-    return createOk(undefined);
-  };
-
-  /**
    * Worktreeをクリーンアップ（削除）
    *
    * WHY: 3.3 エッジケース - タスク完了後のworktree削除（通常と統合ブランチ用）
@@ -1344,12 +1303,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         return createErr(commitResult.err);
       }
 
-      // 5. リモートにpush
-      const pushResult = await pushChanges(worktreePath);
-      if (isErr(pushResult)) {
-        return createErr(pushResult.err);
-      }
-
       return createOk(workerResult);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1438,12 +1391,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         return createErr(commitResult.err);
       }
 
-      // 5. リモートにpush
-      const pushResult = await pushChanges(existingWorktreePath);
-      if (isErr(pushResult)) {
-        return createErr(pushResult.err);
-      }
-
       return createOk(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1460,7 +1407,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     executeTask,
     executeTaskInExistingWorktree,
     commitChanges,
-    pushChanges,
     cleanupWorktree,
     executeTaskWithWorktree,
     continueTask,
