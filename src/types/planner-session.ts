@@ -109,6 +109,72 @@ export const PlannerSessionSchema = z.object({
 export type PlannerSession = z.infer<typeof PlannerSessionSchema>;
 
 /**
+ * Refinement configuration
+ * Configuration for the plan refinement process
+ */
+export type RefinementConfig = {
+  maxRefinementAttempts: number; // default 2
+  refineSuggestionsOnSuccess: boolean; // default false
+  maxSuggestionReplans: number; // default 1
+  enableIndividualFallback: boolean; // default true
+  deltaThreshold: number; // default 5
+  deltaThresholdPercent: number; // default 5
+  taskCountChangeThreshold: number; // default 0.3
+  taskCountChangeMinAbsolute: number; // default 2
+};
+
+/**
+ * Refinement decision type
+ * Represents the decision made during plan refinement
+ */
+export type RefinementDecision = 'accept' | 'replan' | 'reject';
+
+/**
+ * Feedback type
+ * Contains issues and suggestions for plan refinement
+ */
+export type Feedback = {
+  issues: string[];
+  suggestions: string[];
+};
+
+/**
+ * Refinement result
+ * Contains the result of a single refinement attempt
+ */
+export type RefinementResult = {
+  decision: RefinementDecision;
+  reason: string;
+  feedback?: Feedback;
+  previousScore?: number;
+  currentScore?: number;
+  attemptCount: number;
+  suggestionReplanCount: number;
+};
+
+/**
+ * Structure validation result
+ * Contains validation metrics for plan structure
+ */
+export type StructureValidation = {
+  isValid: boolean;
+  taskCountChange: number;
+  absoluteTaskCountDiff: number;
+  hasDependencyIssues: boolean;
+  hasCyclicDependency: boolean;
+  details?: string;
+};
+
+/**
+ * Refinement error
+ * Error type for Result<T, E> pattern in refinement operations
+ */
+export type RefinementError = {
+  reason: string;
+  refinementHistory: RefinementResult[];
+};
+
+/**
  * 新しいセッションを作成するためのヘルパー関数
  */
 export const createPlannerSession = (sessionId: string, instruction: string): PlannerSession => {
