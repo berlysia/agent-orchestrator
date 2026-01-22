@@ -11,6 +11,7 @@ import { createInitialTask } from '../../types/task.ts';
 import { randomUUID } from 'node:crypto';
 import type { PlannerDeps } from './planner-operations.ts';
 import { parseAgentOutputWithErrors } from './planner-operations.ts';
+import { extractSessionShort } from './task-helpers.ts';
 
 /**
  * Planner再評価プロンプトを生成
@@ -161,8 +162,9 @@ export const replanFailedTask = async (
 
   const taskBreakdowns = parseResult.tasks;
 
-  // セッション短縮ID生成（タスクID重複回避のため）
-  const sessionShort = randomUUID().split('-')[0];
+  // リプランニングセッションIDを生成し、短縮IDを抽出
+  const replanningSessionId = `planner-replanning-${randomUUID()}`;
+  const sessionShort = extractSessionShort(replanningSessionId);
 
   // タスクをTaskStoreに保存
   const taskIds: TaskId[] = [];

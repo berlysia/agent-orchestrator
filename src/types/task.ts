@@ -118,8 +118,26 @@ export const TaskSchema = z.object({
   /** タスクの30文字程度のサマリ（ログ出力用） */
   summary: z.string().max(50).nullable().optional(),
 
-  /** このタスクを生成したプランナーのID（オプショナル） */
-  plannerRunId: z.string().nullable().optional(),
+  /**
+   * このタスクが属するセッションID
+   *
+   * WHY: セッション単位でのタスク検索・集計を可能にする
+   */
+  sessionId: z.string().nullable().optional(),
+
+  /**
+   * 親セッションID（continue時）
+   *
+   * WHY: `agent continue` で追加タスクを生成した場合、元のセッションを参照可能にする
+   */
+  parentSessionId: z.string().nullable().optional(),
+
+  /**
+   * ルートセッションID（集計単位）
+   *
+   * WHY: 複数のcontinueを経ても、元のセッションチェーンを追跡可能にする
+   */
+  rootSessionId: z.string().nullable().optional(),
 
   /** プランナーのログファイルパス（絶対パス、オプショナル） */
   plannerLogPath: z.string().nullable().optional(),
@@ -212,7 +230,9 @@ export function createInitialTask(params: {
   context: string;
   dependencies?: TaskId[];
   summary?: string | null;
-  plannerRunId?: string | null;
+  sessionId?: string | null;
+  parentSessionId?: string | null;
+  rootSessionId?: string | null;
   plannerLogPath?: string | null;
   plannerMetadataPath?: string | null;
 }): Task {
@@ -233,7 +253,9 @@ export function createInitialTask(params: {
     createdAt: now,
     updatedAt: now,
     summary: params.summary ?? null,
-    plannerRunId: params.plannerRunId ?? null,
+    sessionId: params.sessionId ?? null,
+    parentSessionId: params.parentSessionId ?? null,
+    rootSessionId: params.rootSessionId ?? null,
     plannerLogPath: params.plannerLogPath ?? null,
     plannerMetadataPath: params.plannerMetadataPath ?? null,
     latestRunId: null,

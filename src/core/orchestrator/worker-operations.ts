@@ -570,7 +570,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       taskId: task.id,
       agentType: deps.agentType,
       logPath,
-      plannerRunId: task.plannerRunId ?? null,
+      sessionId: task.sessionId ?? null,
       plannerLogPath: task.plannerLogPath ?? null,
       plannerMetadataPath: task.plannerMetadataPath ?? null,
     });
@@ -885,7 +885,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
       taskId: task.id,
       agentType: deps.agentType,
       logPath,
-      plannerRunId: task.plannerRunId ?? null,
+      sessionId: task.sessionId ?? null,
       plannerLogPath: task.plannerLogPath ?? null,
       plannerMetadataPath: task.plannerMetadataPath ?? null,
     });

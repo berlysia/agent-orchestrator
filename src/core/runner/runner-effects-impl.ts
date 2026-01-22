@@ -96,7 +96,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         `# Run ID: ${run.id}`,
         `# Task ID: ${run.taskId}`,
         `# Metadata: ${metadataPath}`,
-        run.plannerRunId ? `# Planner Run ID: ${run.plannerRunId}` : null,
+        run.sessionId ? `# Session ID: ${run.sessionId}` : null,
         run.plannerMetadataPath ? `# Planner Metadata: ${run.plannerMetadataPath}` : null,
         `# Started At: ${run.startedAt}`,
         '#',

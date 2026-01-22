@@ -13,10 +13,9 @@ import {
   parseFinalCompletionJudgement,
   detectCircularDependencies,
   validateTaskDependencies,
-  TaskTypeEnum,
-  type TaskBreakdown,
   type TaskQualityJudgement,
 } from '../../../../src/core/orchestrator/planner-operations.ts';
+import { TaskTypeEnum, type TaskBreakdown } from '../../../../src/types/task-breakdown.ts';
 
 describe('Planner Operations', () => {
   describe('buildPlanningPrompt', () => {

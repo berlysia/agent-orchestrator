@@ -14,6 +14,7 @@ import { createPlannerSession } from '../../types/planner-session.ts';
 import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
 import { extractSessionShort } from './task-helpers.ts';
+import { TaskBreakdownSchema, type TaskBreakdown } from '../../types/task-breakdown.ts';
 
 /**
  * Levenshtein距離を計算
@@ -185,61 +186,6 @@ export const FinalCompletionJudgementSchema = z.object({
 export const TASK_BREAKDOWN_SCHEMA_VERSION = 2;
 
 /**
- * タスクタイプ定数
- *
- * - implementation: 新機能や既存機能の実装
- * - documentation: ドキュメント作成・更新
- * - investigation: 調査・検証タスク
- * - integration: システム統合・連携作業
- */
-export const TaskTypeEnum = {
-  IMPLEMENTATION: 'implementation',
-  DOCUMENTATION: 'documentation',
-  INVESTIGATION: 'investigation',
-  INTEGRATION: 'integration',
-} as const;
-
-export type TaskType = (typeof TaskTypeEnum)[keyof typeof TaskTypeEnum];
-
-/**
- * タスク分解情報のZodスキーマ（エージェントが返すべき形式）
- *
- * WHY: 厳格なバリデーションによりエージェント出力の品質を保証
- */
-export const TaskBreakdownSchema = z.object({
-  /** タスクID（Planner段階で割り当てる） */
-  id: z.string(),
-  /** タスクの説明 */
-  description: z.string().min(1, 'description must not be empty'),
-  /** ブランチ名 */
-  branch: z.string().min(1, 'branch must not be empty'),
-  /** スコープパス */
-  scopePaths: z.array(z.string()).min(1, 'scopePaths must contain at least one path'),
-  /** 受け入れ基準 */
-  acceptance: z.string().min(1, 'acceptance must not be empty'),
-  /** タスクタイプ（必須） */
-  type: z.enum([
-    TaskTypeEnum.IMPLEMENTATION,
-    TaskTypeEnum.DOCUMENTATION,
-    TaskTypeEnum.INVESTIGATION,
-    TaskTypeEnum.INTEGRATION,
-  ]),
-  /** 見積もり時間（時間単位、0.5-8時間の範囲） */
-  estimatedDuration: z.number().min(0.5).max(8),
-  /** タスク実行に必要なコンテキスト情報（必須） */
-  context: z.string().min(1, 'context must not be empty'),
-  /** 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスクのID） */
-  dependencies: z.array(z.string()).default([]),
-  /** タスクの30文字程度のサマリ（ログ出力用） */
-  summary: z.string().max(50).optional(),
-});
-
-/**
- * タスク分解情報（TypeScript型）
- */
-export type TaskBreakdown = z.infer<typeof TaskBreakdownSchema>;
-
-/**
  * 生のタスクIDから一意のタスクIDを生成
  *
  * WHY: 異なるセッションで同じタスクID（task-1, task-2など）が生成されても衝突しないよう、
@@ -333,27 +279,27 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
   const planTasks = async (
     userInstruction: string,
   ): Promise<Result<PlanningResult, TaskStoreError>> => {
-    const plannerRunId = `planner-${randomUUID()}`;
+    const sessionId = `planner-${randomUUID()}`;
     const maxRetries = deps.plannerQualityRetries ?? 5;
 
     const appendPlanningLog = async (content: string): Promise<void> => {
-      const logResult = await deps.runnerEffects.appendLog(plannerRunId, content);
+      const logResult = await deps.runnerEffects.appendLog(sessionId, content);
       if (isErr(logResult)) {
         console.warn(`⚠️  Failed to write planner log: ${logResult.err.message}`);
       }
     };
 
-    const plannerLogPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.log`);
-    const plannerMetadataPath = path.join(deps.coordRepoPath, 'runs', `${plannerRunId}.json`);
+    const plannerLogPath = path.join(deps.coordRepoPath, 'runs', `${sessionId}.log`);
+    const plannerMetadataPath = path.join(deps.coordRepoPath, 'runs', `${sessionId}.json`);
 
     console.log(`📝 Starting task planning for instruction: "${userInstruction}"`);
-    console.log(`🆔 Planner Run ID: ${plannerRunId}`);
+    console.log(`🆔 Planner Run ID: ${sessionId}`);
     console.log(`📄 Planner Log Path: ${plannerLogPath}`);
     console.log(`🗂️  Planner Metadata Path: ${plannerMetadataPath}`);
 
     const planningRun = createInitialRun({
-      id: runId(plannerRunId),
-      taskId: taskId(plannerRunId),
+      id: runId(sessionId),
+      taskId: taskId(sessionId),
       agentType: deps.agentType,
       logPath: plannerLogPath,
     });
@@ -408,8 +354,8 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       // WHY: 役割ごとに最適なモデルを使用（Config から取得）
       const runResult =
         deps.agentType === 'claude'
-          ? await deps.runnerEffects.runClaudeAgent(planningPrompt, deps.appRepoPath, deps.model!, plannerRunId)
-          : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model, plannerRunId);
+          ? await deps.runnerEffects.runClaudeAgent(planningPrompt, deps.appRepoPath, deps.model!, sessionId)
+          : await deps.runnerEffects.runCodexAgent(planningPrompt, deps.appRepoPath, deps.model, sessionId);
 
       // 2. エージェント実行結果の確認
       if (isErr(runResult)) {
@@ -624,7 +570,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     const errors: string[] = [];
 
     // プランナーセッションIDの短縮版を使用してタスクIDを一意にする
-    const sessionShort = extractSessionShort(plannerRunId);
+    const sessionShort = extractSessionShort(sessionId);
 
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
@@ -641,7 +587,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           taskId(makeUniqueTaskId(depId, sessionShort)),
         ),
         summary: breakdown.summary ?? null,
-        plannerRunId: plannerRunId,
+        sessionId: sessionId,
+        // 初期タスクは親がないのでnull
+        parentSessionId: null,
+        // 初期タスクは自身がルート
+        rootSessionId: sessionId,
         plannerLogPath: plannerLogPath,
         plannerMetadataPath: plannerMetadataPath,
       });
@@ -691,7 +641,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     // セッション情報を保存
     if (taskIds.length > 0) {
-      const session = createPlannerSession(plannerRunId, userInstruction);
+      const session = createPlannerSession(sessionId, userInstruction);
       session.generatedTasks = taskBreakdowns;
       session.plannerLogPath = plannerLogPath;
       session.plannerMetadataPath = plannerMetadataPath;
@@ -713,7 +663,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
       if (isErr(saveSessionResult)) {
         console.warn(`⚠️  Failed to save planner session: ${saveSessionResult.err.message}`);
       } else {
-        await appendPlanningLog(`\n✅ Session saved: ${plannerRunId}\n`);
+        await appendPlanningLog(`\n✅ Session saved: ${sessionId}\n`);
       }
     }
 
@@ -724,7 +674,7 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
 
     return createOk({
       taskIds,
-      runId: plannerRunId,
+      runId: sessionId,
     });
   };
 
@@ -1319,6 +1269,12 @@ Output only the JSON array, no additional text.`;
     // WHY: 追加タスクは additionalRunId から sessionShort を抽出（元の session.sessionId とは異なる）
     const additionalSessionShort = extractSessionShort(additionalRunId);
 
+    // 親子関係の設定
+    // WHY: continue で追加されたタスクは元セッションを参照可能にする
+    const parentSessionId = sessionId;  // 元のセッションID
+    // WHY: rootSessionId は集計単位として、最初のセッションを追跡
+    const rootSessionId = session.rootSessionId ?? sessionId;
+
     for (const breakdown of taskBreakdowns) {
       const rawTaskId = breakdown.id;
       const uniqueTaskId = makeUniqueTaskId(rawTaskId, additionalSessionShort);
@@ -1344,7 +1300,9 @@ Output only the JSON array, no additional text.`;
           return taskId(makeUniqueTaskId(depId, additionalSessionShort));
         }),
         summary: breakdown.summary ?? null,
-        plannerRunId: additionalRunId,
+        sessionId: additionalRunId,
+        parentSessionId,
+        rootSessionId,
         plannerLogPath: additionalPlannerLogPath,
         plannerMetadataPath: additionalPlannerMetadataPath,
       });

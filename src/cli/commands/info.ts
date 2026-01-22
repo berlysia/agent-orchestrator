@@ -75,9 +75,9 @@ async function showInfo(params: { id: string; configPath?: string }): Promise<vo
     console.log(`  ${taskMetadataPath}`);
 
     // 関連するPlanner情報
-    if (task.plannerRunId) {
+    if (task.sessionId) {
       console.log(`\n🤖 Related Planner:`);
-      console.log(`  Planner Run ID: ${task.plannerRunId}`);
+      console.log(`  Session ID: ${task.sessionId}`);
       if (task.plannerLogPath) {
         console.log(`  Planner Log: ${task.plannerLogPath}`);
       }
@@ -123,9 +123,9 @@ async function showInfo(params: { id: string; configPath?: string }): Promise<vo
     console.log(`  ${runMetadataPath}`);
 
     // 関連するPlanner情報
-    if (run.plannerRunId) {
+    if (run.sessionId) {
       console.log(`\n🤖 Related Planner:`);
-      console.log(`  Planner Run ID: ${run.plannerRunId}`);
+      console.log(`  Session ID: ${run.sessionId}`);
       if (run.plannerLogPath) {
         console.log(`  Planner Log: ${run.plannerLogPath}`);
       }

@@ -46,8 +46,12 @@ export const RunSchema = z.object({
   /** エラーメッセージ（失敗時のみ） */
   errorMessage: z.string().nullable(),
 
-  /** このタスクを生成したプランナーのID（オプショナル） */
-  plannerRunId: z.string().nullable().optional(),
+  /**
+   * このRunが属するセッションID
+   *
+   * WHY: ログ追跡のため、どのセッションで実行されたかを記録
+   */
+  sessionId: z.string().nullable().optional(),
 
   /** プランナーのログファイルパス（絶対パス、オプショナル） */
   plannerLogPath: z.string().nullable().optional(),
@@ -69,7 +73,7 @@ export function createInitialRun(params: {
   taskId: TaskId;
   agentType: 'claude' | 'codex';
   logPath: string;
-  plannerRunId?: string | null;
+  sessionId?: string | null;
   plannerLogPath?: string | null;
   plannerMetadataPath?: string | null;
 }): Run {
@@ -82,7 +86,7 @@ export function createInitialRun(params: {
     startedAt: new Date().toISOString(),
     finishedAt: null,
     errorMessage: null,
-    plannerRunId: params.plannerRunId ?? null,
+    sessionId: params.sessionId ?? null,
     plannerLogPath: params.plannerLogPath ?? null,
     plannerMetadataPath: params.plannerMetadataPath ?? null,
   };

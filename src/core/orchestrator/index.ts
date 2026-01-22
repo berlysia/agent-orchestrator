@@ -15,12 +15,9 @@ export type {
   ClaimTaskResult,
 } from './scheduler-operations.ts';
 export { createPlannerOperations } from './planner-operations.ts';
-export type {
-  PlannerOperations,
-  PlannerDeps,
-  PlanningResult,
-  TaskBreakdown,
-} from './planner-operations.ts';
+export type { PlannerOperations, PlannerDeps, PlanningResult } from './planner-operations.ts';
+export { TaskBreakdownSchema, TaskTypeEnum } from '../../types/task-breakdown.ts';
+export type { TaskBreakdown, TaskType } from '../../types/task-breakdown.ts';
 export { createJudgeOperations } from './judge-operations.ts';
 export type { JudgeOperations, JudgeDeps, JudgementResult } from './judge-operations.ts';
 export { createOrchestrator } from './orchestrate.ts';

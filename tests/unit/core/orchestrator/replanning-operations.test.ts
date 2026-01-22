@@ -11,7 +11,6 @@ import {
 import {
   taskId,
   workerId,
-  runId,
   branchName,
   repoPath,
 } from '../../../../src/types/branded.ts';
@@ -31,7 +30,7 @@ describe('Replanning Operations', () => {
     });
     task.state = TaskState.RUNNING;
     task.owner = workerId('worker-1');
-    task.plannerRunId = runId('planner-1');
+    task.sessionId = 'planner-1';
     return task;
   };
 

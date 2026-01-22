@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { PlannerSessionEffectsImpl } from '../../../../src/core/orchestrator/planner-session-effects-impl.ts';
 import { createPlannerSession } from '../../../../src/types/planner-session.ts';
-import type { TaskBreakdown } from '../../../../src/core/orchestrator/planner-operations.ts';
+import type { TaskBreakdown } from '../../../../src/types/task-breakdown.ts';
 
 const TEST_COORD_REPO = path.join(process.cwd(), '.tmp', 'test-planner-sessions');
 
@@ -227,7 +227,7 @@ describe('PlannerSessionEffects', () => {
       const final = loadResult2.val;
       assert.strictEqual(final.conversationHistory.length, 2, 'Should have 2 messages');
       assert.strictEqual(final.generatedTasks.length, 1, 'Should have 1 task');
-      assert.strictEqual(final.generatedTasks[0].id, 'task-1');
+      assert.strictEqual(final.generatedTasks[0]?.id, 'task-1');
     });
   });
 });
