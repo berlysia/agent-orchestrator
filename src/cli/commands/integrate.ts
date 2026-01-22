@@ -124,8 +124,10 @@ async function showIntegrationCommands(params: {
   const mergedTaskIds: string[] = [];
 
   // 統合ブランチに各タスクをマージ
+  // WHY: integrationSignature=false の場合、GPG署名を無効化してマージコミットを作成
+  const mergeOptions: string[] = config.commit.integrationSignature ? [] : ['--no-gpg-sign'];
   for (const task of selectedTasks) {
-    const mergeResult = await gitEffects.merge(repo, task.branch);
+    const mergeResult = await gitEffects.merge(repo, task.branch, mergeOptions);
     if (isErr(mergeResult)) {
       console.error(`❌ Failed to merge ${task.branch}: ${mergeResult.err.message}`);
       process.exit(1);

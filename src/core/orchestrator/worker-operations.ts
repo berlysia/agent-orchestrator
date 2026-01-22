@@ -477,9 +477,11 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
     const mergedBranches: BranchName[] = [firstBranch];
 
     // 2. worktree内で残りの依存ブランチを順次マージ
+    // WHY: autoSignature=false の場合、GPG署名を無効化してマージコミットを作成
+    const mergeOptions: string[] = deps.config.commit.autoSignature ? [] : ['--no-gpg-sign'];
     for (let i = 1; i < dependencyBranches.length; i++) {
       const branchToMerge = dependencyBranches[i]!;
-      const mergeResult = await deps.gitEffects.merge(repoPath(worktreePath), branchToMerge);
+      const mergeResult = await deps.gitEffects.merge(repoPath(worktreePath), branchToMerge, mergeOptions);
 
       if (isErr(mergeResult)) {
         // マージエラー: マージを中断し、worktreeをクリーンアップしてエラーを返す
