@@ -37,5 +37,9 @@
     "judgeTaskRetries": 5,
     "orchestrateMainLoop": 5,
     "serialChainTaskRetries": 5
+  },
+  "commit": {
+    "autoSignature": false,
+    "integrationSignature": false
   }
 }
