@@ -10,7 +10,11 @@ import type { TaskStoreError } from '../../types/errors.ts';
 import { ioError } from '../../types/errors.ts';
 import { createInitialRun, RunStatus } from '../../types/run.ts';
 import { z } from 'zod';
-import { createPlannerSession } from '../../types/planner-session.ts';
+import {
+  createPlannerSession,
+  type StructureValidation,
+  type RefinementConfig,
+} from '../../types/planner-session.ts';
 import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
 import { extractSessionShort } from './task-helpers.ts';
@@ -2264,4 +2268,144 @@ export const parseFinalCompletionJudgement = (output: string): FinalCompletionJu
     );
     return defaultJudgement;
   }
+};
+
+/**
+ * 循環依存を検出
+ *
+ * WHY: タスクの依存関係グラフに循環がある場合、実行が不可能になるため検出が必要
+ *
+ * @param tasks タスクリスト
+ * @returns 循環依存が存在する場合はtrue
+ */
+const hasCycle = (tasks: Task[]): boolean => {
+  const taskMap = new Map<string, Task>();
+  for (const task of tasks) {
+    taskMap.set(task.id, task);
+  }
+
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  const dfs = (taskId: string): boolean => {
+    if (recursionStack.has(taskId)) {
+      // 再帰スタックに存在する = 循環依存を発見
+      return true;
+    }
+
+    if (visited.has(taskId)) {
+      // 既に訪問済み（別の経路から）
+      return false;
+    }
+
+    visited.add(taskId);
+    recursionStack.add(taskId);
+
+    const task = taskMap.get(taskId);
+    if (task && task.dependencies) {
+      for (const depId of task.dependencies) {
+        // 自己参照チェック
+        if (depId === taskId) {
+          return true;
+        }
+
+        if (dfs(depId)) {
+          return true;
+        }
+      }
+    }
+
+    recursionStack.delete(taskId);
+    return false;
+  };
+
+  // すべてのタスクについてDFSを実行
+  for (const task of tasks) {
+    if (!visited.has(task.id)) {
+      if (dfs(task.id)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
+/**
+ * 構造検証を実行
+ *
+ * WHY: Plannerが生成したタスクリストの構造的な妥当性を検証し、
+ *      実行不可能なタスク構成を早期に検出する
+ *
+ * 検証項目:
+ * 1. タスク数の変化率が閾値を超えていないか
+ * 2. 依存関係の不整合（存在しないタスクIDへの依存）
+ * 3. 循環依存の有無
+ *
+ * @param originalTasks 元のタスクリスト
+ * @param newTasks 新しいタスクリスト
+ * @param config 閾値設定
+ * @returns 構造検証の結果
+ */
+export const validateStructure = (
+  originalTasks: Task[],
+  newTasks: Task[],
+  config: RefinementConfig,
+): StructureValidation => {
+  const details: string[] = [];
+
+  // タスク数変化率の計算（0除算回避）
+  const absoluteDiff = Math.abs(newTasks.length - originalTasks.length);
+  const changeRate =
+    originalTasks.length === 0
+      ? 0
+      : Math.abs(newTasks.length - originalTasks.length) / originalTasks.length;
+
+  // タスク数変化判定
+  const hasExcessiveChange =
+    changeRate > config.taskCountChangeThreshold && absoluteDiff > config.taskCountChangeMinAbsolute;
+
+  if (hasExcessiveChange) {
+    details.push(
+      `タスク数変化率が閾値超過: 変化率=${(changeRate * 100).toFixed(1)}% (閾値=${(config.taskCountChangeThreshold * 100).toFixed(1)}%), 絶対差=${absoluteDiff} (下限=${config.taskCountChangeMinAbsolute})`,
+    );
+  }
+
+  // 依存関係不整合検出
+  const taskIds = new Set(newTasks.map((t) => t.id));
+  const dependencyIssues: string[] = [];
+
+  for (const task of newTasks) {
+    if (task.dependencies) {
+      for (const depId of task.dependencies) {
+        if (!taskIds.has(depId)) {
+          dependencyIssues.push(`${task.id} -> ${depId}`);
+        }
+      }
+    }
+  }
+
+  const hasDependencyIssues = dependencyIssues.length > 0;
+
+  if (hasDependencyIssues) {
+    details.push(`依存関係不整合: ${dependencyIssues.join(', ')}`);
+  }
+
+  // 循環依存検出
+  const hasCyclicDependency = hasCycle(newTasks);
+
+  if (hasCyclicDependency) {
+    details.push('循環依存検出');
+  }
+
+  const isValid = !hasExcessiveChange && !hasDependencyIssues && !hasCyclicDependency;
+
+  return {
+    isValid,
+    taskCountChange: changeRate,
+    absoluteTaskCountDiff: absoluteDiff,
+    hasDependencyIssues,
+    hasCyclicDependency,
+    details: details.length > 0 ? details.join('; ') : undefined,
+  };
 };
