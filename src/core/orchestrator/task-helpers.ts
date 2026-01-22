@@ -116,3 +116,19 @@ export async function collectFailedTaskDescriptions(
 
   return descriptions;
 }
+
+/**
+ * セッションIDから短縮版を抽出
+ *
+ * WHY: タスクIDを一意にするため、セッションIDの一部を使用
+ *
+ * @param runId プランナー実行ID（"planner-xxx" または "planner-additional-xxx"）
+ * @returns 短縮版ID（8文字）
+ */
+export const extractSessionShort = (runId: string): string => {
+  // "planner-" の後の8文字、または "planner-additional-" の後の8文字を取得
+  if (runId.startsWith('planner-additional-')) {
+    return runId.substring(19, 27);
+  }
+  return runId.substring(8, 16);
+};

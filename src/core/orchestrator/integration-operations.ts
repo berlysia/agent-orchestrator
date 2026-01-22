@@ -65,10 +65,15 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
    * 複数タスクブランチを統合
    *
    * WHY: 並列実行されたタスクの変更を統合し、コンフリクトがあれば解決タスクを生成
+   *
+   * @param completedTasks 完了タスクのリスト
+   * @param baseBranch ベースブランチ名
+   * @param sessionShort セッション短縮ID（コンフリクト解決タスク生成用、省略時は空文字列で旧形式のIDを使用）
    */
   const integrateTasks = async (
     completedTasks: Task[],
     baseBranch: BranchName,
+    sessionShort: string = '',
   ): Promise<Result<IntegrationResult, OrchestratorError>> => {
     const repo = repoPath(appRepoPath);
 
@@ -276,6 +281,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         conflictedTaskIds,
         failedMerges,
         integrationBranch,
+        sessionShort,
       );
 
       if (!isErr(resolutionTaskResult)) {
@@ -299,11 +305,17 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
    * コンフリクト解決タスクを生成
    *
    * WHY: コンフリクトが発生したタスクをまとめて解決するための専用タスクを作成
+   *
+   * @param _conflictedTaskIds コンフリクトが発生したタスクIDの配列
+   * @param failedMerges マージ失敗情報の配列
+   * @param integrationBranch 統合ブランチ名
+   * @param sessionShort セッション短縮ID（タスクIDの一意性を保証するため）
    */
   const createConflictResolutionTask = async (
     _conflictedTaskIds: TaskId[],
     failedMerges: Array<{ taskId: TaskId; sourceBranch: BranchName; conflicts: any[] }>,
     integrationBranch: BranchName,
+    sessionShort: string,
   ): Promise<Result<Task, OrchestratorError>> => {
     // コンフリクト詳細を収集
     const conflictDetails: ConflictResolutionInfo[] = [];
@@ -324,7 +336,8 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
     const prompt = await buildConflictResolutionPrompt(conflictDetails);
 
     // 解決タスクを作成
-    const resolutionTaskId = taskId(`conflict-resolution-${randomUUID()}`);
+    // WHY: セッションフィルタで除外されないよう、task-${sessionShort}-* 形式を使用
+    const resolutionTaskId = taskId(`task-${sessionShort}-conflict-resolution-${randomUUID().slice(0, 8)}`);
     const resolutionTask = createInitialTask({
       id: resolutionTaskId,
       repo: repoPath(appRepoPath),
@@ -516,11 +529,13 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
    *
    * @param worktreeInfo 統合worktree情報
    * @param completedTasks 完了タスクのリスト
+   * @param sessionShort セッション短縮ID（コンフリクト解決タスク生成用）
    * @returns 統合マージ結果
    */
   const mergeTasksInWorktree = async (
     worktreeInfo: IntegrationWorktreeInfo,
     completedTasks: Task[],
+    sessionShort: string,
   ): Promise<Result<IntegrationMergeResult, OrchestratorError>> => {
     const { worktreePath: wtPath, integrationBranch } = worktreeInfo;
     const repo = repoPath(String(wtPath));
@@ -675,6 +690,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         conflictedTaskIds,
         failedMerges,
         integrationBranch,
+        sessionShort,
       );
 
       if (conflictTaskResult.ok) {

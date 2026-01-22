@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { createPlannerSession } from '../../types/planner-session.ts';
 import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
+import { extractSessionShort } from './task-helpers.ts';
 
 /**
  * Levenshtein距離を計算
@@ -237,22 +238,6 @@ export const TaskBreakdownSchema = z.object({
  * タスク分解情報（TypeScript型）
  */
 export type TaskBreakdown = z.infer<typeof TaskBreakdownSchema>;
-
-/**
- * プランナーセッションIDから短縮版を抽出
- *
- * WHY: タスクIDを一意にするため、セッションIDの一部を使用
- *
- * @param runId プランナー実行ID（"planner-xxx" または "planner-additional-xxx"）
- * @returns 短縮版ID（8文字）
- */
-const extractSessionShort = (runId: string): string => {
-  // "planner-" の後の8文字、または "planner-additional-" の後の8文字を取得
-  if (runId.startsWith('planner-additional-')) {
-    return runId.substring(19, 27);
-  }
-  return runId.substring(8, 16);
-};
 
 /**
  * 生のタスクIDから一意のタスクIDを生成

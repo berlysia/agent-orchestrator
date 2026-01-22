@@ -23,6 +23,7 @@ import {
   loadTasks,
   collectCompletedTaskSummaries,
   collectFailedTaskDescriptions,
+  extractSessionShort,
 } from './task-helpers.ts';
 import { executeTaskPipeline } from './task-execution-pipeline.ts';
 import { truncateSummary } from './utils/log-utils.ts';
@@ -335,6 +336,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             const mergeResult = await integrationOps.mergeTasksInWorktree(
               worktreeInfo,
               completedTasks,
+              extractSessionShort(sessionId),
             );
 
             if (isErr(mergeResult)) {
@@ -515,6 +517,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             const mergeResult = await integrationOps.mergeTasksInWorktree(
               integrationWorktreeInfo,
               additionalTasks,
+              extractSessionShort(sessionId),
             );
 
             if (isErr(mergeResult)) {
