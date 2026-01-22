@@ -1083,8 +1083,14 @@ Output only the JSON array, no additional text.`;
     // WHY: LLMに即座にフィードバックを与えることで、タスク重複を防ぐ
     const MAX_VALIDATION_RETRIES = 3;
     let validationAttempts = 0;
-    let taskBreakdowns: ReturnType<typeof parseAgentOutputWithErrors>['tasks'];
+    let taskBreakdowns: ReturnType<typeof parseAgentOutputWithErrors>['tasks'] = [];
     let currentValidationErrors: string[] = [];
+
+    // Issue: JSONパースエラー時のリトライ機構
+    // WHY: Claude APIの出力が途中で切れた場合など、再試行で回復できることがある
+    const MAX_JSON_PARSE_RETRIES = 3;
+    let consecutiveJsonParseErrors = 0;
+    let jsonParseErrorFeedback = '';
 
     // リトライループ: バリデーション成功 or 最大試行回数まで
     do {
@@ -1092,7 +1098,12 @@ Output only the JSON array, no additional text.`;
 
       // プロンプト生成（初回 or リトライ時）
       let promptToUse = additionalPrompt;
-      if (validationAttempts > 1) {
+
+      // JSONパースエラーのフィードバックがあれば追加
+      if (jsonParseErrorFeedback) {
+        promptToUse = additionalPrompt + jsonParseErrorFeedback;
+        jsonParseErrorFeedback = ''; // 使用後にクリア
+      } else if (validationAttempts > 1) {
         // リトライ時はバリデーションエラーをフィードバックとして追加
         const feedbackSection = `\n\n⚠️ VALIDATION FEEDBACK (Attempt ${validationAttempts}/${MAX_VALIDATION_RETRIES}):\nYour previous task generation failed validation with the following errors:\n${currentValidationErrors.map((err, idx) => `${idx + 1}. ${err}`).join('\n')}\n\nPlease regenerate the tasks, carefully addressing these issues:\n- Ensure no duplicate tasks with completed tasks listed above\n- Ensure every task has a non-empty summary field\n\nOutput only the corrected JSON array, no additional text.`;
         promptToUse = additionalPrompt + feedbackSection;
@@ -1145,7 +1156,45 @@ Output only the JSON array, no additional text.`;
           const errorMsg = `No valid task breakdowns. Validation errors: ${parseResult.errors.join('; ')}`;
           await appendPlanningLog(`\n❌ ${errorMsg}\n`);
 
-          // パース失敗の場合は即座に終了（リトライ不要）
+          // JSON構文エラーかどうかを判定
+          const isJsonParseError = parseResult.errors.some((err) =>
+            err.includes('JSON parse failed') || err.includes('No JSON content found'),
+          );
+
+          if (isJsonParseError) {
+            consecutiveJsonParseErrors++;
+            await appendPlanningLog(
+              `⚠️  JSON parse error count: ${consecutiveJsonParseErrors}/${MAX_JSON_PARSE_RETRIES}\n`,
+            );
+
+            if (consecutiveJsonParseErrors >= MAX_JSON_PARSE_RETRIES) {
+              // 最大リトライ回数に到達
+              const failedRun = {
+                ...planningRun,
+                status: RunStatus.FAILURE,
+                finishedAt: new Date().toISOString(),
+                errorMessage: `${errorMsg} (${consecutiveJsonParseErrors} consecutive JSON parse errors)`,
+              };
+              await deps.runnerEffects.saveRunMetadata(failedRun);
+
+              return createErr(
+                ioError(
+                  'planAdditionalTasks.parseOutput',
+                  `${errorMsg} (${consecutiveJsonParseErrors} consecutive JSON parse errors)`,
+                ),
+              );
+            }
+
+            // JSONパースエラーの場合はリトライ（validationAttemptsを消費しない）
+            validationAttempts--;
+            jsonParseErrorFeedback = `\n\n⚠️ JSON PARSE ERROR (Retry ${consecutiveJsonParseErrors}/${MAX_JSON_PARSE_RETRIES}):\n${errorMsg}\n\nIMPORTANT: Your previous output had JSON syntax errors. Please ensure you output ONLY valid JSON without any extra text, markdown code blocks, or malformed strings.\n\nOutput only the corrected JSON array, no additional text.`;
+            continue;
+          }
+
+          // JSONパースエラーではない検証エラーの場合はカウントをリセット
+          consecutiveJsonParseErrors = 0;
+
+          // その他のバリデーションエラーの場合は即座に終了
           const failedRun = {
             ...planningRun,
             status: RunStatus.FAILURE,
@@ -2070,7 +2119,7 @@ ${failedTaskDescriptions.length > 0 ? failedTaskDescriptions.map((desc, idx) => 
 
 IMPORTANT:
 - Review COMPLETED TASKS carefully before identifying missing aspects
-- If a feature is already implemented (listed in COMPLETED TASKS), do NOT suggest recreating it
+- If a feature is already satisfied (listed in COMPLETED TASKS), do NOT suggest recreating it
 - Only identify truly missing aspects that are NOT covered by completed tasks
 
 Evaluate based on:
