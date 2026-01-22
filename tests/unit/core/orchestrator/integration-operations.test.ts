@@ -280,7 +280,7 @@ describe('Integration Operations', () => {
       }
     });
 
-    it('should return command with rebase-sign when method is "auto" and integrationSignature is true', async () => {
+    it('should return command with finalize when method is "auto" and integrationSignature is true', async () => {
       const mockTaskStore = {
         createTask: mock.fn(async (_task: Task) => createOk(undefined)),
       };
@@ -315,7 +315,7 @@ describe('Integration Operations', () => {
         // WHY: integrationSignature=true の場合、GPG署名のタイムアウト問題を回避するため
         //      自動rebaseではなくコマンド出力に切り替わる
         assert.strictEqual(result.val.method, 'command');
-        assert(result.val.mergeCommand?.includes('rebase-sign'));
+        assert(result.val.mergeCommand?.includes('finalize'));
       }
     });
 

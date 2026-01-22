@@ -4,43 +4,46 @@ import { repoPath, branchName } from '../../types/branded.ts';
 import { isErr } from 'option-t/plain_result';
 
 /**
- * `agent rebase-sign` コマンドの実装
+ * `agent finalize` コマンドの実装
  *
  * WHY: GPG署名には認証（pinentry等）が必要で、長時間のオーケストレーション後に
  * ユーザーが席を離れていると認証タイムアウトで失敗する問題がある。
- * このコマンドは統合ブランチに対して手動で署名付きrebaseを実行するために使用する。
+ * このコマンドは統合ブランチを署名付きリベースしてベースブランチにマージする。
  */
-export function createRebaseSignCommand(): Command {
-  const rebaseSignCommand = new Command('rebase-sign')
-    .description('Rebase a branch with GPG signing for all commits')
+export function createFinalizeCommand(): Command {
+  const finalizeCommand = new Command('finalize')
+    .description('Finalize integration branch: rebase with GPG signing and merge into base')
     .option('--base <branch>', 'Base branch to rebase onto (default: auto-detect main/master)')
-    .option('--branch <branch>', 'Branch to rebase (default: current branch)')
+    .option('--branch <branch>', 'Branch to finalize (default: current branch)')
+    .option('--no-merge', 'Skip merging into base branch after rebase')
     .option('--dry-run', 'Show what would be done without executing', false)
     .action(async (options) => {
       try {
-        await executeRebaseSign({
+        await executeFinalize({
           baseBranch: options.base,
           targetBranch: options.branch,
+          merge: options.merge,
           dryRun: options.dryRun,
         });
       } catch (error) {
-        console.error('Rebase-sign failed:', error);
+        console.error('Finalize failed:', error);
         process.exit(1);
       }
     });
 
-  return rebaseSignCommand;
+  return finalizeCommand;
 }
 
 /**
- * rebase-sign の実装
+ * finalize の実装
  */
-async function executeRebaseSign(params: {
+async function executeFinalize(params: {
   baseBranch?: string;
   targetBranch?: string;
+  merge: boolean;
   dryRun: boolean;
 }): Promise<void> {
-  const { baseBranch: baseBranchArg, targetBranch: targetBranchArg, dryRun } = params;
+  const { baseBranch: baseBranchArg, targetBranch: targetBranchArg, merge, dryRun } = params;
 
   const gitEffects = createGitEffects();
   const repo = repoPath(process.cwd());
@@ -91,6 +94,10 @@ async function executeRebaseSign(params: {
       console.log(`   git checkout ${targetBranch}`);
     }
     console.log(`   git rebase --gpg-sign ${baseBranch}`);
+    if (merge) {
+      console.log(`   git checkout ${baseBranch}`);
+      console.log(`   git merge --ff-only ${targetBranch}`);
+    }
     console.log('\n💡 Remove --dry-run to execute these commands.');
     return;
   }
@@ -120,6 +127,30 @@ async function executeRebaseSign(params: {
   }
 
   console.log('\n✅ Rebase with GPG signing completed successfully!');
-  console.log('\n📝 All commits on this branch are now signed.');
-  console.log('   Verify with: git log --show-signature');
+  console.log('📝 All commits on this branch are now signed.');
+
+  // マージを実行（--no-merge が指定されていない場合）
+  if (merge) {
+    console.log(`\n📦 Switching to base branch: ${baseBranch}`);
+    const switchToBaseResult = await gitEffects.switchBranch(repo, baseBranch);
+    if (isErr(switchToBaseResult)) {
+      console.error(`❌ Failed to switch to base branch: ${switchToBaseResult.err.message}`);
+      process.exit(1);
+    }
+
+    console.log(`🔀 Merging ${targetBranch} into ${baseBranch} (fast-forward)...`);
+    const mergeResult = await gitEffects.merge(repo, targetBranch, ['--ff-only']);
+    if (isErr(mergeResult)) {
+      console.error(`❌ Merge failed: ${mergeResult.err.message}`);
+      console.error('\n💡 This should not happen after a successful rebase.');
+      console.error('   The rebase was successful, so you can manually run:');
+      console.error(`   git checkout ${baseBranch} && git merge --ff-only ${targetBranch}`);
+      process.exit(1);
+    }
+
+    console.log(`\n✅ Successfully merged ${targetBranch} into ${baseBranch}!`);
+    console.log(`   Current branch: ${baseBranch}`);
+  }
+
+  console.log('\n   Verify with: git log --show-signature');
 }

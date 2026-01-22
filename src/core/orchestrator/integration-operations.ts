@@ -845,7 +845,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         // 署名が必要な場合はコマンド出力に切り替え
         // WHY: 長時間オーケストレーション後にユーザーが不在の場合、
         //      pinentry等の認証がタイムアウトするため、遅延実行を可能にする
-        const mergeCommand = `agent rebase-sign --base ${baseBranch} --branch ${integrationBranch}`;
+        const mergeCommand = `agent finalize --base ${baseBranch} --branch ${integrationBranch}`;
         return createOk({
           method: 'command',
           mergeCommand,

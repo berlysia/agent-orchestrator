@@ -156,13 +156,13 @@ async function showIntegrationCommands(params: {
   const gpgSign = config.commit.integrationSignature;
 
   if (gpgSign) {
-    // 署名が必要な場合はrebase-signコマンドを出力
+    // 署名が必要な場合はfinalizeコマンドを出力
     console.log('\n📦 Integration branch ready:');
     console.log(`   Branch: ${integrationBranch}`);
     console.log(`   Base: ${currentBranch}`);
 
-    console.log('\n🔏 To rebase and sign all commits before merging:');
-    console.log(`\n   agent rebase-sign --base ${currentBranch} --branch ${integrationBranch}\n`);
+    console.log('\n🔏 To finalize (rebase, sign, and merge):');
+    console.log(`\n   agent finalize --base ${currentBranch} --branch ${integrationBranch}\n`);
 
     console.log('📝 To merge without signing:');
     console.log(`\n   git checkout ${currentBranch} && git merge ${integrationBranch}\n`);
