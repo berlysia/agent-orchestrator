@@ -14,6 +14,7 @@ import {
   createPlannerSession,
   type StructureValidation,
   type RefinementConfig,
+  type RefinementResult,
 } from '../../types/planner-session.ts';
 import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
@@ -2269,6 +2270,160 @@ export const parseFinalCompletionJudgement = (output: string): FinalCompletionJu
     return defaultJudgement;
   }
 };
+
+/**
+ * 改善停滞判定関数
+ *
+ * WHY: スコアの改善が停滞しているかを判定するために使用
+ *
+ * 停滞条件（OR条件）:
+ * - 絶対値の改善が閾値未満 (improvement < deltaThreshold)
+ * - 相対値の改善が閾値未満 (relativeImprovement < deltaThresholdPercent)
+ *
+ * @param currentScore 現在のスコア
+ * @param previousScore 前回のスコア
+ * @param config リファインメント設定
+ * @returns 停滞している場合true
+ */
+function isStagnated(
+  currentScore: number | undefined,
+  previousScore: number | undefined,
+  config: RefinementConfig,
+): boolean {
+  if (currentScore === undefined || previousScore === undefined) {
+    return false;
+  }
+
+  const improvement = currentScore - previousScore;
+  const relativeImprovement =
+    previousScore > 0 ? (improvement / previousScore) * 100 : 0;
+
+  // OR条件: 片方でも閾値未満なら停滞とみなす（より保守的に早期終了）
+  return (
+    improvement < config.deltaThreshold ||
+    relativeImprovement < config.deltaThresholdPercent
+  );
+}
+
+/**
+ * リファインメント意思決定関数
+ *
+ * WHY: プラン改善の継続・停止を優先順位に基づいて判定するために使用
+ *
+ * 意思決定の優先順位:
+ * 1. 最大試行回数到達時、品質OKならaccept、NGならreject
+ * 2. スコア取得失敗時、品質OKならaccept、NGならreject
+ * 3. 改善停滞時、品質OKならaccept、NGならreject
+ * 4. 品質未達ならreplan
+ * 5. 品質OK+suggestions+設定有効+上限未達ならreplan
+ * 6. 品質OKならaccept
+ *
+ * @param params 意思決定に必要なパラメータ
+ * @returns リファインメント結果
+ */
+export function makeRefinementDecision(params: {
+  isAcceptable: boolean;
+  score?: number;
+  previousScore?: number;
+  issues: string[];
+  suggestions: string[];
+  attemptCount: number;
+  suggestionReplanCount: number;
+  config: RefinementConfig;
+}): RefinementResult {
+  const {
+    isAcceptable,
+    score,
+    previousScore,
+    issues,
+    suggestions,
+    attemptCount,
+    suggestionReplanCount,
+    config,
+  } = params;
+
+  // 優先順位1: 最大試行回数到達時、品質OKならaccept、NGならreject
+  if (attemptCount >= config.maxRefinementAttempts) {
+    return {
+      decision: isAcceptable ? 'accept' : 'reject',
+      reason: '最大試行回数到達',
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位2: スコア取得失敗時、品質OKならaccept、NGならreject
+  if (score === undefined) {
+    return {
+      decision: isAcceptable ? 'accept' : 'reject',
+      reason: 'スコア取得失敗',
+      attemptCount,
+      suggestionReplanCount,
+      previousScore,
+    };
+  }
+
+  // 優先順位3: 改善停滞時、品質OKならaccept、NGならreject
+  if (isStagnated(score, previousScore, config)) {
+    return {
+      decision: isAcceptable ? 'accept' : 'reject',
+      reason: '改善停滞',
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位4: 品質未達ならreplan
+  if (!isAcceptable) {
+    return {
+      decision: 'replan',
+      reason: '品質未達',
+      feedback: {
+        issues,
+        suggestions,
+      },
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位5: 品質OK+suggestions+設定有効+上限未達ならreplan
+  if (
+    isAcceptable &&
+    suggestions.length > 0 &&
+    config.refineSuggestionsOnSuccess &&
+    suggestionReplanCount < config.maxSuggestionReplans
+  ) {
+    return {
+      decision: 'replan',
+      reason: 'suggestions適用',
+      feedback: {
+        issues: [],
+        suggestions,
+      },
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位6: 品質OKならaccept
+  return {
+    decision: 'accept',
+    reason: '品質OK',
+    attemptCount,
+    suggestionReplanCount,
+    currentScore: score,
+    previousScore,
+  };
+}
 
 /**
  * 循環依存を検出
