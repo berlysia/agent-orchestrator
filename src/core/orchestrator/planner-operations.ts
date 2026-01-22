@@ -2817,3 +2817,120 @@ export async function replanWithFeedback(params: {
     structureValidation,
   });
 }
+
+/**
+ * Quality judge interface
+ *
+ * WHY: Provides an abstraction for quality evaluation to enable testing and different implementations
+ */
+export interface QualityJudge {
+  evaluate(tasks: Task[]): Promise<{
+    isAcceptable: boolean;
+    score?: number;
+    issues?: string[];
+    suggestions?: string[];
+  }>;
+}
+
+/**
+ * メインリファインメントループ
+ *
+ * WHY: タスク品質評価と再計画を繰り返し、高品質なプランを生成する
+ *
+ * ARCHITECTURE: Result<T,E>パターンを使用し、never throw
+ *
+ * FLOW:
+ * 1. QualityJudgeでタスク評価
+ * 2. makeRefinementDecisionで意思決定（accept/replan/reject）
+ * 3. acceptなら成功終了、rejectならエラー終了
+ * 4. replanならreplanWithFeedbackで再計画し、ループ継続
+ * 5. attemptCount と suggestionReplanCount を正しく管理
+ * 6. スコア履歴（previousScore）を保持して改善停滞を検出
+ *
+ * @param params リファインメントループパラメータ
+ * @param params.initialTasks 初期タスク一覧
+ * @param params.qualityJudge 品質評価インターフェース
+ * @param params.config リファインメント設定
+ * @param params.deps Planner依存関係（LLM呼び出し等）
+ * @returns Result<最終タスクとリファインメント履歴, RefinementError>
+ */
+export async function executeRefinementLoop(params: {
+  initialTasks: Task[];
+  qualityJudge: QualityJudge;
+  config: RefinementConfig;
+  deps: PlannerDeps;
+}): Promise<
+  Result<
+    {
+      finalTasks: Task[];
+      refinementHistory: RefinementResult[];
+    },
+    import('../../types/planner-session.ts').RefinementError
+  >
+> {
+  const { initialTasks, qualityJudge, config, deps } = params;
+
+  let currentTasks = initialTasks;
+  let attemptCount = 0;
+  let suggestionReplanCount = 0;
+  let previousScore: number | undefined = undefined;
+  const refinementHistory: RefinementResult[] = [];
+
+  while (true) {
+    // 1. QualityJudgeでタスク評価
+    const judgeResult = await qualityJudge.evaluate(currentTasks);
+
+    // 2. makeRefinementDecisionで意思決定
+    const decision = makeRefinementDecision({
+      isAcceptable: judgeResult.isAcceptable,
+      score: judgeResult.score,
+      previousScore,
+      issues: judgeResult.issues || [],
+      suggestions: judgeResult.suggestions || [],
+      attemptCount,
+      suggestionReplanCount,
+      config,
+    });
+
+    // 履歴に追加
+    refinementHistory.push(decision);
+
+    // 3. accept判定でOk(finalTasks)を返す
+    if (decision.decision === 'accept') {
+      return createOk({ finalTasks: currentTasks, refinementHistory });
+    }
+
+    // 4. reject判定でErr(RefinementError)を返す（例外をthrowしない）
+    if (decision.decision === 'reject') {
+      return createErr({
+        reason: decision.reason,
+        refinementHistory,
+      });
+    }
+
+    // 5. replan判定時にreplanWithFeedbackが呼ばれる
+    const replanResult = await replanWithFeedback({
+      originalTasks: initialTasks,
+      currentTasks,
+      feedback: decision.feedback!,
+      config,
+      deps,
+    });
+
+    if (isErr(replanResult)) {
+      return createErr({
+        reason: replanResult.err,
+        refinementHistory,
+      });
+    }
+
+    currentTasks = replanResult.val.tasks;
+    previousScore = judgeResult.score;
+
+    // 6. attemptCountとsuggestionReplanCountが正しくインクリメントされる
+    attemptCount++;
+    if (decision.reason === 'suggestions適用') {
+      suggestionReplanCount++;
+    }
+  }
+}
