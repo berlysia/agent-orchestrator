@@ -6,7 +6,17 @@ Agent Orchestratorは、Planner/Worker/Judge アーキテクチャに基づく�
 
 ## Core Concepts
 
-### 1. Task State Management
+### 1. Session (PlannerSession)
+
+セッションは、Plannerによる1回のタスク分解とその結果を表す中央的なエンティティです。
+
+- **SessionId**: `planner-<UUID>` 形式の一意識別子
+- **Session → Task**: 1対多。1セッションが複数タスクを生成
+- **Task → Run**: 1対多。1タスクに複数の実行履歴
+
+詳細は [docs/session-concept.md](session-concept.md) を参照。
+
+### 2. Task State Management
 
 タスクは以下の状態を持ちます：
 
@@ -29,7 +39,7 @@ NEEDS_CONTINUATION → RUNNING → (Judge判定) → DONE
                                            → NEEDS_CONTINUATION (継続)
 ```
 
-### 2. Concurrency Control (CAS)
+### 3. Concurrency Control (CAS)
 
 **Compare-And-Swap (CAS)** による楽観的並行制御：
 
@@ -56,7 +66,7 @@ Worktreeで各Workerは独立した作業ディレクトリを持ちますが、
 
 詳細: [docs/decisions/001-cas-implementation-approach.md](decisions/001-cas-implementation-approach.md)
 
-### 3. Storage Layer
+### 4. Storage Layer
 
 **TaskStore インターフェース**:
 
@@ -94,7 +104,7 @@ agent-coord/
   .locks/<taskId>/          # CASロック
 ```
 
-### 4. Adapter Layer (VCS / GitHub)
+### 5. Adapter Layer (VCS / GitHub)
 
 外部サービスとのI/Oは `src/adapters/` に隔離し、CoreからはEffectsインターフェースで利用します。
 
@@ -126,7 +136,7 @@ GitHub APIエラーは原因別に分類し、呼び出し側で適切な対応�
 
 セットアップと使い方は [docs/github-integration.md](github-integration.md) を参照してください。
 
-### 5. Error Handling Strategy
+### 6. Error Handling Strategy
 
 **Result型ベースのエラーハンドリング** (Phase 2実装):
 
