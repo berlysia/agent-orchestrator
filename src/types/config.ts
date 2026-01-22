@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { RefinementConfig } from './planner-session.ts';
 
 /**
  * 既知のモデル名（補完のため）
@@ -181,6 +182,43 @@ const ReplanningConfigSchema = z
   });
 
 /**
+ * Refinement設定のスキーマ
+ *
+ * WHY: Plan品質評価後の改善プロセスを制御し、
+ *      品質スコアが低い場合でも段階的に改善を試みることで、
+ *      タスク生成の成功率を向上させる
+ */
+const RefinementConfigSchema = z
+  .object({
+    /** 最大Refinement試行回数 */
+    maxRefinementAttempts: z.number().int().min(0).max(10).default(2),
+    /** 成功時も改善提案を適用するか */
+    refineSuggestionsOnSuccess: z.boolean().default(false),
+    /** 提案ベースの再計画最大回数 */
+    maxSuggestionReplans: z.number().int().min(0).max(5).default(1),
+    /** 個別タスク評価フォールバックを有効化 */
+    enableIndividualFallback: z.boolean().default(true),
+    /** スコア改善の最小絶対値閾値 */
+    deltaThreshold: z.number().min(0).max(50).default(5),
+    /** スコア改善の最小パーセント閾値 */
+    deltaThresholdPercent: z.number().min(0).max(100).default(5),
+    /** タスク数変化の許容割合 */
+    taskCountChangeThreshold: z.number().min(0).max(1).default(0.3),
+    /** タスク数変化の最小絶対値 */
+    taskCountChangeMinAbsolute: z.number().int().min(0).max(10).default(2),
+  })
+  .default({
+    maxRefinementAttempts: 2,
+    refineSuggestionsOnSuccess: false,
+    maxSuggestionReplans: 1,
+    enableIndividualFallback: true,
+    deltaThreshold: 5,
+    deltaThresholdPercent: 5,
+    taskCountChangeThreshold: 0.3,
+    taskCountChangeMinAbsolute: 2,
+  });
+
+/**
  * Worktree設定のスキーマ
  *
  * WHY: プロジェクトごとにworktree作成後の初期化コマンドを定義可能にすることで、
@@ -271,11 +309,20 @@ export const ConfigSchema = z.object({
   /** Planner再評価設定 */
   replanning: ReplanningConfigSchema,
 
+  /** Refinement設定 */
+  refinement: RefinementConfigSchema.optional(),
+
   /** Worktree設定 */
   worktree: WorktreeConfigSchema,
 
   /** GitHub設定 */
   github: GitHubConfigSchema.optional(),
+
+  /**
+   * 後方互換性: maxQualityRetries (非推奨)
+   * WHY: 既存設定との互換性のため保持。refinement.maxRefinementAttemptsが優先される
+   */
+  maxQualityRetries: z.number().int().min(0).max(10).optional(),
 });
 
 /**
@@ -297,6 +344,23 @@ export type GitHubAuthConfig = z.infer<typeof GitHubAuthConfigSchema>;
  * エージェントタイプ
  */
 export type AgentType = 'claude' | 'codex';
+
+/**
+ * デフォルトRefinement設定定数
+ *
+ * WHY: 設定読み込み時のデフォルト値として使用し、
+ *      部分的な設定でも正しくマージできるようにする
+ */
+export const DEFAULT_REFINEMENT_CONFIG: RefinementConfig = {
+  maxRefinementAttempts: 2,
+  refineSuggestionsOnSuccess: false,
+  maxSuggestionReplans: 1,
+  enableIndividualFallback: true,
+  deltaThreshold: 5,
+  deltaThresholdPercent: 5,
+  taskCountChangeThreshold: 0.3,
+  taskCountChangeMinAbsolute: 2,
+};
 
 /**
  * デフォルトConfig生成ヘルパー
@@ -345,6 +409,7 @@ export function createDefaultConfig(params: {
       maxIterations: 3,
       timeoutSeconds: 300,
     },
+    refinement: DEFAULT_REFINEMENT_CONFIG,
     worktree: {
       postCreate: [],
     },
