@@ -152,6 +152,34 @@ const ReplanningConfigSchema = z
   });
 
 /**
+ * GitHub認証設定のスキーマ
+ *
+ * WHY: Personal Access Tokenによる認証をサポート
+ */
+const GitHubAuthConfigSchema = z.object({
+  /** 認証タイプ */
+  type: z.literal('pat'),
+  /** トークンを格納する環境変数名 */
+  tokenEnvName: z.string(),
+});
+
+/**
+ * GitHub設定のスキーマ
+ *
+ * WHY: GitHub APIとの統合を可能にするための設定
+ */
+const GitHubConfigSchema = z.object({
+  /** GitHub API Base URL */
+  apiBaseUrl: z.string().default('https://api.github.com'),
+  /** リポジトリオーナー */
+  owner: z.string(),
+  /** リポジトリ名 */
+  repo: z.string(),
+  /** 認証設定 */
+  auth: GitHubAuthConfigSchema,
+});
+
+/**
  * プロジェクト設定のスキーマ定義（Zod）
  *
  * `.agent/config.json` に保存される設定
@@ -196,12 +224,25 @@ export const ConfigSchema = z.object({
 
   /** Planner再評価設定 */
   replanning: ReplanningConfigSchema,
+
+  /** GitHub設定 */
+  github: GitHubConfigSchema.optional(),
 });
 
 /**
  * Config型定義（TypeScript型）
  */
 export type Config = z.infer<typeof ConfigSchema>;
+
+/**
+ * GitHub設定型定義（TypeScript型）
+ */
+export type GitHubConfig = z.infer<typeof GitHubConfigSchema>;
+
+/**
+ * GitHub認証設定型定義（TypeScript型）
+ */
+export type GitHubAuthConfig = z.infer<typeof GitHubAuthConfigSchema>;
 
 /**
  * エージェントタイプ
