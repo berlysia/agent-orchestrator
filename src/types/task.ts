@@ -183,6 +183,15 @@ export const TaskSchema = z.object({
 
   /** 統合ブランチからの再試行済みフラグ（Phase 1: 未完了タスク再実行機能） */
   integrationRetried: z.boolean().default(false),
+
+  /**
+   * Worker の作業開始時点のベースコミットハッシュ
+   *
+   * WHY: Judge が Worker の変更を正確に検出するために使用
+   * - worktree 作成直後（複数依存の場合はマージ完了後）のコミットハッシュを記録
+   * - `baseCommit..HEAD` で Worker が実際に行った変更のみを取得できる
+   */
+  baseCommit: z.string().nullable().optional(),
 });
 
 /**

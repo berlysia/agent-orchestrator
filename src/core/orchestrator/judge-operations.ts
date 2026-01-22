@@ -136,10 +136,12 @@ const AgentJudgementSchema = z.object({
 interface GitChangeInfo {
   /** git diffの出力（変更があるかどうか） */
   hasDiff: boolean;
-  /** 変更されたファイル一覧 */
+  /** 変更されたファイル一覧（未コミットの変更） */
   changedFiles: string[];
   /** コミットされた変更があるか */
   hasCommittedChanges: boolean;
+  /** コミットで変更されたファイル一覧 */
+  committedFiles: string[];
   /** エラーがあった場合のメッセージ */
   error?: string;
 }
@@ -162,8 +164,9 @@ const buildJudgementPrompt = (task: Task, runLog: string, gitChangeInfo: GitChan
   const gitSection = `
 GIT CHANGE INFORMATION:
 - Has uncommitted changes: ${gitChangeInfo.hasDiff}
+- Uncommitted files: ${gitChangeInfo.changedFiles.length > 0 ? gitChangeInfo.changedFiles.join(', ') : '(none)'}
 - Has committed changes in this branch: ${gitChangeInfo.hasCommittedChanges}
-- Changed files: ${gitChangeInfo.changedFiles.length > 0 ? gitChangeInfo.changedFiles.join(', ') : '(none)'}
+- Committed files: ${gitChangeInfo.committedFiles.length > 0 ? gitChangeInfo.committedFiles.join(', ') : '(none)'}
 ${gitChangeInfo.error ? `- Git check error: ${gitChangeInfo.error}` : ''}
 `;
 
@@ -351,7 +354,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
    * WHY: Workerが「検証のみ」を行い実際には何も変更しなかったケースを検出するため
    *
    * @param worktreePath worktreeのパス
-   * @param task タスク情報（依存関係のチェック用）
+   * @param task タスク情報（baseCommit を使用）
    * @returns Git変更情報
    */
   const getGitChangeInfo = async (
@@ -372,30 +375,52 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
       }
 
       // 2. このブランチで新しいコミットが作成されたか確認
-      //    依存ブランチとの差分をチェック（依存がない場合はHEAD~1との比較）
+      //    ベースコミットからの全変更ファイル一覧を取得
       let hasCommittedChanges = false;
+      let committedFiles: string[] = [];
 
-      if (task.dependencies.length > 0) {
-        // 依存タスクがある場合：最初の依存ブランチとの差分を確認
-        // （複数依存の場合、マージコミットがあるため単純な比較は難しい）
-        const diffResult = await deps.gitEffects.getDiff(worktreePath, ['--stat', 'HEAD~1']);
-        hasCommittedChanges = diffResult.ok ? diffResult.val.trim().length > 0 : false;
-      } else {
-        // 依存なしの場合：直近のコミットで変更があるか確認
-        const diffResult = await deps.gitEffects.getDiff(worktreePath, ['--stat', 'HEAD~1']);
-        hasCommittedChanges = diffResult.ok ? diffResult.val.trim().length > 0 : false;
+      // WHY: baseCommit がある場合はそれを使用し、Worker の変更のみを正確に取得
+      // - baseCommit は worktree 作成直後（マージ完了後）のコミットハッシュ
+      // - baseCommit..HEAD で Worker が実際に行った変更のみを取得できる
+      // - baseCommit がない場合（後方互換性）は master/main との差分を取得
+      const baseRef = task.baseCommit ?? 'master';
+      const diffNameResult = await deps.gitEffects.getDiff(worktreePath, [
+        '--name-only',
+        `${baseRef}..HEAD`,
+      ]);
+      if (diffNameResult.ok) {
+        const diffOutput = diffNameResult.val.trim();
+        if (diffOutput.length > 0) {
+          committedFiles = diffOutput.split('\n').filter((line) => line.trim().length > 0);
+          hasCommittedChanges = true;
+        }
+      } else if (!task.baseCommit) {
+        // baseCommit がなく master も失敗した場合、main で再試行（後方互換性）
+        const diffNameResultMain = await deps.gitEffects.getDiff(worktreePath, [
+          '--name-only',
+          'main..HEAD',
+        ]);
+        if (diffNameResultMain.ok) {
+          const diffOutput = diffNameResultMain.val.trim();
+          if (diffOutput.length > 0) {
+            committedFiles = diffOutput.split('\n').filter((line) => line.trim().length > 0);
+            hasCommittedChanges = true;
+          }
+        }
       }
 
       return {
         hasDiff,
         changedFiles,
         hasCommittedChanges,
+        committedFiles,
       };
     } catch (error) {
       return {
         hasDiff: false,
         changedFiles: [],
         hasCommittedChanges: false,
+        committedFiles: [],
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -464,6 +489,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
       hasDiff: false,
       changedFiles: [],
       hasCommittedChanges: true, // デフォルトはtrue（後方互換性のため）
+      committedFiles: [],
     };
 
     if (worktreePath) {

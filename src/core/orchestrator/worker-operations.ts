@@ -1219,6 +1219,28 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         worktreePath = result.worktreePath;
       }
 
+      // 2.5 ベースコミットを記録
+      // WHY: Judge が Worker の変更を正確に検出するために、作業開始時点のコミットを記録
+      // - type='none': HEAD から分岐した時点のコミット
+      // - type='single': 依存ブランチから分岐した時点のコミット
+      // - type='multi': 複数ブランチマージ後のコミット
+      if (deps.gitEffects.raw) {
+        const baseCommitResult = await deps.gitEffects.raw(
+          repoPath(worktreePath),
+          ['rev-parse', 'HEAD'],
+        );
+        if (baseCommitResult.ok) {
+          const baseCommit = baseCommitResult.val.trim();
+          const updateResult = await deps.taskStore.updateTaskCAS(task.id, task.version, (t) => ({
+            ...t,
+            baseCommit,
+          }));
+          if (!updateResult.ok) {
+            console.warn(`  ⚠️  Failed to record baseCommit: ${updateResult.err.message}`);
+          }
+        }
+      }
+
       // 3. タスクを実行
       const runResult = await executeTask(task, worktreePath);
       if (isErr(runResult)) {
