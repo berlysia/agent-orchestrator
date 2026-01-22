@@ -20,7 +20,8 @@
     "format:check": "prettier --check .",
     "generate:schema": "node scripts/generate-config-schema.ts",
     "generate:version": "node scripts/generate-version.ts",
-    "restore:version": "node scripts/restore-version.ts"
+    "restore:version": "node scripts/restore-version.ts",
+    "install:local": "pnpm run compile && npm install --global ."
   },
   "keywords": [
     "agent",
