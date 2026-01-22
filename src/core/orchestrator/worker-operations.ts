@@ -706,11 +706,21 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     task: Task,
     worktreePath: WorktreePath,
   ): Promise<Result<void, OrchestratorError>> => {
-    // scopePathsが指定されている場合はそれをステージング、なければ全てステージング
-    const stageResult =
-      task.scopePaths.length > 0
-        ? await deps.gitEffects.stageFiles(worktreePath, task.scopePaths)
-        : await deps.gitEffects.stageAll(worktreePath);
+    // scopePathsが指定されている場合はそれをステージング
+    let stageResult: Result<void, OrchestratorError>;
+
+    if (task.scopePaths.length > 0) {
+      stageResult = await deps.gitEffects.stageFiles(worktreePath, task.scopePaths);
+
+      // WHY: stageFilesがエラーの場合もフォールバックを試みる
+      //      Plannerが指定したscopePathsとWorkerの実際の出力先が異なる場合がある
+      if (isErr(stageResult)) {
+        console.log(`  ℹ️  stageFiles failed, trying stageAll as fallback...`);
+        stageResult = await deps.gitEffects.stageAll(worktreePath);
+      }
+    } else {
+      stageResult = await deps.gitEffects.stageAll(worktreePath);
+    }
 
     if (isErr(stageResult)) {
       return createErr(stageResult.err);
@@ -723,7 +733,10 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     }
 
     // WHY: フォールバック処理 - scopePathsでステージしても変更がない場合
-    //      Workerが変更したファイルがscopePaths外にある可能性があるため、stageAllを試みる
+    //      ケース1: stageFilesが成功したが、scopePaths内に変更がなかった
+    //      ケース2: stageFilesが失敗してstageAllで回復したが、変更が全くなかった
+    //      いずれの場合も、Workerの実際の変更がscopePaths外にある可能性があるため再試行
+    //      WHY冪等: stageAllは冪等なので、既にstageAllを実行済みでも安全に再実行可能
     if (statusResult.val.staged.length === 0 && task.scopePaths.length > 0) {
       console.log(`  ℹ️  No changes in scopePaths, trying stageAll as fallback...`);
       const stageAllResult = await deps.gitEffects.stageAll(worktreePath);
