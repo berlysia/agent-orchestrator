@@ -617,13 +617,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 - If files already exist, verify they meet requirements OR update them
 - The "VERIFY" section describes how to validate completion, not the entire task
 
-⚠️  CRITICAL: After implementing, you MUST commit your changes:
-1. Stage your changes: git add <files>
-2. Commit your changes: git commit -m "<type>: <description>"
-   - Use conventional commit format (feat:, fix:, refactor:, etc.)
-   - Example: git commit -m "feat: add GitHubError type definition"
-3. If you don't commit, the task will be marked as failed
-
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}
 - DO NOT use 'cd ..' or navigate outside this directory
@@ -931,13 +924,6 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 - CREATE or MODIFY the files listed above
 - If files already exist, verify they meet requirements OR update them
 - The "VERIFY" section describes how to validate completion, not the entire task
-
-⚠️  CRITICAL: After implementing, you MUST commit your changes:
-1. Stage your changes: git add <files>
-2. Commit your changes: git commit -m "<type>: <description>"
-   - Use conventional commit format (feat:, fix:, refactor:, etc.)
-   - Example: git commit -m "feat: add GitHubError type definition"
-3. If you don't commit, the task will be marked as failed
 
 ⚠️  IMPORTANT: You are working in an isolated worktree directory.
 - Your working directory is: ${worktreePath}
