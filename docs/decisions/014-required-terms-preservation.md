@@ -1,4 +1,4 @@
-# 必須キーワード保持検証
+# 要件カバレッジ検証
 
 ## 選定日時
 
@@ -6,7 +6,7 @@
 
 ## 選定結果
 
-**ユーザー入力由来の必須キーワードが再計画後も保持されているかを検証する仕組み** を採用
+**QualityJudge の評価項目に「要件カバレッジ」を追加** する方式を採用
 
 ## 背景・課題
 
@@ -28,7 +28,13 @@
 2. API実装
 ```
 
-このような「質劣化」は既存の構造検証（タスク数変化率、依存関係チェック）では検出不可能。
+### 却下したアプローチ
+
+**キーワードベースの検証** は以下の理由で却下：
+
+- 日本語のトークン化が形態素解析なしでは困難
+- 同義語・言い換えの検出ができない
+- シンプルな実装では実用的な精度が出ない
 
 ### 関連ADR
 
@@ -36,225 +42,110 @@
 
 ## 採用した設計
 
-### 1. 必須キーワード抽出
+### 1. QualityJudge の評価項目拡張
 
-ユーザー入力から重要なキーワードを抽出：
+既存の QualityJudge プロンプトに「要件カバレッジ」の評価観点を追加：
+
+```markdown
+## 評価観点
+
+### 既存
+- タスクの粒度は適切か
+- 依存関係は明確か
+- 受け入れ基準は具体的か
+
+### 追加
+- **要件カバレッジ**: ユーザーの元の指示に含まれる全ての要件が、
+  生成されたタスク群でカバーされているか
+  - 欠落している要件があれば `issues` に記載
+  - 例: "ユーザー入力に含まれる「バリデーション」の要件がタスクに反映されていません"
+```
+
+### 2. 評価結果の活用
 
 ```typescript
-interface RequiredTerms {
-  terms: string[];           // 抽出されたキーワード
-  source: 'user-input' | 'original-tasks';  // 抽出元
-}
-
-function extractRequiredTerms(userInput: string): RequiredTerms {
-  // Phase 1: シンプルなトークン化（LLM不要）
-  // - 名詞・動詞の抽出
-  // - ストップワードの除去
-  // - 技術用語の優先
-
-  // Phase 2（将来拡張）: LLMによる高精度抽出
+interface TaskQualityJudgement {
+  isAcceptable: boolean;
+  issues: string[];        // ← 要件欠落もここに含まれる
+  suggestions: string[];
+  overallScore?: number;
 }
 ```
 
-### 2. 保持検証ロジック
+要件欠落が検出された場合：
+- `issues` に欠落内容が記載される
+- `isAcceptable` が `false` になる可能性
+- 既存の refinement フローで `replan` が発生
+
+### 3. プロンプト変更
+
+`buildQualityJudgePrompt` に以下を追加：
 
 ```typescript
-interface TermPreservationResult {
-  preserved: string[];    // 保持されているキーワード
-  missing: string[];      // 欠落しているキーワード
-  preservationRate: number;  // 保持率（0-1）
-}
+const qualityJudgePrompt = `
+...既存の評価観点...
 
-function validateTermPreservation(
-  requiredTerms: RequiredTerms,
-  tasks: Task[],
-  config: TermPreservationConfig
-): TermPreservationResult {
-  const allTaskText = tasks
-    .map(t => `${t.acceptance} ${t.context || ''}`)
-    .join(' ')
-    .toLowerCase();
+## 要件カバレッジ評価
 
-  const preserved: string[] = [];
-  const missing: string[] = [];
+以下のユーザー指示に含まれる要件が、全てタスクとしてカバーされているか評価してください：
 
-  for (const term of requiredTerms.terms) {
-    if (allTaskText.includes(term.toLowerCase())) {
-      preserved.push(term);
-    } else {
-      missing.push(term);
-    }
-  }
+<user-instruction>
+${userInstruction}
+</user-instruction>
 
-  return {
-    preserved,
-    missing,
-    preservationRate: preserved.length / requiredTerms.terms.length,
-  };
-}
-```
-
-### 3. 構造検証への統合
-
-既存の `validateStructure` に追加：
-
-```typescript
-interface StructureValidation {
-  // 既存
-  isValid: boolean;
-  taskCountChange: number;
-  hasCircularDependency: boolean;
-  hasDanglingDependency: boolean;
-
-  // 新規
-  termPreservation?: TermPreservationResult;
-  hasTermLoss: boolean;  // 欠落キーワードがあるか
-}
-
-function validateStructure(
-  originalTasks: Task[],
-  newTasks: Task[],
-  config: RefinementConfig,
-  requiredTerms?: RequiredTerms  // 新規パラメータ
-): StructureValidation {
-  // 既存の検証...
-
-  // 新規: キーワード保持検証
-  let termPreservation: TermPreservationResult | undefined;
-  let hasTermLoss = false;
-
-  if (requiredTerms && config.enableTermPreservationCheck) {
-    termPreservation = validateTermPreservation(requiredTerms, newTasks, config);
-    hasTermLoss = termPreservation.missing.length > 0;
-  }
-
-  return {
-    // ...既存フィールド
-    termPreservation,
-    hasTermLoss,
-  };
-}
-```
-
-### 4. 欠落時の対応
-
-```typescript
-if (structureValidation.hasTermLoss) {
-  const { missing } = structureValidation.termPreservation!;
-
-  // オプション1: 警告のみ（デフォルト）
-  logger.warn(`Required terms missing after replan: ${missing.join(', ')}`);
-
-  // オプション2: 構造破壊として扱う（設定で有効化）
-  if (config.treatTermLossAsStructureBreak) {
-    return { decision: 'reject', reason: `Missing required terms: ${missing.join(', ')}` };
-  }
-}
+欠落している要件があれば、issues に以下の形式で記載してください：
+- "要件欠落: [欠落している要件の説明]"
+`;
 ```
 
 ## 設定項目
 
 | 設定 | デフォルト | 説明 |
 |------|-----------|------|
-| enableTermPreservationCheck | true | キーワード保持検証を有効化 |
-| treatTermLossAsStructureBreak | false | 欠落時に構造破壊として扱うか |
-| minPreservationRate | 0.8 | 最低保持率（これ未満で警告/reject） |
-| customRequiredTerms | [] | ユーザー指定の必須キーワード |
+| enableRequirementCoverageCheck | true | 要件カバレッジ評価を有効化 |
 
 ## 影響範囲
 
 ### 変更対象ファイル
 
-1. **types/planner-session.ts**: `RequiredTerms`, `TermPreservationResult`, 設定追加
-2. **src/core/orchestrator/planner-operations.ts**:
-   - `extractRequiredTerms()` 新規
-   - `validateTermPreservation()` 新規
-   - `validateStructure()` 拡張
+1. **src/core/orchestrator/planner-operations.ts**:
+   - `buildQualityJudgePrompt()` にユーザー指示と評価観点を追加
+2. **src/types/config.ts**: `enableRequirementCoverageCheck` 設定追加
 3. **.agent/config-schema.json**: 設定追加
-4. **src/config/agent-config.ts**: デフォルト値設定
 
 ### 後方互換性
 
-- `enableTermPreservationCheck: false` で従来動作
-- 設定が存在しない場合はデフォルト値で動作
-
-## キーワード抽出の実装段階
-
-### Phase 1: シンプル実装（初期リリース）
-
-```typescript
-function extractRequiredTerms(text: string): RequiredTerms {
-  // 1. 基本的なトークン化
-  const tokens = text
-    .toLowerCase()
-    .split(/[\s,、。．.]+/)
-    .filter(t => t.length >= 2);
-
-  // 2. ストップワード除去
-  const stopWords = new Set(['する', 'ある', 'できる', 'the', 'a', 'an', 'is', 'are']);
-  const filtered = tokens.filter(t => !stopWords.has(t));
-
-  // 3. 技術用語の優先（簡易パターンマッチ）
-  const techPatterns = /^(api|jwt|oauth|sql|http|crud|rest|graphql|auth|valid|test)/i;
-  const prioritized = filtered.sort((a, b) => {
-    const aIsTech = techPatterns.test(a) ? 0 : 1;
-    const bIsTech = techPatterns.test(b) ? 0 : 1;
-    return aIsTech - bIsTech;
-  });
-
-  return {
-    terms: prioritized.slice(0, 10),  // 上位10個
-    source: 'user-input',
-  };
-}
-```
-
-### Phase 2: LLM拡張（将来）
-
-- LLMに「この入力から必須要件を抽出して」と依頼
-- より高精度な抽出が可能
-- コスト増のためオプション化
+- `enableRequirementCoverageCheck: false` で従来動作
+- 設定が存在しない場合はデフォルト（true）で動作
 
 ## 利点
 
-1. **質劣化の早期検出**: 重要な要件の欠落を自動検知
-2. **低コスト**: Phase 1ではLLM呼び出し不要
-3. **段階的改善**: Phase 2で精度向上可能
-4. **透明性**: 欠落キーワードを明示的にログ出力
+1. **日本語対応**: LLM が自然言語で判定するため、トークン化不要
+2. **追加コストほぼゼロ**: 既存の QualityJudge 呼び出しに相乗り
+3. **既存フローとの統合**: `issues` → `replan` の既存フローで対処
+4. **柔軟な検出**: 同義語・言い換えも LLM が理解可能
 
 ## 制約・考慮事項
 
 | リスク | 対策 |
 |--------|------|
-| 同義語・言い換えを検出できない | Phase 2でLLM活用、または同義語辞書 |
-| 日本語のトークン化が不完全 | 形態素解析ライブラリの導入を検討 |
-| 誤検知（実際には保持されている） | `minPreservationRate` で閾値調整 |
+| LLM の判定が不安定 | ADR-013 のノイズ耐性と組み合わせ |
+| プロンプトが長くなる | ユーザー指示が長い場合は要約を検討 |
+| 過剰検出（実際にはカバーされている） | Judge の判定を信頼、必要なら閾値調整 |
 
 ## テスト戦略
 
 ### 単体テスト
 
-- `extractRequiredTerms()` の抽出精度
-- `validateTermPreservation()` の検証ロジック
-- 構造検証との統合
+- `buildQualityJudgePrompt()` にユーザー指示が含まれることを確認
+- 設定による有効/無効の切り替え
 
-### テストケース例
+### E2E テスト（手動検証）
 
-```typescript
-// 抽出テスト
-const terms = extractRequiredTerms('認証機能とバリデーションを実装して');
-assert(terms.terms.includes('認証'));
-assert(terms.terms.includes('バリデーション'));
-
-// 保持検証テスト
-const tasks = [
-  { acceptance: 'JWT認証を実装する', context: '' },
-  { acceptance: '入力バリデーションを追加する', context: '' },
-];
-const result = validateTermPreservation({ terms: ['認証', 'バリデーション'], source: 'user-input' }, tasks, config);
-assert(result.preservationRate === 1.0);
-assert(result.missing.length === 0);
-```
+検証シナリオ：
+1. 要件が欠落した計画に対して `issues` に欠落が記載される
+2. 全要件がカバーされた計画は `issues` に要件欠落がない
+3. `enableRequirementCoverageCheck: false` で評価がスキップされる
 
 ## ステータス
 
@@ -268,37 +159,21 @@ assert(result.missing.length === 0);
 
 | ファイル | 内容 |
 |----------|------|
-| `src/types/planner-session.ts:183-190` | `StructureValidation` 型定義 |
-| `src/core/orchestrator/planner-operations.ts` | `validateStructure` 実装箇所 |
-| `src/types/task-breakdown.ts` | `TaskBreakdown` 型（acceptance, context フィールド） |
-| `tests/unit/core/orchestrator/validate-structure.test.ts` | 既存テスト |
-| `tests/e2e/refinement-integration.test.ts` | 統合テスト |
+| `src/core/orchestrator/planner-operations.ts` | `buildQualityJudgePrompt` 実装箇所 |
+| `src/core/orchestrator/planner-operations.ts:128-137` | `TaskQualityJudgement` 型定義 |
+| `src/types/config.ts` | 設定型定義 |
+| `.agent/config-schema.json` | 設定スキーマ |
 
 ### 実装タスク
 
-1. `RequiredTerms` 型を新規定義
-2. `TermPreservationResult` 型を新規定義
-3. `TermPreservationConfig` を `RefinementConfig` に追加
-4. `extractRequiredTerms()` 関数を新規作成（Phase 1: シンプル実装）
-5. `validateTermPreservation()` 関数を新規作成
-6. `StructureValidation` に `termPreservation`, `hasTermLoss` を追加
-7. `validateStructure()` を拡張
-8. `.agent/config-schema.json` に設定追加
-9. 単体テスト追加
+1. `buildQualityJudgePrompt()` を特定
+2. プロンプトに「要件カバレッジ評価」セクションを追加
+3. ユーザー指示（instruction）をプロンプトに渡す導線を確認
+4. `enableRequirementCoverageCheck` 設定を追加
+5. E2E テストで動作確認
 
 ### 確認ポイント
 
-- ユーザー入力（instruction）へのアクセス方法
-  - `PlannerSession.instruction` から取得可能
-- 日本語トークン化の精度（形態素解析なしでどこまで実用的か）
-- ストップワードリストの初期セット
-- `validateStructure` の呼び出し箇所と `requiredTerms` の渡し方
-
-### 日本語対応の検討
-
-Phase 1では以下の簡易アプローチで開始：
-- スペース・句読点でのトークン化
-- 2文字以上のトークンを抽出
-- 英語の技術用語はそのまま抽出可能
-- 日本語は「認証」「バリデーション」など長めの単語は抽出可能
-- 精度不足が顕著な場合、Phase 2でLLM抽出を検討
+- `buildQualityJudgePrompt` の現在のシグネチャ
+- ユーザー指示（`PlannerSession.instruction`）へのアクセス経路
+- プロンプトの長さ制限（ユーザー指示が長い場合の対処）
