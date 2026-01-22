@@ -235,6 +235,77 @@ Branch: ${task.branch}
 };
 
 /**
+ * Worktree作成後のpostCreateコマンドを実行
+ *
+ * WHY: プロジェクトの依存関係インストールなどを自動化し、Worker実行時のエラーを防ぐ
+ *
+ * @param worktreePath worktreeのパス
+ * @param commands 実行するコマンド配列
+ * @returns 成功した場合はvoid、失敗した場合はエラーメッセージ
+ */
+const runPostCreateCommands = async (
+  worktreePath: string,
+  commands: string[],
+): Promise<Result<void, OrchestratorError>> => {
+  for (const command of commands) {
+    console.log(`  📦 Running postCreate command: ${command}`);
+
+    try {
+      const result = await new Promise<{ code: number; stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          const [cmd, ...args] = command.split(/\s+/);
+          if (!cmd) {
+            reject(new Error(`Invalid command: ${command}`));
+            return;
+          }
+
+          const proc = spawn(cmd, args, {
+            cwd: worktreePath,
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+          let stdout = '';
+          let stderr = '';
+
+          proc.stdout?.on('data', (data) => {
+            stdout += data.toString();
+          });
+
+          proc.stderr?.on('data', (data) => {
+            stderr += data.toString();
+          });
+
+          proc.on('close', (code) => {
+            resolve({ code: code ?? 0, stdout, stderr });
+          });
+
+          proc.on('error', (err) => {
+            reject(err);
+          });
+        },
+      );
+
+      if (result.code !== 0) {
+        console.warn(`  ⚠️  postCreate command failed (exit code ${result.code}): ${command}`);
+        console.warn(`     stderr: ${result.stderr.slice(0, 200)}`);
+        // 失敗してもエラーとせず、警告のみ出力して続行
+        // WHY: 依存関係インストール失敗は致命的ではなく、Worker実行時にリトライ可能
+      } else {
+        console.log(`  ✅ postCreate command completed: ${command}`);
+      }
+    } catch (error) {
+      console.warn(
+        `  ⚠️  postCreate command error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // エラーが発生しても続行
+    }
+  }
+
+  return createOk(undefined);
+};
+
+/**
  * Worker操作を生成するファクトリ関数
  */
 export const createWorkerOperations = (deps: WorkerDeps) => {
@@ -289,6 +360,17 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
       !branchExists,
       baseBranch,
     );
+
+    if (isErr(worktreeResult)) {
+      return worktreeResult;
+    }
+
+    // postCreateコマンドを実行
+    const postCreateCommands = deps.config.worktree?.postCreate ?? [];
+    if (postCreateCommands.length > 0) {
+      console.log(`  🔧 Running ${postCreateCommands.length} postCreate command(s)...`);
+      await runPostCreateCommands(worktreeResult.val, postCreateCommands);
+    }
 
     return worktreeResult;
   };

@@ -181,6 +181,23 @@ const ReplanningConfigSchema = z
   });
 
 /**
+ * Worktree設定のスキーマ
+ *
+ * WHY: プロジェクトごとにworktree作成後の初期化コマンドを定義可能にすることで、
+ *      依存関係のインストールなどを自動化し、Worker実行時のエラーを防ぐ
+ */
+const WorktreeConfigSchema = z
+  .object({
+    /**
+     * worktree作成後に実行するコマンド配列
+     *
+     * 例: ["pnpm install"], ["npm install"], ["pip install -r requirements.txt"]
+     */
+    postCreate: z.array(z.string()).default([]),
+  })
+  .default({ postCreate: [] });
+
+/**
  * GitHub認証設定のスキーマ
  *
  * WHY: Personal Access Tokenによる認証をサポート
@@ -254,6 +271,9 @@ export const ConfigSchema = z.object({
   /** Planner再評価設定 */
   replanning: ReplanningConfigSchema,
 
+  /** Worktree設定 */
+  worktree: WorktreeConfigSchema,
+
   /** GitHub設定 */
   github: GitHubConfigSchema.optional(),
 });
@@ -324,6 +344,9 @@ export function createDefaultConfig(params: {
       enabled: true,
       maxIterations: 3,
       timeoutSeconds: 300,
+    },
+    worktree: {
+      postCreate: [],
     },
   };
 }

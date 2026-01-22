@@ -314,6 +314,9 @@ test('E2E: Integration Evaluation', async (t) => {
         maxIterations: 3,
         timeoutSeconds: 300,
       },
+      worktree: {
+        postCreate: [],
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -387,6 +390,9 @@ test('E2E: Integration Evaluation', async (t) => {
         maxIterations: 3,
         timeoutSeconds: 300,
       },
+      worktree: {
+        postCreate: [],
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -448,6 +454,9 @@ test('E2E: Integration Evaluation', async (t) => {
         maxIterations: 3,
         timeoutSeconds: 300,
       },
+      worktree: {
+        postCreate: [],
+      },
     };
 
     const taskStore = createFileStore({ basePath: coordPath });
@@ -508,6 +517,9 @@ test('E2E: Integration Evaluation', async (t) => {
         enabled: true,
         maxIterations: 3,
         timeoutSeconds: 300,
+      },
+      worktree: {
+        postCreate: [],
       },
     };
 
