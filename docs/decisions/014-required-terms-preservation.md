@@ -6,7 +6,9 @@
 
 ## 選定結果
 
-**QualityJudge の評価項目に「要件カバレッジ」を追加** する方式を採用
+**既存の QualityJudge の Coverage 評価項目で部分的に対応済み**
+
+通常計画・refinement時は対応済み。再計画（replan）時の対応に課題あり。
 
 ## 背景・課題
 
@@ -40,28 +42,35 @@
 
 - [ADR-010: Task Refinement Design](010-task-refinement-design.md) の制限事項として記載
 
-## 採用した設計
+## 現状の実装（既存）
 
-### 1. QualityJudge の評価項目拡張
+調査の結果、`buildTaskQualityPrompt()` (planner-operations.ts:1756) に以下が既に実装されていた：
 
-既存の QualityJudge プロンプトに「要件カバレッジ」の評価観点を追加：
+### 1. ユーザー指示の提示
 
-```markdown
-## 評価観点
-
-### 既存
-- タスクの粒度は適切か
-- 依存関係は明確か
-- 受け入れ基準は具体的か
-
-### 追加
-- **要件カバレッジ**: ユーザーの元の指示に含まれる全ての要件が、
-  生成されたタスク群でカバーされているか
-  - 欠落している要件があれば `issues` に記載
-  - 例: "ユーザー入力に含まれる「バリデーション」の要件がタスクに反映されていません"
+```
+USER INSTRUCTION:
+${userInstruction}
 ```
 
-### 2. 評価結果の活用
+プロンプト冒頭でユーザー指示を明示的に提示（1787-1788行目）。
+
+### 2. Coverage 評価項目
+
+CRITICAL評価基準の5番目として以下が既に含まれている（1809-1813行目）：
+
+```
+5. **Coverage**: Do all tasks together fully satisfy the original instruction?
+   - All explicit requirements must be addressed by at least one task
+   - Implicit requirements (e.g., if adding interface, must also use it) must be considered
+   - No aspect of the instruction should be left unaddressed
+   - Example: If instruction says "implement authentication and update orchestrate.ts to use it",
+     there must be tasks for BOTH implementing auth AND updating orchestrate.ts
+```
+
+### 3. 評価結果の型
+
+`TaskQualityJudgement` 型（128-137行目）で既に対応：
 
 ```typescript
 interface TaskQualityJudgement {
@@ -72,108 +81,169 @@ interface TaskQualityJudgement {
 }
 ```
 
-要件欠落が検出された場合：
-- `issues` に欠落内容が記載される
-- `isAcceptable` が `false` になる可能性
-- 既存の refinement フローで `replan` が発生
+## 追加実装の検討と却下
 
-### 3. プロンプト変更
+### 検討した追加機能
 
-`buildQualityJudgePrompt` に以下を追加：
+| 機能 | 理由 | 判断 |
+|------|------|------|
+| `enableRequirementCoverageCheck` 設定 | Coverage評価のオプトアウト | **却下** |
+| `<user-instruction>` タグによる強調 | ユーザー指示の明確化 | **不要** |
+
+### 却下理由
+
+1. **オプトアウト設定**:
+   - Coverage評価は品質管理の中核であり、無効化するユースケースが想定できない
+   - 評価が厳しすぎる場合は `planning.qualityThreshold` で調整可能
+   - 設定項目の増加は認知負荷を高める
+
+2. **タグによる強調**:
+   - 現状の `USER INSTRUCTION:` セクションで十分明確
+   - プロンプト変更はリグレッションリスクを伴う
+
+## 結論
+
+通常計画・refinement時の要件カバレッジ検証は既存実装で機能している。
+ただし、以下の課題が残存しており、完全な対応には追加改善が必要。
+
+## 残存リスク
+
+### High: 再計画時の元指示欠落
+
+`buildReplanningPrompt()` (replanning-operations.ts) は元のユーザー指示を含まない。
+再計画はタスク情報・実行ログ・Judge判定のみに依存し、元の要件を参照できない。
 
 ```typescript
-const qualityJudgePrompt = `
-...既存の評価観点...
-
-## 要件カバレッジ評価
-
-以下のユーザー指示に含まれる要件が、全てタスクとしてカバーされているか評価してください：
-
-<user-instruction>
-${userInstruction}
-</user-instruction>
-
-欠落している要件があれば、issues に以下の形式で記載してください：
-- "要件欠落: [欠落している要件の説明]"
-`;
+// 現状: ユーザー指示が含まれていない
+export const buildReplanningPrompt = (
+  task: Task,              // ← タスク情報のみ
+  runLog: string,          // ← 実行ログ
+  judgement: JudgementResult, // ← Judge判定
+): string => { ... }
 ```
 
-## 設定項目
+### High: fail-open動作
 
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| enableRequirementCoverageCheck | true | 要件カバレッジ評価を有効化 |
+品質評価でLLM実行失敗・JSONパース失敗時は `isAcceptable: true` で通過する（planner-operations.ts:1881-1930）。
+要件欠落があっても評価自体が失敗すると検出できない。
 
-## 影響範囲
+### Medium: スコア閾値による上書き
 
-### 変更対象ファイル
+`isAcceptable: false` でも `overallScore >= qualityThreshold` なら受理される可能性がある（planner-operations.ts:539）。
 
-1. **src/core/orchestrator/planner-operations.ts**:
-   - `buildQualityJudgePrompt()` にユーザー指示と評価観点を追加
-2. **src/types/config.ts**: `enableRequirementCoverageCheck` 設定追加
-3. **.agent/config-schema.json**: 設定追加
+### Medium: 再計画プロンプトに Coverage 評価基準がない
 
-### 後方互換性
+`buildReplanningPrompt()` には通常計画時の `buildTaskQualityPrompt()` に含まれる「Coverage」評価基準が含まれていない。元のユーザー指示を追加しても、Coverage 評価の明示的な指示がなければ効果が限定的になる可能性。
 
-- `enableRequirementCoverageCheck: false` で従来動作
-- 設定が存在しない場合はデフォルト（true）で動作
+## 将来の改善項目
 
-## 利点
-
-1. **日本語対応**: LLM が自然言語で判定するため、トークン化不要
-2. **追加コストほぼゼロ**: 既存の QualityJudge 呼び出しに相乗り
-3. **既存フローとの統合**: `issues` → `replan` の既存フローで対処
-4. **柔軟な検出**: 同義語・言い換えも LLM が理解可能
-
-## 制約・考慮事項
-
-| リスク | 対策 |
-|--------|------|
-| LLM の判定が不安定 | ADR-013 のノイズ耐性と組み合わせ |
-| プロンプトが長くなる | ユーザー指示が長い場合は要約を検討 |
-| 過剰検出（実際にはカバーされている） | Judge の判定を信頼、必要なら閾値調整 |
-
-## テスト戦略
-
-### 単体テスト
-
-- `buildQualityJudgePrompt()` にユーザー指示が含まれることを確認
-- 設定による有効/無効の切り替え
-
-### E2E テスト（手動検証）
-
-検証シナリオ：
-1. 要件が欠落した計画に対して `issues` に欠落が記載される
-2. 全要件がカバーされた計画は `issues` に要件欠落がない
-3. `enableRequirementCoverageCheck: false` で評価がスキップされる
+| 優先度 | 項目 | 内容 |
+|--------|------|------|
+| High | 再計画時の元指示追加 | `buildReplanningPrompt()` にユーザー指示を渡す |
+| Medium | fail-closed オプション | 評価失敗時に安全側倒れで拒否する設定 |
+| Low | issues フォーマット統一 | `[Coverage] 要件欠落: ...` 形式で検出しやすく |
 
 ## ステータス
 
-**設計中**
+**部分的に対応済み（追加改善推奨）**
 
 ---
 
-## 次回セッション用情報
+## 実装計画（High優先度: 再計画時の元指示追加）
 
-### 参照すべきファイル
+### 変更対象ファイル
 
-| ファイル | 内容 |
-|----------|------|
-| `src/core/orchestrator/planner-operations.ts` | `buildQualityJudgePrompt` 実装箇所 |
-| `src/core/orchestrator/planner-operations.ts:128-137` | `TaskQualityJudgement` 型定義 |
-| `src/types/config.ts` | 設定型定義 |
-| `.agent/config-schema.json` | 設定スキーマ |
+| ファイル | 変更内容 |
+|----------|----------|
+| `src/core/orchestrator/planner-operations.ts` | `PlannerDeps` に `userInstruction?: string` 追加 |
+| `src/core/orchestrator/replanning-operations.ts` | `buildReplanningPrompt()` に `userInstruction` パラメータ追加 |
+| `src/core/orchestrator/task-execution-pipeline.ts` | `TaskExecutionPipelineInput` に `userInstruction` 追加 |
+| `src/core/orchestrator/orchestrate.ts` | 4箇所の `executeTaskPipeline` 呼び出しに `userInstruction` を渡す |
 
-### 実装タスク
+### 実装手順
 
-1. `buildQualityJudgePrompt()` を特定
-2. プロンプトに「要件カバレッジ評価」セクションを追加
-3. ユーザー指示（instruction）をプロンプトに渡す導線を確認
-4. `enableRequirementCoverageCheck` 設定を追加
-5. E2E テストで動作確認
+1. **PlannerDeps 型拡張** (planner-operations.ts:109)
+   ```typescript
+   readonly userInstruction?: string;
+   ```
 
-### 確認ポイント
+2. **buildReplanningPrompt 修正** (replanning-operations.ts:27)
+   ```typescript
+   export const buildReplanningPrompt = (
+     task: Task,
+     runLog: string,
+     judgement: JudgementResult,
+     userInstruction?: string,  // 追加
+   ): string => {
+     const userInstructionSection = userInstruction
+       ? `## Original User Instruction\n\n${userInstruction}\n\n`
+       : '';
+     return `...${userInstructionSection}...`;
+   };
+   ```
 
-- `buildQualityJudgePrompt` の現在のシグネチャ
-- ユーザー指示（`PlannerSession.instruction`）へのアクセス経路
-- プロンプトの長さ制限（ユーザー指示が長い場合の対処）
+3. **replanFailedTask 修正** (replanning-operations.ts:148)
+   ```typescript
+   const prompt = buildReplanningPrompt(task, runLog, judgement, deps.userInstruction);
+   ```
+
+4. **TaskExecutionPipelineInput 拡張** (task-execution-pipeline.ts:74)
+   ```typescript
+   readonly userInstruction?: string;
+   ```
+
+5. **executeTaskPipeline 内の plannerDeps 構築修正** (task-execution-pipeline.ts:145)
+   ```typescript
+   const plannerDeps = { ...existing, userInstruction };
+   ```
+
+6. **orchestrate.ts の4箇所で userInstruction を渡す**
+   - 255行目: `executeInstruction` 内（`userInstruction` 利用可能）
+   - 474行目: 追加タスク実行（`session.instruction` から取得）
+   - 836行目: `resumeFromSession` 内（`session.instruction` 利用可能）
+   - 1127行目: `continueFromSession` 内（`session.instruction` 利用可能）
+
+### テスト計画
+
+1. **単体テスト**: `buildReplanningPrompt()` に `userInstruction` が含まれることを確認
+2. **統合テスト**: 再計画時に元の指示がプロンプトに反映されることを確認
+3. **後方互換性**: `userInstruction` が未指定（`undefined`）でも動作することを確認
+4. **境界値テスト**:
+   - 空文字列の `userInstruction`
+   - 非常に長い `userInstruction`（トークン制限への影響）
+   - マルチバイト文字（日本語）を含む `userInstruction`
+5. **E2Eテスト**: 実際の再計画フローで元指示が保持され、Coverage評価に反映されることを確認
+
+### 関連ADR
+
+- [ADR-010: Task Refinement Design](010-task-refinement-design.md) - Refinementフローの設計
+
+---
+
+## 参考：既存実装の詳細
+
+### buildTaskQualityPrompt 関数シグネチャ
+
+```typescript
+export const buildTaskQualityPrompt = (
+  userInstruction: string,
+  tasks: TaskBreakdown[],
+  strictContextValidation: boolean,
+  maxTaskDuration: number = 4,
+  previousFeedback?: string,
+): string
+```
+
+### 評価基準の重み付け（既存）
+
+- **CRITICAL** (70%): Completeness, Clarity, Acceptance criteria, Dependency validity, **Coverage**
+- **IMPORTANT** (20%): Context sufficiency, Granularity
+- **NICE TO HAVE** (10%): Independence, Best practices
+
+### 関連ファイル
+
+| ファイル | 行番号 | 内容 |
+|----------|--------|------|
+| `src/core/orchestrator/planner-operations.ts` | 1756-1841 | `buildTaskQualityPrompt()` 定義 |
+| `src/core/orchestrator/planner-operations.ts` | 128-137 | `TaskQualityJudgement` 型定義 |
+| `src/core/orchestrator/planner-operations.ts` | 246-279 | `judgeTaskQuality()` 呼び出し元 |
