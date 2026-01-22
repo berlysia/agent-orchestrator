@@ -98,17 +98,33 @@ agent-coord/
 
 外部サービスとのI/Oは `src/adapters/` に隔離し、CoreからはEffectsインターフェースで利用します。
 
-- `src/adapters/vcs/`: Git/Worktree操作（実装済み）
-- `src/adapters/github/`: GitHub API連携（計画中）
-  - PR作成・コメント投稿・チェック/ステータス更新・Actions参照を担当
+- `src/adapters/vcs/`: Git/Worktree操作
+- `src/adapters/github/`: GitHub API連携
 
-**GitHub設定項目（`.agent/config.json` の想定）**:
+**設計方針**:
 
-- `github.apiBaseUrl`（例: `https://api.github.com`）
-- `github.owner` / `github.repo`
-- `github.auth.type`: `pat` | `app`
-- `github.auth.token`（PAT時）
-- `github.auth.appId` / `github.auth.installationId` / `github.auth.privateKeyPath`（App時）
+Effectsパターンにより、外部APIへの依存をインターフェースで抽象化します。
+これにより、テスト時のモック差し替えや、将来的な別プロバイダ対応が容易になります。
+
+```typescript
+// GitHubEffects インターフェース
+interface GitHubEffects {
+  createPullRequest(input: CreatePullRequestInput): Promise<Result<PullRequest, GitHubError>>;
+}
+```
+
+**エラー分類の設計**:
+
+GitHub APIエラーは原因別に分類し、呼び出し側で適切な対応を可能にします：
+
+- `authentication`: 認証失敗（トークン無効・期限切れ）
+- `permission`: 権限不足
+- `rate_limit`: APIレート制限
+- `validation`: リクエストパラメータ不正
+- `not_found`: リソースが存在しない
+- `unknown`: その他のエラー
+
+セットアップと使い方は [docs/github-integration.md](github-integration.md) を参照してください。
 
 ### 5. Error Handling Strategy
 
@@ -250,11 +266,34 @@ const taskId: TaskId = workerId; // ❌
 - `tests/unit/file-store.test.ts` - TaskStore CRUD/CAS操作テスト
 - `tests/e2e/cli-basic.test.ts` - CLI基本コマンドE2Eテスト
 
+### GitHub Integration
+
+✅ Phase 1 実装完了
+
+- Octokit SDKによるGitHub API連携
+- Pull Request自動作成機能
+- エラー分類と適切なエラーハンドリング
+
+実装ファイル:
+
+- `src/adapters/github/client.ts` - Octokitクライアント生成
+- `src/adapters/github/pull-request.ts` - PR作成API呼び出し
+- `src/adapters/github/error.ts` - GitHubエラー分類
+- `src/adapters/github/index.ts` - GitHubEffects実装
+- `src/types/github.ts` - GitHub関連型定義
+
 ## Planned Architecture
 
 ### GitHub Integration (Phase 2)
 
-GitHub統合は**未実装（計画段階）**で、詳細は以下の計画/設計ドキュメントを参照します：
+Phase 2以降の機能は**未実装（計画段階）**です：
+
+- コメント投稿
+- チェック/ステータス更新
+- GitHub Actions参照
+- GitHub App認証
+
+詳細は以下の計画/設計ドキュメントを参照：
 
 - [docs/plans/github-integration-plan.md](plans/github-integration-plan.md)
 - [docs/plans/github-integration-design.md](plans/github-integration-design.md)

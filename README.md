@@ -8,6 +8,7 @@ Multi-agent collaborative development tool with Planner/Worker/Judge architectur
 - **Worktree-based parallelization**: Parallel task execution using Git worktrees
 - **CAS concurrency control**: Optimistic concurrency using Compare-And-Swap
 - **SDK integration**: Claude Agent SDK and OpenAI Codex SDK support
+- **GitHub integration**: Automatic Pull Request creation ([docs/github-integration.md](docs/github-integration.md))
 
 ## Requirements
 

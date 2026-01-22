@@ -221,6 +221,7 @@ src/
 
   adapters/
     vcs/                # Git/Worktree operations (simple-git + child_process)
+    github/             # GitHub API integration (Octokit)
 
   cli/
     commands/           # CLI commands (init, run, status, stop, resume, continue, info)
