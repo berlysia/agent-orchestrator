@@ -225,9 +225,15 @@ export async function executeSerialChain(
 
         const judgement = judgementResult.val;
         if (judgement.success) {
-          console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
-          await judgeOps.markTaskAsCompleted(tid);
-          completed.push(tid);
+          if (judgement.alreadySatisfied) {
+            console.log(`  ⏭️  [${rawTaskId}] Task skipped (already satisfied): ${judgement.reason}`);
+            await judgeOps.markTaskAsSkipped(tid, judgement.reason);
+            completed.push(tid);
+          } else {
+            console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
+            await judgeOps.markTaskAsCompleted(tid);
+            completed.push(tid);
+          }
         } else if (judgement.shouldContinue) {
           // 継続実行可能な場合
           console.log(`  🔄 [${rawTaskId}] Task needs continuation: ${judgement.reason}`);

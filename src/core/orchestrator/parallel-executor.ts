@@ -212,6 +212,11 @@ export async function executeLevelParallel(
         const judgement = judgementResult.val;
 
         if (judgement.success) {
+          if (judgement.alreadySatisfied) {
+            console.log(`  ⏭️  [${rawTaskId}] Task skipped (already satisfied): ${judgement.reason}`);
+            await judgeOps.markTaskAsSkipped(tid, judgement.reason);
+            return { taskId: tid, status: TaskExecutionStatus.COMPLETED, workerId: wid };
+          }
           console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
           await judgeOps.markTaskAsCompleted(tid);
           return { taskId: tid, status: TaskExecutionStatus.COMPLETED, workerId: wid };

@@ -39,6 +39,7 @@ describe('Replanning Operations', () => {
     success: false,
     shouldContinue: false,
     shouldReplan: true,
+    alreadySatisfied: false,
     reason: 'Task scope is too large for single iteration',
     missingRequirements: ['Split into smaller subtasks'],
   });

@@ -12,6 +12,7 @@ export type { CheckId, WorkerId } from './branded.ts';
  * - RUNNING: Worker実行中
  * - NEEDS_CONTINUATION: 実行済みだが継続が必要（Judgeが不完全と判定）
  * - DONE: 完了
+ * - SKIPPED: 既に実装済みのためスキップ（Judgeが判定）
  * - BLOCKED: エラーや依存関係により実行不可
  * - CANCELLED: ユーザーによる中断
  * - REPLACED_BY_REPLAN: 再計画により新タスクに置き換えられた
@@ -21,6 +22,7 @@ export const TaskState = {
   RUNNING: 'RUNNING',
   NEEDS_CONTINUATION: 'NEEDS_CONTINUATION',
   DONE: 'DONE',
+  SKIPPED: 'SKIPPED',
   BLOCKED: 'BLOCKED',
   CANCELLED: 'CANCELLED',
   REPLACED_BY_REPLAN: 'REPLACED_BY_REPLAN',
@@ -68,6 +70,7 @@ export const TaskSchema = z.object({
     TaskState.RUNNING,
     TaskState.NEEDS_CONTINUATION,
     TaskState.DONE,
+    TaskState.SKIPPED,
     TaskState.BLOCKED,
     TaskState.CANCELLED,
     TaskState.REPLACED_BY_REPLAN,
@@ -198,6 +201,9 @@ export const TaskSchema = z.object({
 
   /** BLOCKED理由の詳細メッセージ（Phase 1: 未完了タスク再実行機能） */
   blockMessage: z.string().optional().nullable(),
+
+  /** SKIPPED理由（既に実装済みの場合のスキップ理由） */
+  skipReason: z.string().optional().nullable(),
 
   /** 統合ブランチからの再試行済みフラグ（Phase 1: 未完了タスク再実行機能） */
   integrationRetried: z.boolean().default(false),

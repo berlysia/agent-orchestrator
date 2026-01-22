@@ -113,6 +113,8 @@ export interface JudgementResult {
   shouldContinue: boolean;
   /** Planner再評価の必要性（true=タスク分解をやり直す、false=不要） */
   shouldReplan: boolean;
+  /** 既に実装済みかどうか（true=要件は既に満たされている、false=そうではない） */
+  alreadySatisfied: boolean;
   /** 理由メッセージ */
   reason: string;
   /** 未達成要件リスト */
@@ -128,6 +130,7 @@ const AgentJudgementSchema = z.object({
   missingRequirements: z.array(z.string()).optional().default([]),
   shouldContinue: z.boolean().optional().default(false),
   shouldReplan: z.boolean().optional().default(false),
+  alreadySatisfied: z.boolean().optional().default(false),
 });
 
 /**
@@ -199,13 +202,20 @@ Output (JSON only, no additional text):
   "reason": "Detailed explanation of your judgement",
   "missingRequirements": ["req1", "req2"],  // Empty array if none
   "shouldContinue": true/false,  // true if worker can fix in next iteration
-  "shouldReplan": true/false     // true if task needs to be broken down by planner
+  "shouldReplan": true/false,    // true if task needs to be broken down by planner
+  "alreadySatisfied": true/false  // true if requirements were already met before this execution
 }
 
 Rules:
 - success=true only if ALL acceptance criteria are met AND actual changes were made (if required)
 - **IMPORTANT**: If scopePaths specifies files to create but git shows no changes, success=false
 - missingRequirements should list specific unmet criteria
+
+- alreadySatisfied=true if the acceptance criteria were ALREADY satisfied before this worker execution:
+  * Worker verified existing code and found it already meets all requirements
+  * No changes were needed because the functionality was implemented in a previous iteration
+  * Tests pass without any modifications from this worker
+  * **CRITICAL**: When alreadySatisfied=true, set success=true (task is complete)
 
 - shouldContinue=true if the worker can fix issues in next iteration:
   * Test failures (can be debugged and fixed)
@@ -214,7 +224,7 @@ Rules:
   * Missing error handling or edge cases (can be added)
   * Code quality issues (can be improved)
   * Partial implementation that can be finished
-  * **Worker only verified but did not implement** (can implement in next iteration)
+  * Worker only verified but requirements are NOT yet met (needs implementation)
 
 - shouldContinue=false && shouldReplan=true if task needs restructuring:
   * Task scope is too large for single iteration
@@ -458,6 +468,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
         success: false,
         shouldContinue: false,
         shouldReplan: false,
+        alreadySatisfied: false,
         reason: `Task is not in RUNNING state: ${task.state}`,
       });
     }
@@ -526,6 +537,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
             success: parseResult.data.success,
             shouldContinue: parseResult.data.shouldContinue,
             shouldReplan: parseResult.data.shouldReplan,
+            alreadySatisfied: parseResult.data.alreadySatisfied,
             reason: parseResult.data.reason,
             missingRequirements: parseResult.data.missingRequirements,
           });
@@ -611,6 +623,36 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
   };
 
   /**
+   * タスクをスキップ状態に更新
+   *
+   * WHY: 要件が既に満たされている場合、タスクを実行せずにスキップする
+   *      DONEとは異なり、このイテレーションでは何も変更されていないことを示す
+   *
+   * @param tid タスクID
+   * @param reason スキップ理由
+   * @returns 更新後のタスク（Result型）
+   */
+  const markTaskAsSkipped = async (
+    tid: TaskId,
+    reason: string,
+  ): Promise<Result<Task, TaskStoreError>> => {
+    const taskResult = await deps.taskStore.readTask(tid);
+    if (!taskResult.ok) {
+      return taskResult;
+    }
+
+    const task = taskResult.val;
+
+    return await deps.taskStore.updateTaskCAS(tid, task.version, (currentTask) => ({
+      ...currentTask,
+      state: TaskState.SKIPPED,
+      owner: null,
+      updatedAt: new Date().toISOString(),
+      skipReason: reason,
+    }));
+  };
+
+  /**
    * タスクをブロック状態に更新
    *
    * WHY: Phase 1で追加 - BLOCKED理由を記録することで、統合ブランチからの再試行可否を判定できる
@@ -690,6 +732,7 @@ export const createJudgeOperations = (deps: JudgeDeps) => {
   return {
     judgeTask,
     markTaskAsCompleted,
+    markTaskAsSkipped,
     markTaskAsBlocked,
     markTaskForContinuation,
   };
