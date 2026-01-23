@@ -6,6 +6,7 @@ import { createOrchestrator } from '../../core/orchestrator/orchestrate.ts';
 import { PlannerSessionEffectsImpl } from '../../core/orchestrator/planner-session-effects-impl.ts';
 import { isErr } from 'option-t/plain_result';
 import { loadConfig } from '../utils/load-config.ts';
+import { generateReportSafely } from '../utils/auto-report.ts';
 
 /**
  * `agent run` コマンドの実装
@@ -17,11 +18,13 @@ export function createRunCommand(): Command {
     .description('Execute a task using agent orchestration')
     .argument('<instruction>', 'Task instruction for the agent')
     .option('--config <path>', 'Path to configuration file')
+    .option('--no-report', 'Disable automatic report generation')
     .action(async (instruction: string, options) => {
       try {
         await executeRun({
           instruction,
           configPath: options.config,
+          noReport: options.noReport,
         });
       } catch (error) {
         console.error('Execution failed:', error);
@@ -35,8 +38,12 @@ export function createRunCommand(): Command {
 /**
  * agent run の実行処理
  */
-async function executeRun(params: { instruction: string; configPath?: string }): Promise<void> {
-  const { instruction, configPath } = params;
+async function executeRun(params: {
+  instruction: string;
+  configPath?: string;
+  noReport?: boolean;
+}): Promise<void> {
+  const { instruction, configPath, noReport } = params;
 
   // 設定ファイルを読み込み
   const config = await loadConfig(configPath);
@@ -76,29 +83,45 @@ async function executeRun(params: { instruction: string; configPath?: string }):
   // タスクを実行
   console.log(`🚀 Starting orchestration...\n`);
 
-  const resultOrError = await orchestrator.executeInstruction(instruction);
+  try {
+    const resultOrError = await orchestrator.executeInstruction(instruction);
 
-  // Result型をunwrap
-  if (isErr(resultOrError)) {
-    console.error(`\n❌ Orchestration error: ${resultOrError.err.message}`);
-    process.exit(1);
-  }
+    // Result型をunwrap
+    if (isErr(resultOrError)) {
+      // エラー時もレポート生成を試みる（デバッグ用）
+      if (!noReport) {
+        // エラー時はsessionIdが取得できないので、レポート生成をスキップ
+        console.warn('\n⚠️  Orchestration failed, skipping report generation');
+      }
+      console.error(`\n❌ Orchestration error: ${resultOrError.err.message}`);
+      process.exit(1);
+    }
 
-  const result = resultOrError.val;
+    const result = resultOrError.val;
 
-  // 結果を表示
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`Orchestration Summary:`);
-  console.log(`  Total tasks: ${result.taskIds.length}`);
-  console.log(`  Completed: ${result.completedTaskIds.length}`);
-  console.log(`  Failed: ${result.failedTaskIds.length}`);
-  if (result.blockedTaskIds && result.blockedTaskIds.length > 0) {
-    console.log(`  Blocked: ${result.blockedTaskIds.length}`);
-  }
-  console.log(`  Status: ${result.success ? '✅ SUCCESS' : '❌ FAILED'}`);
-  console.log(`${'='.repeat(60)}\n`);
+    // 結果を表示
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`Orchestration Summary:`);
+    console.log(`  Total tasks: ${result.taskIds.length}`);
+    console.log(`  Completed: ${result.completedTaskIds.length}`);
+    console.log(`  Failed: ${result.failedTaskIds.length}`);
+    if (result.blockedTaskIds && result.blockedTaskIds.length > 0) {
+      console.log(`  Blocked: ${result.blockedTaskIds.length}`);
+    }
+    console.log(`  Status: ${result.success ? '✅ SUCCESS' : '❌ FAILED'}`);
+    console.log(`${'='.repeat(60)}\n`);
 
-  if (!result.success) {
+    // レポート自動生成（成功・失敗どちらでも）
+    if (!noReport) {
+      await generateReportSafely(result.sessionId, config.agentCoordPath);
+    }
+
+    if (!result.success) {
+      process.exit(1);
+    }
+  } catch (error) {
+    // 予期しないエラー時もレポート生成を試みる（可能なら）
+    console.error('Unexpected error during orchestration:', error);
     process.exit(1);
   }
 }

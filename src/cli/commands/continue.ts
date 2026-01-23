@@ -7,6 +7,7 @@ import { PlannerSessionEffectsImpl } from '../../core/orchestrator/planner-sessi
 import { isErr } from 'option-t/plain_result';
 import { loadConfig } from '../utils/load-config.ts';
 import type { TaskStoreError } from '../../types/errors.ts';
+import { generateReportSafely } from '../utils/auto-report.ts';
 
 /**
  * `agent continue` コマンドの実装
@@ -24,6 +25,7 @@ export function createContinueCommand(): Command {
     .option('--auto', 'Skip confirmation prompts', false)
     .option('--dry-run', 'Show what would be done without executing', false)
     .option('--config <path>', 'Path to configuration file')
+    .option('--no-report', 'Disable automatic report generation')
     .action(async (options) => {
       try {
         await executeContinue({
@@ -32,6 +34,7 @@ export function createContinueCommand(): Command {
           autoConfirm: options.auto,
           dryRun: options.dryRun,
           configPath: options.config,
+          noReport: options.noReport,
         });
       } catch (error) {
         console.error('Continue execution failed:', error);
@@ -51,8 +54,9 @@ async function executeContinue(params: {
   autoConfirm: boolean;
   dryRun: boolean;
   configPath?: string;
+  noReport?: boolean;
 }): Promise<void> {
-  const { sessionId, autoConfirm, dryRun, configPath } = params;
+  const { sessionId, autoConfirm, dryRun, configPath, noReport } = params;
 
   // 設定ファイルを読み込み
   const config = await loadConfig(configPath);
@@ -131,43 +135,54 @@ async function executeContinue(params: {
   // maxIterationsはCLIオプション優先、なければconfigから取得
   const maxIterations = params.maxIterations ?? config.iterations.orchestrateMainLoop;
 
-  const resultOrError = await orchestrator.continueFromSession(targetSessionId, {
-    maxIterations,
-    autoConfirm,
-    dryRun,
-  });
-
-  // Result型をunwrap
-  if (isErr(resultOrError)) {
-    console.error(`\n❌ Continue error: ${resultOrError.err.message}`);
-    process.exit(1);
-  }
-
-  const result = resultOrError.val;
-
-  // 結果を表示
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`Continue Summary:`);
-  console.log(`  Iterations performed: ${result.iterationsPerformed}`);
-  console.log(`  Total tasks: ${result.allTaskIds.length}`);
-  console.log(`  Completed: ${result.completedTaskIds.length}`);
-  console.log(`  Failed: ${result.failedTaskIds.length}`);
-  console.log(`  Completion score: ${result.completionScore ?? 'N/A'}%`);
-  console.log(`  Status: ${result.isComplete ? '✅ COMPLETE' : '⚠️  INCOMPLETE'}`);
-
-  if (!result.isComplete && result.remainingMissingAspects.length > 0) {
-    console.log(`\n  Remaining missing aspects:`);
-    result.remainingMissingAspects.forEach((aspect, idx) => {
-      console.log(`    ${idx + 1}. ${aspect}`);
+  try {
+    const resultOrError = await orchestrator.continueFromSession(targetSessionId, {
+      maxIterations,
+      autoConfirm,
+      dryRun,
     });
-  }
 
-  console.log(`${'='.repeat(60)}\n`);
+    // Result型をunwrap
+    if (isErr(resultOrError)) {
+      console.error(`\n❌ Continue error: ${resultOrError.err.message}`);
+      process.exit(1);
+    }
 
-  if (!result.isComplete) {
-    console.log(
-      '💡 Tip: Run `agent continue` again to generate more tasks, or manually review the missing aspects.',
-    );
+    const result = resultOrError.val;
+
+    // 結果を表示
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`Continue Summary:`);
+    console.log(`  Iterations performed: ${result.iterationsPerformed}`);
+    console.log(`  Total tasks: ${result.allTaskIds.length}`);
+    console.log(`  Completed: ${result.completedTaskIds.length}`);
+    console.log(`  Failed: ${result.failedTaskIds.length}`);
+    console.log(`  Completion score: ${result.completionScore ?? 'N/A'}%`);
+    console.log(`  Status: ${result.isComplete ? '✅ COMPLETE' : '⚠️  INCOMPLETE'}`);
+
+    if (!result.isComplete && result.remainingMissingAspects.length > 0) {
+      console.log(`\n  Remaining missing aspects:`);
+      result.remainingMissingAspects.forEach((aspect, idx) => {
+        console.log(`    ${idx + 1}. ${aspect}`);
+      });
+    }
+
+    console.log(`${'='.repeat(60)}\n`);
+
+    // レポート自動生成（成功・失敗どちらでも）
+    if (!noReport) {
+      await generateReportSafely(result.sessionId, config.agentCoordPath);
+    }
+
+    if (!result.isComplete) {
+      console.log(
+        '💡 Tip: Run `agent continue` again to generate more tasks, or manually review the missing aspects.',
+      );
+      process.exit(1);
+    }
+  } catch (error) {
+    // 予期しないエラー時もレポート生成を試みる（可能なら）
+    console.error('Unexpected error during continue:', error);
     process.exit(1);
   }
 }
