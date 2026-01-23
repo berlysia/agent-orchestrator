@@ -19,6 +19,7 @@ import type { Task } from '../../types/task.ts';
 import { TaskState } from '../../types/task.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
 import type { IntegrationWorktreeInfo } from '../../types/integration.ts';
+import type { IntegrationInfo } from '../report/types.ts';
 import {
   loadTasks,
   collectCompletedTaskSummaries,
@@ -59,6 +60,8 @@ export interface OrchestrationResult {
   blockedTaskIds: string[];
   /** 全体の成功可否 */
   success: boolean;
+  /** 統合情報（統合worktreeが有効な場合のみ） */
+  integrationInfo?: IntegrationInfo;
 }
 
 /**
@@ -214,6 +217,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     const failedTaskIds: string[] = [];
     const blockedTaskIds: string[] = [];
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
+    let integrationInfo: IntegrationInfo | undefined = undefined;
 
     try {
       // 早期設定検証: PR作成にはGitHub設定が必要
@@ -319,6 +323,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         let codeChanges = '';
         let integrationWorktreeInfo: IntegrationWorktreeInfo | null = null;
+        let mergeResult: Result<import('../../types/integration.ts').IntegrationMergeResult, import('../../types/errors.ts').OrchestratorError> | null = null;
 
         // WHY: 統合後評価を有効化している場合、統合worktree上でコード差分を取得して評価する
         if (deps.config.integration.postIntegrationEvaluation && completedTasks.length > 1) {
@@ -339,7 +344,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             console.log(`  🔗 Merging ${completedTasks.length} tasks...`);
 
             // 完了タスクを統合worktreeにマージ
-            const mergeResult = await integrationOps.mergeTasksInWorktree(
+            mergeResult = await integrationOps.mergeTasksInWorktree(
               worktreeInfo,
               completedTasks,
               extractSessionShort(sessionId),
@@ -521,7 +526,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
               }
             }
 
-            const mergeResult = await integrationOps.mergeTasksInWorktree(
+            mergeResult = await integrationOps.mergeTasksInWorktree(
               integrationWorktreeInfo,
               additionalTasks,
               extractSessionShort(sessionId),
@@ -641,6 +646,16 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           }
         }
 
+        // IntegrationInfo構築（統合worktreeが有効な場合）
+        integrationInfo = integrationWorktreeInfo ? {
+          integrationBranch: integrationWorktreeInfo.integrationBranch ? String(integrationWorktreeInfo.integrationBranch) : undefined,
+          mergedCount: mergeResult?.ok ? mergeResult.val.mergedTaskIds.length : 0,
+          conflictCount: mergeResult?.ok ? mergeResult.val.conflictedTaskIds.length : 0,
+          conflictResolutionTaskId: mergeResult?.ok && mergeResult.val.conflictResolutionTaskId ? String(mergeResult.val.conflictResolutionTaskId) : undefined,
+          completionScore: finalJudgement.completionScore,
+          missingAspects: finalJudgement.missingAspects,
+        } : undefined;
+
         // 統合worktreeのクリーンアップと最終マージ情報出力
         if (integrationWorktreeInfo) {
           // WHY: クリーンアップ前に統合ブランチの情報を出力し、ユーザーがマージできるようにする
@@ -748,6 +763,9 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       if (blockedTaskIds.length > 0) {
         console.log(`  Blocked: ${blockedTaskIds.length}`);
       }
+      if (integrationInfo && integrationInfo.conflictCount > 0) {
+        console.log('  Conflicts resolved: ' + integrationInfo.conflictCount);
+      }
 
       return createOk({
         sessionId,
@@ -756,6 +774,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         failedTaskIds,
         blockedTaskIds,
         success,
+        integrationInfo,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
