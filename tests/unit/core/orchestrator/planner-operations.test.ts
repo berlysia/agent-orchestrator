@@ -13,8 +13,10 @@ import {
   parseFinalCompletionJudgement,
   detectCircularDependencies,
   validateTaskDependencies,
+  makeRefinementDecision,
   type TaskQualityJudgement,
 } from '../../../../src/core/orchestrator/planner-operations.ts';
+import type { RefinementConfig } from '../../../../src/types/planner-session.ts';
 import { TaskTypeEnum, type TaskBreakdown } from '../../../../src/types/task-breakdown.ts';
 
 describe('Planner Operations', () => {
@@ -920,6 +922,292 @@ Suggestions:
 
         const errors = validateTaskDependencies(tasks);
         assert.strictEqual(errors.length, 0);
+      });
+    });
+  });
+
+  describe('Refinement Decision', () => {
+    const defaultConfig: RefinementConfig = {
+      maxRefinementAttempts: 2,
+      refineSuggestionsOnSuccess: false,
+      maxSuggestionReplans: 1,
+      enableIndividualFallback: true,
+      deltaThreshold: 5,
+      deltaThresholdPercent: 5,
+      taskCountChangeThreshold: 0.3,
+      taskCountChangeMinAbsolute: 2,
+    };
+
+    describe('makeRefinementDecision', () => {
+      it('should accept when quality is OK and no suggestions', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 78,
+          previousScore: undefined,
+          issues: [],
+          suggestions: [],
+          attemptCount: 0,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '品質OK');
+      });
+
+      it('should replan when quality is not acceptable', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: false,
+          score: 45,
+          previousScore: undefined,
+          issues: ['Task context is insufficient'],
+          suggestions: ['Add more detail to context'],
+          attemptCount: 0,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'replan');
+        assert.strictEqual(result.reason, '品質未達');
+        assert(result.feedback);
+        assert.strictEqual(result.feedback.issues.length, 1);
+      });
+
+      it('should reject when max attempts reached and quality is not acceptable', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: false,
+          score: 55,
+          previousScore: 50,
+          issues: ['Still insufficient'],
+          suggestions: [],
+          attemptCount: 2, // maxRefinementAttempts = 2
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'reject');
+        assert.strictEqual(result.reason, '最大試行回数到達');
+      });
+
+      it('should accept when max attempts reached and quality is acceptable', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 65,
+          previousScore: 60,
+          issues: [],
+          suggestions: ['Minor improvements possible'],
+          attemptCount: 2,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '最大試行回数到達');
+      });
+
+      it('should continue replan when stagnated and quality is not acceptable (改善版)', () => {
+        // このテストは以前の問題を改善した挙動を確認:
+        // 1回目: 78点で品質OK、suggestionsありでreplan
+        // 2回目: 75点に下がり(3点下落)、停滞判定、品質NG
+        // → 以前はrejectだったが、試行回数が残っているのでreplan継続
+
+        const result = makeRefinementDecision({
+          isAcceptable: false, // 2回目で閾値を下回った
+          score: 75,
+          previousScore: 78,
+          issues: ['Some issues remain'],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 改善が-3点 < deltaThreshold(5)なので停滞判定
+        // isAcceptable=falseだが、試行回数が残っているのでreplan継続
+        assert.strictEqual(result.decision, 'replan');
+        assert.strictEqual(result.reason, '改善停滞（継続）');
+        assert.strictEqual(result.currentScore, 75);
+        assert.strictEqual(result.previousScore, 78);
+        assert(result.feedback); // feedbackが設定される
+      });
+
+      it('should reject when max attempts reached even if stagnated', () => {
+        // 最大試行回数到達時は停滞判定より先に処理される
+        const result = makeRefinementDecision({
+          isAcceptable: false,
+          score: 75,
+          previousScore: 78,
+          issues: ['Still not acceptable'],
+          suggestions: [],
+          attemptCount: 2, // maxRefinementAttempts = 2
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 最大試行回数到達 + 品質NG → reject
+        assert.strictEqual(result.decision, 'reject');
+        assert.strictEqual(result.reason, '最大試行回数到達');
+      });
+
+      it('should accept when stagnated but quality is acceptable', () => {
+        // 停滞しても品質OKならaccept
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 80,
+          previousScore: 78,
+          issues: [],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 改善が2点 < deltaThreshold(5)なので停滞判定
+        // しかしisAcceptable=trueなのでaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '改善停滞');
+      });
+
+      it('should reject when score is undefined and quality is not acceptable', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: false,
+          score: undefined,
+          previousScore: 78,
+          issues: ['Parse error in quality check'],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'reject');
+        assert.strictEqual(result.reason, 'スコア取得失敗');
+      });
+
+      it('should accept when score is undefined but quality is acceptable', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: undefined,
+          previousScore: 78,
+          issues: [],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, 'スコア取得失敗');
+      });
+
+      it('should replan with suggestions when enabled and quality is OK', () => {
+        const configWithSuggestions: RefinementConfig = {
+          ...defaultConfig,
+          refineSuggestionsOnSuccess: true,
+          maxSuggestionReplans: 2,
+        };
+
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 78,
+          previousScore: undefined,
+          issues: [],
+          suggestions: ['Add edge case handling'],
+          attemptCount: 0,
+          suggestionReplanCount: 0,
+          config: configWithSuggestions,
+        });
+
+        assert.strictEqual(result.decision, 'replan');
+        assert.strictEqual(result.reason, 'suggestions適用');
+      });
+
+      it('should accept when suggestions limit reached', () => {
+        const configWithSuggestions: RefinementConfig = {
+          ...defaultConfig,
+          refineSuggestionsOnSuccess: true,
+          maxSuggestionReplans: 1,
+        };
+
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 90,
+          previousScore: 78, // 12点改善 >= deltaThreshold(5) で停滞しない
+          issues: [],
+          suggestions: ['More suggestions'],
+          attemptCount: 1,
+          suggestionReplanCount: 1, // 既に1回使用済み
+          config: configWithSuggestions,
+        });
+
+        // suggestionsあるがmaxSuggestionReplans到達なのでaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '品質OK');
+      });
+
+      it('should detect stagnation with relative threshold (percent)', () => {
+        // 相対閾値（5%）で停滞判定するケース
+        // 前回90点 → 今回95点 = 5点改善 (絶対値は閾値以上)
+        // しかし 5/90 = 5.5% なので相対閾値も超える
+        // → 停滞しない
+
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 95,
+          previousScore: 90,
+          issues: [],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 5点改善 >= deltaThreshold(5) かつ 5.5% >= deltaThresholdPercent(5)
+        // なので停滞しない → 品質OKでaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '品質OK');
+      });
+
+      it('should detect stagnation when relative improvement is too small', () => {
+        // 絶対値は閾値以上だが相対値が閾値未満のケース
+        // 前回30点 → 今回35点 = 5点改善 (絶対値は閾値ちょうど)
+        // しかし 5/30 = 16.7% なので相対閾値は超える
+        // → 停滞しない
+
+        // 逆パターン: 前回95点 → 今回99点 = 4点改善
+        // 4/95 = 4.2% < 5% なので停滞
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 99,
+          previousScore: 95,
+          issues: [],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 4点改善 < deltaThreshold(5) なので停滞判定（OR条件）
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '改善停滞');
+      });
+
+      it('should continue replan when improvement is sufficient', () => {
+        const result = makeRefinementDecision({
+          isAcceptable: false,
+          score: 65,
+          previousScore: 50,
+          issues: ['Still needs work'],
+          suggestions: [],
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 15点改善 >= deltaThreshold(5) かつ 30% >= deltaThresholdPercent(5)
+        // なので停滞しない → 品質未達でreplan
+        assert.strictEqual(result.decision, 'replan');
+        assert.strictEqual(result.reason, '品質未達');
       });
     });
   });

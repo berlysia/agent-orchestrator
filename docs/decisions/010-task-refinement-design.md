@@ -55,10 +55,12 @@ Plan → QualityJudge → makeRefinementDecision()
 
 1. 最大試行回数到達 → accept（品質OK時）/ reject（品質NG時）
 2. スコア取得失敗 → accept（品質OK時）/ reject（品質NG時）
-3. 改善停滞検知 → accept（品質OK時）/ reject（品質NG時）
+3. 改善停滞検知 → accept（品質OK時）/ replan継続（品質NG時、試行回数残りあり）
 4. 品質未達 → replan
 5. 品質OK + suggestions + 設定有効 + 上限未達 → replan
 6. 品質OK → accept
+
+**NOTE**: 優先順位3で停滞+品質NGでもreplan継続とするのは、停滞しても試行回数が残っていれば諦めずに改善を試みるため。最大試行回数に達した場合は優先順位1で処理される。
 
 ### 構造検証
 

@@ -636,6 +636,18 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
             qualityJudge,
             config: deps.refinementConfig,
             deps,
+            onEvaluate: async (result) => {
+              await appendPlanningLog(`\n=== Refinement Evaluation ${result.attemptNumber} ===\n`);
+              await appendPlanningLog(`Quality acceptable: ${result.isAcceptable ? 'YES' : 'NO'}\n`);
+              await appendPlanningLog(`Score: ${result.score ?? 'N/A'}/100`);
+              if (result.previousScore !== undefined) {
+                const diff = result.score !== undefined ? result.score - result.previousScore : 0;
+                const sign = diff >= 0 ? '+' : '';
+                await appendPlanningLog(` (previous: ${result.previousScore}, change: ${sign}${diff})`);
+              }
+              await appendPlanningLog('\n');
+              await appendPlanningLog(`Decision: ${result.decision.decision}, Reason: ${result.decision.reason}\n`);
+            },
           });
 
           // Handle refinement result
@@ -643,8 +655,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
             await appendPlanningLog(`\n❌ Refinement failed: ${refinementResult.err.reason}\n`);
             await appendPlanningLog(`Refinement history:\n`);
             for (const [idx, entry] of refinementResult.err.refinementHistory.entries()) {
+              const scoreInfo = entry.currentScore !== undefined ? `, Score: ${entry.currentScore}` : '';
+              const prevScoreInfo = entry.previousScore !== undefined ? ` (prev: ${entry.previousScore})` : '';
               await appendPlanningLog(
-                `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}\n`,
+                `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}${scoreInfo}${prevScoreInfo}\n`,
               );
             }
 
@@ -666,8 +680,10 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           await appendPlanningLog(`\n✅ Refinement succeeded\n`);
           await appendPlanningLog(`Refinement history:\n`);
           for (const [idx, entry] of refinementResult.val.refinementHistory.entries()) {
+            const scoreInfo = entry.currentScore !== undefined ? `, Score: ${entry.currentScore}` : '';
+            const prevScoreInfo = entry.previousScore !== undefined ? ` (prev: ${entry.previousScore})` : '';
             await appendPlanningLog(
-              `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}, Score: ${entry.currentScore ?? 'N/A'}\n`,
+              `  ${idx + 1}. Decision: ${entry.decision}, Reason: ${entry.reason}${scoreInfo}${prevScoreInfo}\n`,
             );
           }
 
@@ -2558,11 +2574,29 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位3: 改善停滞時、品質OKならaccept、NGならreject
+  // 優先順位3: 改善停滞時、品質OKならaccept、NGなら継続（試行回数残りあり）
+  // WHY: 停滞しても試行回数が残っていれば諦めずにreplanを継続する
+  //      最大試行回数に達した場合は優先順位1で処理されるため、
+  //      ここに到達した時点では必ず試行回数が残っている
   if (isStagnated(score, previousScore, config)) {
+    if (isAcceptable) {
+      return {
+        decision: 'accept',
+        reason: '改善停滞',
+        attemptCount,
+        suggestionReplanCount,
+        currentScore: score,
+        previousScore,
+      };
+    }
+    // 停滞 + 品質NG + 試行回数残り → replan継続
     return {
-      decision: isAcceptable ? 'accept' : 'reject',
-      reason: '改善停滞',
+      decision: 'replan',
+      reason: '改善停滞（継続）',
+      feedback: {
+        issues,
+        suggestions,
+      },
       attemptCount,
       suggestionReplanCount,
       currentScore: score,
@@ -3052,6 +3086,14 @@ export async function executeRefinementLoop(params: {
   qualityJudge: QualityJudge;
   config: RefinementConfig;
   deps: PlannerDeps;
+  /** 各評価結果をログ出力するコールバック（オプショナル） */
+  onEvaluate?: (result: {
+    attemptNumber: number;
+    isAcceptable: boolean;
+    score: number | undefined;
+    previousScore: number | undefined;
+    decision: RefinementResult;
+  }) => Promise<void>;
 }): Promise<
   Result<
     {
@@ -3061,7 +3103,7 @@ export async function executeRefinementLoop(params: {
     import('../../types/planner-session.ts').RefinementError
   >
 > {
-  const { initialTasks, qualityJudge, config, deps } = params;
+  const { initialTasks, qualityJudge, config, deps, onEvaluate } = params;
 
   let currentTasks = initialTasks;
   let attemptCount = 0;
@@ -3087,6 +3129,17 @@ export async function executeRefinementLoop(params: {
 
     // 履歴に追加
     refinementHistory.push(decision);
+
+    // ログ出力コールバックがあれば呼び出す
+    if (onEvaluate) {
+      await onEvaluate({
+        attemptNumber: attemptCount + 1,
+        isAcceptable: judgeResult.isAcceptable,
+        score: judgeResult.score,
+        previousScore,
+        decision,
+      });
+    }
 
     // 3. accept判定でOk(finalTasks)を返す
     if (decision.decision === 'accept') {
