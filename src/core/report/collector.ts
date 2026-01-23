@@ -7,8 +7,8 @@
 
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr } from 'option-t/plain_result';
-import type { TaskStoreError } from '../../types/errors.ts';
-import type { Task, TaskState } from '../../types/task.ts';
+import { ioError, type TaskStoreError } from '../../types/errors.ts';
+import type { Task } from '../../types/task.ts';
 import { TaskState as TaskStateEnum, BlockReason } from '../../types/task.ts';
 import type { PlannerSessionEffects } from '../orchestrator/planner-session-effects.ts';
 import type { TaskStore } from '../task-store/interface.ts';
@@ -19,7 +19,6 @@ import type {
   TaskStatistics,
   TaskSummary,
   ReportEvent,
-  ReportEventType,
 } from './types.ts';
 
 /**
@@ -52,10 +51,7 @@ export async function collectReportData(
   const sessions = sessionsResult.val;
 
   if (sessions.length === 0) {
-    return createErr({
-      type: 'NOT_FOUND',
-      message: `No sessions found for rootSessionId: ${rootSessionId}`,
-    });
+    return createErr(ioError('listSessionsByRootId', `No sessions found for rootSessionId: ${rootSessionId}`));
   }
 
   // 2. listTasks()で全タスクを取得し、rootSessionIdでフィルタリング
