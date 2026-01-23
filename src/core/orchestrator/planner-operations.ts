@@ -646,6 +646,18 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
                 await appendPlanningLog(` (previous: ${result.previousScore}, change: ${sign}${diff})`);
               }
               await appendPlanningLog('\n');
+              if (result.issues.length > 0) {
+                await appendPlanningLog(`Issues:\n`);
+                for (const issue of result.issues) {
+                  await appendPlanningLog(`  - ${issue}\n`);
+                }
+              }
+              if (result.suggestions.length > 0) {
+                await appendPlanningLog(`Suggestions:\n`);
+                for (const suggestion of result.suggestions) {
+                  await appendPlanningLog(`  - ${suggestion}\n`);
+                }
+              }
               await appendPlanningLog(`Decision: ${result.decision.decision}, Reason: ${result.decision.reason}\n`);
             },
           });
@@ -3092,6 +3104,8 @@ export async function executeRefinementLoop(params: {
     isAcceptable: boolean;
     score: number | undefined;
     previousScore: number | undefined;
+    issues: string[];
+    suggestions: string[];
     decision: RefinementResult;
   }) => Promise<void>;
 }): Promise<
@@ -3137,6 +3151,8 @@ export async function executeRefinementLoop(params: {
         isAcceptable: judgeResult.isAcceptable,
         score: judgeResult.score,
         previousScore,
+        issues: judgeResult.issues || [],
+        suggestions: judgeResult.suggestions || [],
         decision,
       });
     }
