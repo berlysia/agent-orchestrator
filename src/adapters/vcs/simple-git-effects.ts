@@ -116,7 +116,18 @@ export const createSimpleGitEffects = (): Omit<
   const commit: GitEffects['commit'] = async (path, message, options) => {
     const result = await tryCatchIntoResultAsync(async () => {
       const git = simpleGit(path);
-      const commitOptions = options?.noGpgSign ? { '--no-gpg-sign': null } : undefined;
+      // gpgSign オプションで署名の有無を明示的に制御
+      // WHY: git config の設定に依存せず、常に意図した動作を保証するため
+      //      - gpgSign: true → --gpg-sign（署名を強制）
+      //      - gpgSign: false → --no-gpg-sign（署名を無効化）
+      //      - gpgSign: undefined かつ noGpgSign: true → --no-gpg-sign（後方互換性）
+      //      - 両方 undefined → git config に任せる
+      let commitOptions: Record<string, null> | undefined;
+      if (options?.gpgSign === true) {
+        commitOptions = { '--gpg-sign': null };
+      } else if (options?.gpgSign === false || options?.noGpgSign) {
+        commitOptions = { '--no-gpg-sign': null };
+      }
       await git.commit(message, undefined, commitOptions);
     });
     return mapErrForResult(result, toGitError('commit'));

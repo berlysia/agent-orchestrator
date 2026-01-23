@@ -169,12 +169,13 @@ export interface GitEffects {
    * @param path リポジトリまたは Worktree のパス
    * @param message コミットメッセージ
    * @param options コミットオプション
-   * @param options.noGpgSign GPG署名を無効化
+   * @param options.noGpgSign GPG署名を無効化（優先度: 低）
+   * @param options.gpgSign GPG署名を有効化（優先度: 高、noGpgSignより優先される）
    */
   commit(
     path: RepoPath | WorktreePath,
     message: string,
-    options?: { noGpgSign?: boolean },
+    options?: { noGpgSign?: boolean; gpgSign?: boolean },
   ): Promise<Result<void, GitError>>;
 
   /**

@@ -231,7 +231,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
           const commitResult = await gitEffects.commit(
             repo,
             `Merge ${task.branch}: auto-resolved generated file conflicts`,
-            { noGpgSign: !deps.config.commit.integrationSignature },
+            { gpgSign: deps.config.commit.integrationSignature },
           );
 
           if (!commitResult.ok) {
@@ -579,7 +579,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
 
         // マージ成功: コミットを作成
         const commitMessage = `Merge task ${task.id}: ${task.acceptance}`;
-        const commitResult = await gitEffects.commit(repo, commitMessage, { noGpgSign: !deps.config.commit.integrationSignature });
+        const commitResult = await gitEffects.commit(repo, commitMessage, { gpgSign: deps.config.commit.integrationSignature });
 
         if (isErr(commitResult)) {
           return createErr(commitResult.err);
@@ -663,7 +663,7 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
 
           // コミットして続行
           const commitMessage = `Merge task ${task.id}: ${task.acceptance} (auto-resolved conflicts)`;
-          const commitResult = await gitEffects.commit(repo, commitMessage, { noGpgSign: !deps.config.commit.integrationSignature });
+          const commitResult = await gitEffects.commit(repo, commitMessage, { gpgSign: deps.config.commit.integrationSignature });
 
           if (!commitResult.ok) {
             // コミット失敗時はマージを中断

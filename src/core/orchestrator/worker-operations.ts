@@ -596,7 +596,7 @@ export const createWorkerOperations = (deps: WorkerDeps) => {
           const commitResult = await deps.gitEffects.commit(
             repoPath(worktreePath),
             'Resolve generated file conflicts (auto-resolved)',
-            { noGpgSign: !deps.config.commit.autoSignature },
+            { gpgSign: deps.config.commit.autoSignature },
           );
 
           if (!commitResult.ok) {
@@ -848,10 +848,10 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     const commitMessage = generateCommitMessage(task);
 
     // コミットオプション設定（署名制御）
-    const noGpgSign = !deps.config.commit.autoSignature;
+    const gpgSign = deps.config.commit.autoSignature;
 
     // コミット
-    const commitResult = await deps.gitEffects.commit(worktreePath, commitMessage, { noGpgSign });
+    const commitResult = await deps.gitEffects.commit(worktreePath, commitMessage, { gpgSign });
     if (isErr(commitResult)) {
       return createErr(commitResult.err);
     }
@@ -1234,7 +1234,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         const commitResult = await deps.gitEffects.commit(
           worktreePath,
           'Resolve merge conflicts from dependencies',
-          { noGpgSign: !deps.config.commit.autoSignature },
+          { gpgSign: deps.config.commit.autoSignature },
         );
 
         if (isErr(commitResult)) {
