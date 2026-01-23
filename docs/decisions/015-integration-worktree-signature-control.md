@@ -138,4 +138,5 @@ if (options?.gpgSign === true) {
 ## 関連ADR
 
 - [ADR-016: マージ失敗時のエラーリカバリ](016-merge-failure-error-recovery.md)
-- [ADR-017: 統合結果の可視化](017-integration-result-visibility.md)
+- [ADR-017: 統合結果のレポート可視化](017-integration-result-visibility.md)
+- [ADR-018: マージ失敗時の評価改善](018-merge-failure-evaluation-improvement.md)

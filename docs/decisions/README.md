@@ -7,6 +7,7 @@
 | **Implemented** | ✅ | 完全に実装済み |
 | **Partially Implemented** | 🔶 | 部分的に実装済み |
 | **Proposed** | ⏳ | 提案中、未実装 |
+| **Draft** | 📝 | 下書き、要再設計 |
 | **Superseded** | 🔄 | 他のADRに置き換え |
 | **Deprecated** | ❌ | 非推奨 |
 
@@ -24,13 +25,15 @@
 | [014](014-required-terms-preservation.md) | 要件カバレッジ検証 | 🔶 Partial | 2026-01-23 |
 | [015](015-integration-worktree-signature-control.md) | 統合worktree署名制御 | ✅ Implemented | 2026-01-23 |
 | [016](016-merge-failure-error-recovery.md) | マージ失敗時エラーリカバリ | ✅ Implemented | 2026-01-23 |
-| [017](017-integration-result-visibility.md) | 統合結果の可視化 | ⏳ Proposed | 2026-01-23 |
+| [017](017-integration-result-visibility.md) | 統合結果のレポート可視化 | ⏳ Proposed | 2026-01-23 |
+| [018](018-merge-failure-evaluation-improvement.md) | マージ失敗時の評価改善 | 📝 Draft | 2026-01-23 |
 
 ## サマリー
 
 - **Implemented**: 7件
 - **Partially Implemented**: 1件
 - **Proposed**: 4件
+- **Draft**: 1件
 
 ---
 

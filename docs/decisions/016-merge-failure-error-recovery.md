@@ -79,4 +79,5 @@ if (isErr(commitResult)) {
 ## 関連ADR
 
 - [ADR-015: 統合worktree内コミットの署名制御](015-integration-worktree-signature-control.md) - 根本原因の修正
-- [ADR-017: 統合結果の可視化](017-integration-result-visibility.md)
+- [ADR-017: 統合結果のレポート可視化](017-integration-result-visibility.md)
+- [ADR-018: マージ失敗時の評価改善](018-merge-failure-evaluation-improvement.md)
