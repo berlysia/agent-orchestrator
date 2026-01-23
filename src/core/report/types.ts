@@ -74,6 +74,26 @@ export interface ReportPeriod {
 }
 
 /**
+ * 統合情報
+ *
+ * ADR017で定義された統合プロセスに関する情報
+ */
+export interface IntegrationInfo {
+  /** 統合ブランチ名（オプショナル） */
+  integrationBranch?: string;
+  /** マージ済みタスク数 */
+  mergedCount: number;
+  /** コンフリクト発生タスク数 */
+  conflictCount: number;
+  /** コンフリクト解決タスクID（オプショナル） */
+  conflictResolutionTaskId?: string;
+  /** 完了スコア（オプショナル） */
+  completionScore?: number;
+  /** 未完了アスペクトリスト */
+  missingAspects: string[];
+}
+
+/**
  * レポートデータ
  *
  * セッション全体の実行結果を包含するデータ構造
@@ -89,6 +109,8 @@ export interface ReportData {
   taskSummaries: TaskSummary[];
   /** イベント情報配列 */
   events: ReportEvent[];
+  /** 統合情報（オプショナル） */
+  integration?: IntegrationInfo;
 }
 
 /**
