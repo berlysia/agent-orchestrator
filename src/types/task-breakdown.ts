@@ -25,8 +25,14 @@ export type TaskType = (typeof TaskTypeEnum)[keyof typeof TaskTypeEnum];
  * WHY: 厳格なバリデーションによりエージェント出力の品質を保証
  */
 export const TaskBreakdownSchema = z.object({
-  /** タスクID（Planner段階で割り当てる） */
-  id: z.string(),
+  /**
+   * タスクID（Planner段階で割り当てる）
+   *
+   * WHY: "task-N" 形式（N >= 1）を強制することで、セッションIDとの混同を防ぐ
+   * 例: "task-1", "task-2", "task-10" は有効
+   * 例: "task-0", "task-0d6ed7f4", "1", "task" は無効
+   */
+  id: z.string().regex(/^task-[1-9]\d*$/, 'Task ID must be in format "task-1", "task-2", etc. (starting from 1)'),
   /** タスクの説明 */
   description: z.string().min(1, 'description must not be empty'),
   /** ブランチ名 */
@@ -46,8 +52,14 @@ export const TaskBreakdownSchema = z.object({
   estimatedDuration: z.number().min(0.5).max(8),
   /** タスク実行に必要なコンテキスト情報（必須） */
   context: z.string().min(1, 'context must not be empty'),
-  /** 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスクのID） */
-  dependencies: z.array(z.string()).default([]),
+  /**
+   * 依存するタスクIDの配列（このタスクを実行する前に完了が必要なタスクのID）
+   *
+   * WHY: 依存関係も "task-N" 形式（N >= 1）を強制して一貫性を確保
+   */
+  dependencies: z
+    .array(z.string().regex(/^task-[1-9]\d*$/, 'Dependency ID must be in format "task-1", "task-2", etc. (starting from 1)'))
+    .default([]),
   /** タスクの30文字程度のサマリ（ログ出力用） */
   summary: z.string().max(50).optional(),
 });

@@ -2212,6 +2212,21 @@ export const parseAgentOutputWithErrors = (output: string): ParseResult => {
       }
     });
 
+    // タスクIDの重複チェック
+    // WHY: 同じIDを持つ複数のタスクが生成された場合、タスク作成時にエラーになるため事前検出
+    if (tasks.length > 0) {
+      const taskIdCounts = new Map<string, number>();
+      for (const task of tasks) {
+        taskIdCounts.set(task.id, (taskIdCounts.get(task.id) ?? 0) + 1);
+      }
+      const duplicateIds = [...taskIdCounts.entries()]
+        .filter(([, count]) => count > 1)
+        .map(([id, count]) => `${id} (${count} occurrences)`);
+      if (duplicateIds.length > 0) {
+        errors.push(`Duplicate task IDs found: ${duplicateIds.join(', ')}`);
+      }
+    }
+
     // 依存関係の検証（タスクが1つ以上ある場合のみ）
     if (tasks.length > 0) {
       const depErrors = validateTaskDependencies(tasks);
@@ -2509,8 +2524,31 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位2: スコア取得失敗時、品質OKならaccept、NGならreject
+  // 優先順位2: スコア取得失敗時の判定
+  // WHY: スコア取得失敗でも、CRITICALな問題が報告されている場合はacceptしない
+  //      これにより、タスクID重複などの致命的な問題を持つプランがacceptされることを防ぐ
   if (score === undefined) {
+    const hasCriticalIssues = issues.some((issue) => {
+      const lower = issue.toLowerCase();
+      return (
+        lower.includes('critical') ||
+        lower.includes('duplicate task id') ||
+        lower.includes('circular dependenc') // "circular dependencies" や "circular dependency" をカバー
+      );
+    });
+    if (hasCriticalIssues) {
+      return {
+        decision: 'reject',
+        reason: 'スコア取得失敗（CRITICALな問題あり）',
+        feedback: {
+          issues,
+          suggestions,
+        },
+        attemptCount,
+        suggestionReplanCount,
+        previousScore,
+      };
+    }
     return {
       decision: isAcceptable ? 'accept' : 'reject',
       reason: 'スコア取得失敗',
