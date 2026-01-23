@@ -20,6 +20,7 @@ import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
 import { extractSessionShort } from './task-helpers.ts';
 import { TaskBreakdownSchema, type TaskBreakdown } from '../../types/task-breakdown.ts';
+import { isRateLimited } from './utils/rate-limit-utils.ts';
 
 /**
  * Levenshtein距離を計算
@@ -268,6 +269,32 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
         : await deps.runnerEffects.runCodexAgent(qualityPrompt, deps.appRepoPath, judgeModelToUse);
 
     if (isErr(runResult)) {
+      // planQualityJudgeAgentTypeが明示的に指定されていて、Rate Limitエラーの場合、
+      // デフォルトのagentTypeとjudgeModelにフォールバック
+      if (deps.planQualityJudgeAgentType && isRateLimited(runResult.err.cause)) {
+        console.warn(
+          `⚠️  Quality judge rate limited (${deps.planQualityJudgeAgentType}/${judgeModelToUse}), ` +
+            `falling back to default (${deps.agentType}/${deps.judgeModel})...`,
+        );
+
+        const fallbackResult =
+          deps.agentType === 'claude'
+            ? await deps.runnerEffects.runClaudeAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel)
+            : await deps.runnerEffects.runCodexAgent(qualityPrompt, deps.appRepoPath, deps.judgeModel);
+
+        if (isErr(fallbackResult)) {
+          console.warn(`⚠️  Fallback quality judge also failed: ${fallbackResult.err.message}, accepting by default`);
+          return {
+            isAcceptable: true,
+            issues: [],
+            suggestions: [],
+          };
+        }
+
+        const fallbackJudgement = parseQualityJudgement(fallbackResult.val.finalResponse || '');
+        return fallbackJudgement;
+      }
+
       console.warn(`⚠️  Quality judge failed: ${runResult.err.message}, accepting by default`);
       return {
         isAcceptable: true,

@@ -11,6 +11,7 @@ import type { Result } from 'option-t/plain_result';
 import { createOk, createErr } from 'option-t/plain_result';
 import { z } from 'zod';
 import { truncateLogForJudge } from './utils/log-utils.ts';
+import { isRateLimited, getRetryAfterSeconds } from './utils/rate-limit-utils.ts';
 
 /**
  * 指定された秒数だけ待機するPromise
@@ -30,62 +31,6 @@ const sleep = (seconds: number): Promise<void> => {
 const formatWaitUntilTime = (seconds: number): string => {
   const waitUntil = new Date(Date.now() + seconds * 1000);
   return waitUntil.toISOString();
-};
-
-const getErrorCause = (err: unknown): unknown => {
-  if (err && typeof err === 'object' && 'cause' in err) {
-    const cause = (err as { cause?: unknown }).cause;
-    return cause ?? err;
-  }
-  return err;
-};
-
-/**
- * Rate Limit エラーかどうかを判定
- */
-const isRateLimited = (err: unknown): boolean => {
-  const target = getErrorCause(err);
-
-  // RateLimitError インスタンスチェック（最優先）
-  if (target && typeof target === 'object' && target.constructor?.name === 'RateLimitError') {
-    return true;
-  }
-
-  const status =
-    (target as any)?.status ??
-    (target as any)?.statusCode ??
-    (target as any)?.response?.status ??
-    (target as any)?.response?.statusCode;
-  if (status === 429) {
-    return true;
-  }
-
-  if ((target as any)?.error?.type === 'rate_limit_error') {
-    return true;
-  }
-  if ((target as any)?.type === 'rate_limit_error') {
-    return true;
-  }
-
-  return false;
-};
-
-/**
- * retry-after ヘッダから待機秒数を取得
- */
-const getRetryAfterSeconds = (err: unknown): number | undefined => {
-  const target = getErrorCause(err) as any;
-  const h = target?.headers ?? target?.response?.headers;
-  const v =
-    typeof h?.get === 'function'
-      ? h.get('retry-after')
-      : typeof h === 'object' && h
-        ? (h['retry-after'] ?? h['Retry-After'])
-        : undefined;
-
-  if (v == null) return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
 };
 
 /**
