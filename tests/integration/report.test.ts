@@ -456,7 +456,6 @@ test('Integration: CLI E2E - report command', async (t) => {
 
     // Initialize stores
     const taskStore = createFileStore({ basePath: coordPath });
-    const sessionEffects = new PlannerSessionEffectsImpl(coordPath);
 
     // Create a test session
     const sessionId = 'cli-test-session';

@@ -26,4 +26,5 @@ export type {
   OrchestrateDeps,
   OrchestratorError,
   OrchestrationResult,
+  ContinueResult,
 } from './orchestrate.ts';

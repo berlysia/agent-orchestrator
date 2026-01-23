@@ -5,7 +5,6 @@ import path from 'path';
 import { listSessionsByRootId } from '../../../../src/core/session/queries.ts';
 import { PlannerSessionEffectsImpl } from '../../../../src/core/orchestrator/planner-session-effects-impl.ts';
 import { createPlannerSession, SessionStatus } from '../../../../src/types/planner-session.ts';
-import type { PlannerSession } from '../../../../src/types/planner-session.ts';
 
 const TEST_COORD_REPO = path.join(process.cwd(), '.tmp', 'test-session-queries');
 

@@ -47,6 +47,8 @@ export interface OrchestrateDeps {
  * WHY: index.ts の OrchestrationResult と同一だが、循環インポート回避のため再定義
  */
 export interface OrchestrationResult {
+  /** セッションID */
+  sessionId: string;
   /** 生成されたタスクID配列 */
   taskIds: string[];
   /** 完了したタスクID配列 */
@@ -65,6 +67,8 @@ export interface OrchestrationResult {
  * WHY: agent continue コマンドの実行結果を返すための型定義
  */
 export interface ContinueResult {
+  /** セッションID */
+  sessionId: string;
   /** 完了したかどうか */
   isComplete: boolean;
   /** 実行した反復回数 */
@@ -744,6 +748,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       return createOk({
+        sessionId,
         taskIds,
         completedTaskIds,
         failedTaskIds,
@@ -872,6 +877,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       return createOk({
+        sessionId,
         taskIds,
         completedTaskIds,
         failedTaskIds,
@@ -944,6 +950,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         if (session.finalJudgement?.isComplete) {
           console.log('✅ Session already complete');
           return createOk({
+            sessionId,
             isComplete: true,
             iterationsPerformed,
             completionScore: session.finalJudgement.completionScore,
@@ -1003,6 +1010,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           await deps.sessionEffects.saveSession(session);
 
           return createOk({
+            sessionId,
             isComplete: true,
             iterationsPerformed,
             completionScore: currentJudgement.completionScore,
@@ -1032,6 +1040,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         if (options.dryRun) {
           console.log('\n🔍 Dry-run mode: stopping before generating additional tasks');
           return createOk({
+            sessionId,
             isComplete: false,
             iterationsPerformed,
             completionScore: currentJudgement.completionScore,
@@ -1097,6 +1106,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           await deps.sessionEffects.saveSession(session);
 
           return createOk({
+            sessionId,
             isComplete: false,
             iterationsPerformed: currentIteration + 1,
             completionScore: currentJudgement.completionScore,
@@ -1170,6 +1180,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         const session = sessionResult.val;
 
         return createOk({
+          sessionId,
           isComplete: session.finalJudgement?.isComplete ?? false,
           iterationsPerformed,
           completionScore: session.finalJudgement?.completionScore,
@@ -1181,6 +1192,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       return createOk({
+        sessionId,
         isComplete: false,
         iterationsPerformed,
         remainingMissingAspects: [],

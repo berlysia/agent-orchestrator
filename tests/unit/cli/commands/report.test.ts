@@ -21,9 +21,11 @@ describe('report command', () => {
       const command = createReportCommand();
       const args = command.registeredArguments;
       assert.strictEqual(args.length, 1);
-      assert.strictEqual(args[0].name(), 'rootSessionId');
-      assert.strictEqual(args[0].required, false);
-      assert.strictEqual(args[0].description, 'Root session ID (default: most recent)');
+      const arg = args[0];
+      assert(arg, 'Expected argument to exist');
+      assert.strictEqual(arg.name(), 'rootSessionId');
+      assert.strictEqual(arg.required, false);
+      assert.strictEqual(arg.description, 'Root session ID (default: most recent)');
     });
 
     it('should have --stdout option', () => {
