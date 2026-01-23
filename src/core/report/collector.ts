@@ -19,6 +19,7 @@ import type {
   TaskStatistics,
   TaskSummary,
   ReportEvent,
+  IntegrationInfo,
 } from './types.ts';
 
 /**
@@ -42,6 +43,7 @@ export async function collectReportData(
   rootSessionId: string,
   sessionEffects: PlannerSessionEffects,
   taskStore: TaskStore,
+  integrationInfo?: IntegrationInfo,
 ): Promise<Result<ReportData, TaskStoreError>> {
   // 1. listSessionsByRootId()で全セッション取得
   const sessionsResult = await listSessionsByRootId(rootSessionId, sessionEffects);
@@ -82,6 +84,7 @@ export async function collectReportData(
     statistics,
     taskSummaries,
     events,
+    ...(integrationInfo && { integration: integrationInfo }),
   });
 }
 
