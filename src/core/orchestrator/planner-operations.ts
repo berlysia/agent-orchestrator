@@ -374,6 +374,11 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       await appendPlanningLog(`\n--- Attempt ${attempt}/${maxRetries} ---\n`);
 
+      // WHY: 2回目以降のイテレーションはプラン改善中であることをユーザーに通知
+      if (attempt > 1) {
+        console.log(`  🔄 [Planning] Refining plan (${attempt}/${maxRetries})...`);
+      }
+
       // 1. Plannerプロンプトを構築
       const maxTaskDuration = deps.maxTaskDuration ?? 4;
       const maxTasks = deps.maxTasks ?? 5;

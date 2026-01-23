@@ -504,8 +504,13 @@ export async function executeDynamically(
       schedulerState = removeRunningWorker(schedulerState, workerId(`worker-${String(taskId)}`));
 
       // 6. 結果を処理
+      // WHY: 進捗状況をユーザーに表示（完了数/全体数）
+      const totalTasks = tasks.length;
+      const processed = dynamicState.completedTasks.size + dynamicState.failedTasks.size + dynamicState.blockedTasks.size + 1;
+
       if (result.status === TaskExecutionStatus.COMPLETED) {
         dynamicState.completedTasks.add(taskId);
+        console.log(`  ✅ [${processed}/${totalTasks}] ${String(taskId)} completed`);
       } else if (result.status === TaskExecutionStatus.FAILED) {
         // タスクがBLOCKED状態でpendingConflictResolutionを持つ場合、
         // コンフリクト解消タスクをpendingTasksに追加
@@ -521,6 +526,7 @@ export async function executeDynamically(
         } else {
           // 通常の失敗
           dynamicState.failedTasks.add(taskId);
+          console.log(`  ❌ [${processed}/${totalTasks}] ${String(taskId)} failed`);
 
           // 失敗タスクの依存先をブロック
           const blockedTasks = computeBlockedTasks([taskId], graph);

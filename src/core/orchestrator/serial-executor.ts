@@ -224,13 +224,16 @@ export async function executeSerialChain(
         }
 
         const judgement = judgementResult.val;
+        // WHY: 直列チェーン内の進捗状況を表示（完了数/チェーン内タスク数）
+        const chainProgress = `[${i + 1}/${chain.length}]`;
+
         if (judgement.success) {
           if (judgement.alreadySatisfied) {
-            console.log(`  ⏭️  [${rawTaskId}] Task skipped (already satisfied): ${judgement.reason}`);
+            console.log(`  ⏭️  ${chainProgress} ${rawTaskId} skipped (already satisfied): ${judgement.reason}`);
             await judgeOps.markTaskAsSkipped(tid, judgement.reason);
             completed.push(tid);
           } else {
-            console.log(`  ✅ [${rawTaskId}] Task completed: ${judgement.reason}`);
+            console.log(`  ✅ ${chainProgress} ${rawTaskId} completed: ${judgement.reason}`);
             await judgeOps.markTaskAsCompleted(tid);
             completed.push(tid);
           }
@@ -326,7 +329,7 @@ export async function executeSerialChain(
           break; // チェーン実行を中断
         } else {
           // 完全失敗（shouldContinue=false && shouldReplan=false）
-          console.log(`  ❌ [${rawTaskId}] Task failed judgement: ${judgement.reason}`);
+          console.log(`  ❌ ${chainProgress} ${rawTaskId} failed: ${judgement.reason}`);
           await judgeOps.markTaskAsBlocked(tid);
           failed.push(tid);
           break; // チェーン実行を中断
