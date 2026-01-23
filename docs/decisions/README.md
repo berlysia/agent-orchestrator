@@ -28,12 +28,13 @@
 | [016](016-merge-failure-error-recovery.md) | マージ失敗時エラーリカバリ | ✅ Implemented | 2026-01-23 |
 | [017](017-integration-result-visibility.md) | 統合結果のレポート可視化 | ✅ Implemented | 2026-01-23 |
 | [018](018-merge-failure-evaluation-improvement.md) | マージ失敗時の評価改善 | 📝 Draft | 2026-01-23 |
+| [019](019-branch-cleanup-feature.md) | ブランチクリーンアップ機能 | 📝 Proposed | 2026-01-23 |
 
 ## サマリー
 
 - **Implemented**: 8件
 - **Partially Implemented**: 1件
-- **Proposed**: 1件
+- **Proposed**: 2件
 - **Rejected**: 1件
 - **Draft**: 1件
 
