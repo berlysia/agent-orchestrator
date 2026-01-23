@@ -1,5 +1,11 @@
 # Task Refinement 機能の設計
 
+## ステータス
+
+**Implemented** ✅
+
+RefinementConfig、makeRefinementDecision等が実装済み。
+
 ## 選定日時
 
 2026-01-23

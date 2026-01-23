@@ -1,5 +1,13 @@
 # 要件カバレッジ検証
 
+## ステータス
+
+**Partially Implemented** 🔶
+
+- 通常計画・refinement時のCoverage評価: ✅ 実装済み
+- 再計画時の元指示追加: ⏳ 未実装（High優先度）
+- fail-closedオプション: ⏳ 未実装（Medium優先度）
+
 ## 選定日時
 
 2026-01-23
@@ -142,10 +150,6 @@ export const buildReplanningPrompt = (
 | High | 再計画時の元指示追加 | `buildReplanningPrompt()` にユーザー指示を渡す |
 | Medium | fail-closed オプション | 評価失敗時に安全側倒れで拒否する設定 |
 | Low | issues フォーマット統一 | `[Coverage] 要件欠落: ...` 形式で検出しやすく |
-
-## ステータス
-
-**部分的に対応済み（追加改善推奨）**
 
 ---
 

@@ -1,5 +1,11 @@
 # スコア差分ノイズ耐性
 
+## ステータス
+
+**Proposed** ⏳
+
+noiseThreshold、ScoreDirection等は未実装。詳細な実装チェックリストあり。
+
 ## 選定日時
 
 2026-01-23
@@ -754,10 +760,6 @@ const defaultConfig: RefinementConfig = {
 ```
 
 `tests/unit/core/orchestrator/validate-structure.test.ts` の `defaultConfig` にも追加。
-
-## ステータス
-
-**実装準備完了**
 
 ---
 

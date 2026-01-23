@@ -1,5 +1,13 @@
 # Judge再評価戦略の導入
 
+## ステータス
+
+**Implemented** ✅
+
+- Phase 2-1: 型・データ構造の拡張 ✅
+- Phase 2-2: Planner再評価機能 ✅
+- Phase 2-3: Executor統合 ✅
+
 ## 選定日時
 
 2026-01-21
@@ -201,13 +209,3 @@ if (newIteration >= maxReplanIterations) {
 ## 実装完了日
 
 2026-01-21
-
-## ステータス
-
-**実装完了**（Phase 2-3まで完了）
-
-- ✅ Phase 2-1: 型・データ構造の拡張
-- ✅ Phase 2-2: Planner再評価機能
-- ✅ Phase 2-3: Executor統合
-- ✅ ビルド・型チェック成功
-- ✅ 単体テスト作成

@@ -1,7 +1,15 @@
 # ADR 008: Implement Visibility and Agent Integration Improvements
 
+## ステータス
+
+**Implemented** ✅
+
+- Phase 1: Worker実行ログの保存 ✅
+- Phase 2: Plannerのエージェント統合 ✅
+- Phase 3: CLI出力の改善 ✅
+- Phase 4: Judge判定の強化 ✅
+
 **Date**: 2026-01-19
-**Status**: Accepted
 **Context**: Issue with execution visibility and agent integration
 
 ## Context

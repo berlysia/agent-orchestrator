@@ -1,5 +1,11 @@
 # 統合worktree内コミットの署名制御
 
+## ステータス
+
+**Proposed** ⏳
+
+integration-operations.ts内の5箇所で `integrationSignature` → `autoSignature` への修正が未実施。
+
 ## 選定日時
 
 2026-01-23
@@ -130,10 +136,6 @@ if (options?.gpgSign === true) {
   commitOptions = { '--no-gpg-sign': null };
 }
 ```
-
-## ステータス
-
-**実装予定**
 
 ## 関連ADR
 

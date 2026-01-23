@@ -2,7 +2,11 @@
 
 ## ステータス
 
-提案中
+**Implemented** ✅
+
+- ReportGenerator クラス実装済み
+- `agent report` コマンド実装済み
+- CLI完了時の自動生成フック実装済み
 
 ## コンテキスト
 

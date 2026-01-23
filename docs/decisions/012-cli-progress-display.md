@@ -1,12 +1,14 @@
 # CLI進捗表示機能の設計
 
+## ステータス
+
+**Proposed** ⏳
+
+ProgressEmitter、TTYRendererは未実装。
+
 ## 決定日時
 
 2026-01-23
-
-## ステータス
-
-**Proposed** (実装待ち)
 
 ## 背景
 
