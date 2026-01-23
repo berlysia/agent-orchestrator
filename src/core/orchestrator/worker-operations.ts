@@ -48,8 +48,10 @@ export interface WorkerDeps {
  * Worker実行結果
  */
 export interface WorkerResult {
-  /** 実行ID */
+  /** 実行ID（タスク本体の実装） */
   readonly runId: string;
+  /** チェック修正の実行ID履歴（修正があった場合のみ） */
+  readonly checkFixRunIds?: readonly string[];
   /** 成功したか */
   readonly success: boolean;
   /** エラーメッセージ（失敗時） */
@@ -172,6 +174,178 @@ const runCommand = (
       resolve(createErr(err));
     });
   });
+};
+
+/**
+ * チェックコマンド実行結果
+ */
+export interface CheckResult {
+  /** 全コマンドが成功したか */
+  success: boolean;
+  /** 失敗したコマンドとその出力 */
+  failures: Array<{
+    command: string;
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }>;
+}
+
+/**
+ * チェックコマンドを実行
+ *
+ * WHY: タスク完了後にテストや型チェックを実行し、品質を担保する
+ *
+ * @param worktreePath 作業ディレクトリ
+ * @param commands 実行するコマンド配列
+ * @returns チェック結果
+ */
+const runChecksCommands = async (
+  worktreePath: string,
+  commands: string[],
+): Promise<CheckResult> => {
+  const failures: CheckResult['failures'] = [];
+
+  for (const command of commands) {
+    console.log(`  🔍 Running check: ${command}`);
+
+    try {
+      const result = await new Promise<{ code: number; stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          const [cmd, ...args] = command.split(/\s+/);
+          if (!cmd) {
+            reject(new Error(`Invalid command: ${command}`));
+            return;
+          }
+
+          const proc = spawn(cmd, args, {
+            cwd: worktreePath,
+            shell: true,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+          let stdout = '';
+          let stderr = '';
+
+          proc.stdout?.on('data', (data) => {
+            stdout += data.toString();
+          });
+
+          proc.stderr?.on('data', (data) => {
+            stderr += data.toString();
+          });
+
+          proc.on('close', (code) => {
+            resolve({ code: code ?? 0, stdout, stderr });
+          });
+
+          proc.on('error', (err) => {
+            reject(err);
+          });
+        },
+      );
+
+      if (result.code !== 0) {
+        console.log(`  ❌ Check failed: ${command} (exit code ${result.code})`);
+        failures.push({
+          command,
+          exitCode: result.code,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        });
+      } else {
+        console.log(`  ✅ Check passed: ${command}`);
+      }
+    } catch (error) {
+      console.log(`  ❌ Check error: ${command}`);
+      failures.push({
+        command,
+        exitCode: -1,
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    success: failures.length === 0,
+    failures,
+  };
+};
+
+/**
+ * チェック失敗時の修正プロンプトを構築
+ *
+ * WHY: Workerにエラー内容と元タスク要件を明確に伝え、適切な修正を促す
+ */
+const buildCheckFixPrompt = (
+  task: Task,
+  checkResult: CheckResult,
+  retryCount: number,
+  maxRetries: number,
+): string => {
+  const lines: string[] = [
+    `# ⚠️  Check Failed - Fix Required (Attempt ${retryCount}/${maxRetries})`,
+    '',
+    'The following checks failed after your implementation. Please fix the issues.',
+    '',
+  ];
+
+  for (const failure of checkResult.failures) {
+    lines.push(`## Failed: \`${failure.command}\` (exit code: ${failure.exitCode})`);
+    lines.push('');
+
+    if (failure.stderr) {
+      lines.push('### stderr:');
+      lines.push('```');
+      lines.push(failure.stderr.slice(0, 3000));
+      if (failure.stderr.length > 3000) {
+        lines.push('... (truncated)');
+      }
+      lines.push('```');
+      lines.push('');
+    }
+
+    if (failure.stdout) {
+      lines.push('### stdout:');
+      lines.push('```');
+      lines.push(failure.stdout.slice(0, 3000));
+      if (failure.stdout.length > 3000) {
+        lines.push('... (truncated)');
+      }
+      lines.push('```');
+      lines.push('');
+    }
+  }
+
+  // 元タスク要件を含める
+  lines.push('## Original Task Requirements');
+  lines.push('');
+  lines.push(`**Task:** ${task.acceptance}`);
+  lines.push('');
+
+  if (task.context) {
+    lines.push('**Implementation Details:**');
+    lines.push(task.context);
+    lines.push('');
+  }
+
+  if (task.scopePaths.length > 0) {
+    lines.push('**Files to modify:**');
+    for (const p of task.scopePaths) {
+      lines.push(`- ${p}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('## Instructions');
+  lines.push('');
+  lines.push('1. Analyze the error messages above');
+  lines.push('2. Fix the type errors, test failures, or lint issues');
+  lines.push('3. Ensure your fixes maintain the original task requirements above');
+  lines.push('4. DO NOT commit - the orchestrator will commit after successful checks');
+
+  return lines.join('\n');
 };
 
 export const shouldSkipAutoResolution = (
@@ -1290,7 +1464,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         return createErr(runResult.err);
       }
 
-      const workerResult = runResult.val;
+      let workerResult = runResult.val;
 
       if (!workerResult.success) {
         // エージェント実行失敗時はWorkerResultをそのまま返す
@@ -1303,7 +1477,163 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         return createErr(commitResult.err);
       }
 
-      return createOk(workerResult);
+      // 5. チェックコマンドを実行（設定がある場合）
+      const checksConfig = deps.config.checks;
+      const checkFixRunIds: string[] = [];
+
+      if (checksConfig.enabled && checksConfig.commands.length > 0) {
+        console.log(`  🔍 Running ${checksConfig.commands.length} check command(s)...`);
+
+        let checkResult = await runChecksCommands(worktreePath, checksConfig.commands);
+        let retryCount = 0;
+
+        // チェック失敗時の処理
+        while (!checkResult.success) {
+          if (checksConfig.failureMode === 'warn') {
+            // 警告のみで続行
+            console.log(`  ⚠️  Checks failed but continuing (failureMode: warn)`);
+            break;
+          }
+
+          if (checksConfig.failureMode === 'block') {
+            // オーケストレーション停止
+            const errorMsg = checkResult.failures
+              .map((f) => `${f.command}: exit ${f.exitCode}`)
+              .join(', ');
+            return createErr({
+              type: 'ValidationError',
+              message: `Checks failed: ${errorMsg}`,
+              details: checkResult.failures.map((f) => f.stderr).join('\n'),
+            });
+          }
+
+          // failureMode === 'retry'
+          retryCount++;
+          if (retryCount > checksConfig.maxRetries) {
+            console.log(`  ❌ Max retries (${checksConfig.maxRetries}) exceeded for check fixes`);
+            return createErr({
+              type: 'ValidationError',
+              message: `Checks failed after ${checksConfig.maxRetries} retry attempts`,
+              details: checkResult.failures.map((f) => `${f.command}: ${f.stderr}`).join('\n'),
+            });
+          }
+
+          console.log(`  🔄 Retry ${retryCount}/${checksConfig.maxRetries}: Asking Worker to fix issues...`);
+
+          // Workerに修正を依頼（元タスク要件を含む）
+          const fixPrompt = buildCheckFixPrompt(task, checkResult, retryCount, checksConfig.maxRetries);
+
+          // 修正用のRunIDを生成
+          const fixRunId = runId(`check-fix-${task.id}-${Date.now()}`);
+          checkFixRunIds.push(fixRunId);
+
+          const fixRun = createInitialRun({
+            id: fixRunId,
+            taskId: task.id,
+            agentType: deps.agentType,
+            logPath: path.join(deps.agentCoordPath, 'runs', `${fixRunId}.log`),
+            // WHY: セッションフィルターに合致させるため、タスクと同じsessionIdを設定
+            sessionId: task.sessionId ?? null,
+            plannerLogPath: task.plannerLogPath ?? null,
+            plannerMetadataPath: task.plannerMetadataPath ?? null,
+          });
+
+          const saveMetaResult = await deps.runnerEffects.saveRunMetadata(fixRun);
+          if (isErr(saveMetaResult)) {
+            return createErr(saveMetaResult.err);
+          }
+
+          const initLogResult = await deps.runnerEffects.initializeLogFile(fixRun);
+          if (isErr(initLogResult)) {
+            return createErr(initLogResult.err);
+          }
+
+          console.log(`  📝 Fix attempt log: ${getRunDisplayPath(fixRunId, 'log')}`);
+
+          // エージェントに修正を依頼
+          const fixResult =
+            deps.agentType === 'claude'
+              ? await deps.runnerEffects.runClaudeAgent(fixPrompt, worktreePath as string, deps.model!, fixRunId)
+              : await deps.runnerEffects.runCodexAgent(fixPrompt, worktreePath as string, deps.model, fixRunId);
+
+          if (isErr(fixResult)) {
+            console.log(`  ❌ Fix attempt failed: ${fixResult.err.message}`);
+            // メタデータ更新（失敗）
+            const failedRun = {
+              ...fixRun,
+              status: RunStatus.FAILURE,
+              finishedAt: new Date().toISOString(),
+              errorMessage: fixResult.err.message,
+            };
+            await deps.runnerEffects.saveRunMetadata(failedRun);
+
+            // WHY: 修正エージェントが失敗しても部分的な変更がある可能性がある
+            //      変更をコミットしてからチェックを再実行し、状態を正確に把握する
+            const partialStageResult = await deps.gitEffects.stageAll(worktreePath);
+            if (partialStageResult.ok) {
+              const statusResult = await deps.gitEffects.getStatus(worktreePath);
+              if (statusResult.ok && statusResult.val.staged.length > 0) {
+                console.log(`  ℹ️  Committing partial changes before retry...`);
+                await deps.gitEffects.commit(
+                  worktreePath,
+                  `fix: partial changes from failed fix attempt ${retryCount}`,
+                  { gpgSign: deps.config.commit.autoSignature },
+                );
+              }
+            }
+
+            // チェックを再実行して現在の状態を確認
+            console.log(`  🔍 Re-running checks to assess current state...`);
+            checkResult = await runChecksCommands(worktreePath, checksConfig.commands);
+            continue; // 次のリトライへ
+          }
+
+          // メタデータ更新（成功）
+          const completedRun = {
+            ...fixRun,
+            status: RunStatus.SUCCESS,
+            finishedAt: new Date().toISOString(),
+          };
+          await deps.runnerEffects.saveRunMetadata(completedRun);
+
+          // WHY: 修正コミット時はscopePathsに縛られず全変更をコミット
+          //      チェック修正では型エラー修正等でscopePaths外のファイルも変更される可能性がある
+          const stageAllResult = await deps.gitEffects.stageAll(worktreePath);
+          if (isErr(stageAllResult)) {
+            console.log(`  ⚠️  Stage after fix failed: ${stageAllResult.err.message}`);
+          } else {
+            const statusResult = await deps.gitEffects.getStatus(worktreePath);
+            if (statusResult.ok && statusResult.val.staged.length > 0) {
+              const fixCommitResult = await deps.gitEffects.commit(
+                worktreePath,
+                `fix: address check failures (attempt ${retryCount})`,
+                { gpgSign: deps.config.commit.autoSignature },
+              );
+              if (isErr(fixCommitResult)) {
+                console.log(`  ⚠️  Commit after fix failed: ${fixCommitResult.err.message}`);
+              }
+            } else {
+              console.log(`  ℹ️  No changes to commit after fix`);
+            }
+          }
+
+          // 再度チェックを実行
+          console.log(`  🔍 Re-running checks after fix...`);
+          checkResult = await runChecksCommands(worktreePath, checksConfig.commands);
+        }
+
+        if (checkResult.success) {
+          console.log(`  ✅ All checks passed`);
+        }
+      }
+
+      // WHY: runIdは最初のタスク実装を維持し、チェック修正履歴は別フィールドで返す
+      //      Judgeはタスク本体のログを見て判定し、修正履歴は監査・レポート用
+      return createOk({
+        runId: workerResult.runId,
+        checkFixRunIds: checkFixRunIds.length > 0 ? checkFixRunIds : undefined,
+        success: workerResult.success,
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return createOk({

@@ -289,7 +289,7 @@ test('E2E: Integration Evaluation', async (t) => {
         worker: { type: 'claude', model: 'claude-sonnet-4-5' },
         judge: { type: 'claude', model: 'claude-haiku-4-5' },
       },
-      checks: { enabled: false, failureMode: 'warn' },
+      checks: { enabled: false, failureMode: 'warn', commands: [], maxRetries: 3 },
       commit: { autoSignature: false, integrationSignature: false },
       integration: {
         method: 'auto',
@@ -365,7 +365,7 @@ test('E2E: Integration Evaluation', async (t) => {
         worker: { type: 'claude', model: 'claude-sonnet-4-5' },
         judge: { type: 'claude', model: 'claude-haiku-4-5' },
       },
-      checks: { enabled: false, failureMode: 'warn' },
+      checks: { enabled: false, failureMode: 'warn', commands: [], maxRetries: 3 },
       commit: { autoSignature: false, integrationSignature: false },
       integration: {
         method: 'auto',
@@ -429,7 +429,7 @@ test('E2E: Integration Evaluation', async (t) => {
         worker: { type: 'claude', model: 'claude-sonnet-4-5' },
         judge: { type: 'claude', model: 'claude-haiku-4-5' },
       },
-      checks: { enabled: false, failureMode: 'warn' },
+      checks: { enabled: false, failureMode: 'warn', commands: [], maxRetries: 3 },
       commit: { autoSignature: false, integrationSignature: false },
       integration: {
         method: 'auto',
@@ -493,7 +493,7 @@ test('E2E: Integration Evaluation', async (t) => {
         worker: { type: 'claude', model: 'claude-sonnet-4-5' },
         judge: { type: 'claude', model: 'claude-haiku-4-5' },
       },
-      checks: { enabled: false, failureMode: 'warn' },
+      checks: { enabled: false, failureMode: 'warn', commands: [], maxRetries: 3 },
       commit: { autoSignature: false, integrationSignature: false },
       integration: {
         method: 'auto',

@@ -41,15 +41,35 @@ const AgentConfigSchema = z.discriminatedUnion('type', [
 
 /**
  * チェック設定のスキーマ
+ *
+ * WHY: タスク完了後に型チェックやテストを実行し、失敗時は自動修正を試みることで
+ *      コード品質を担保しつつ人手による介入を最小化する
  */
 const ChecksConfigSchema = z
   .object({
     /** CI/Lintチェックを実行するか */
     enabled: z.boolean().default(true),
-    /** チェック失敗時の動作 */
-    failureMode: z.enum(['block', 'warn']).default('block'),
+    /**
+     * チェック失敗時の動作
+     * - 'block': オーケストレーション停止
+     * - 'warn': 警告のみで続行
+     * - 'retry': Workerにエラー内容を渡して修正を指示、成功まで再実行
+     */
+    failureMode: z.enum(['block', 'warn', 'retry']).default('block'),
+    /**
+     * タスク完了後に実行するチェックコマンド
+     *
+     * 例: ["pnpm typecheck", "pnpm lint", "pnpm test"]
+     */
+    commands: z.array(z.string()).default([]),
+    /**
+     * retry モード時の最大リトライ回数
+     *
+     * WHY: 無限ループを防ぎつつ、十分な修正機会を与える
+     */
+    maxRetries: z.number().int().min(1).max(10).default(3),
   })
-  .default({ enabled: true, failureMode: 'block' });
+  .default({ enabled: true, failureMode: 'block', commands: [], maxRetries: 3 });
 
 /**
  * 統合設定のスキーマ
@@ -390,6 +410,8 @@ export function createDefaultConfig(params: {
     checks: {
       enabled: true,
       failureMode: 'block',
+      commands: [],
+      maxRetries: 3,
     },
     commit: {
       autoSignature: false,

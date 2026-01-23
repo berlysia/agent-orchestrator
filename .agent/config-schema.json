@@ -216,7 +216,9 @@
     "checks": {
       "default": {
         "enabled": true,
-        "failureMode": "block"
+        "failureMode": "block",
+        "commands": [],
+        "maxRetries": 3
       },
       "type": "object",
       "properties": {
@@ -229,13 +231,29 @@
           "type": "string",
           "enum": [
             "block",
-            "warn"
+            "warn",
+            "retry"
           ]
+        },
+        "commands": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "maxRetries": {
+          "default": 3,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
         }
       },
       "required": [
         "enabled",
-        "failureMode"
+        "failureMode",
+        "commands",
+        "maxRetries"
       ],
       "additionalProperties": false
     },
@@ -498,7 +516,7 @@
         "maxRefinementAttempts": {
           "default": 2,
           "type": "integer",
-          "minimum": 1,
+          "minimum": 0,
           "maximum": 10
         },
         "refineSuggestionsOnSuccess": {
@@ -518,7 +536,8 @@
         "deltaThreshold": {
           "default": 5,
           "type": "number",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 50
         },
         "deltaThresholdPercent": {
           "default": 5,
@@ -535,11 +554,10 @@
         "taskCountChangeMinAbsolute": {
           "default": 2,
           "type": "integer",
-          "minimum": 1,
-          "maximum": 9007199254740991
+          "minimum": 0,
+          "maximum": 10
         },
         "targetScore": {
-          "description": "目標スコア閾値（0-100）。品質OKでもtargetScore未達かつsuggestionsがある場合はrefinementを継続する。",
           "default": 85,
           "type": "number",
           "minimum": 0,
@@ -616,6 +634,11 @@
         "auth"
       ],
       "additionalProperties": false
+    },
+    "maxQualityRetries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10
     }
   },
   "required": [
@@ -629,7 +652,6 @@
     "planning",
     "iterations",
     "replanning",
-    "refinement",
     "worktree"
   ],
   "additionalProperties": false
