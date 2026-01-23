@@ -86,6 +86,8 @@ export interface ContinueResult {
   completedTaskIds: string[];
   /** 失敗タスクID（累積） */
   failedTaskIds: string[];
+  /** 統合情報（レポート生成用） */
+  integrationInfo?: IntegrationInfo;
 }
 
 /**
@@ -980,6 +982,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             allTaskIds,
             completedTaskIds: allCompletedTaskIds,
             failedTaskIds: allFailedTaskIds,
+            integrationInfo: {
+              integrationBranch: undefined,
+              mergedCount: allCompletedTaskIds.length,
+              conflictCount: 0,
+              completionScore: session.finalJudgement.completionScore,
+              missingAspects: session.finalJudgement.missingAspects ?? [],
+            },
           });
         }
 
@@ -1040,6 +1049,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             allTaskIds,
             completedTaskIds: allCompletedTaskIds,
             failedTaskIds: allFailedTaskIds,
+            integrationInfo: {
+              integrationBranch: undefined,
+              mergedCount: allCompletedTaskIds.length,
+              conflictCount: 0,
+              completionScore: currentJudgement.completionScore,
+              missingAspects: [],
+            },
           });
         }
 
@@ -1070,6 +1086,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             allTaskIds,
             completedTaskIds: allCompletedTaskIds,
             failedTaskIds: allFailedTaskIds,
+            integrationInfo: {
+              integrationBranch: undefined,
+              mergedCount: allCompletedTaskIds.length,
+              conflictCount: 0,
+              completionScore: currentJudgement.completionScore,
+              missingAspects: currentJudgement.missingAspects,
+            },
           });
         }
 
@@ -1136,6 +1159,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             allTaskIds,
             completedTaskIds: allCompletedTaskIds,
             failedTaskIds: allFailedTaskIds,
+            integrationInfo: {
+              integrationBranch: undefined,
+              mergedCount: allCompletedTaskIds.length,
+              conflictCount: 0,
+              completionScore: currentJudgement.completionScore,
+              missingAspects: currentJudgement.missingAspects,
+            },
           });
         }
 
@@ -1211,6 +1241,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           allTaskIds,
           completedTaskIds: allCompletedTaskIds,
           failedTaskIds: allFailedTaskIds,
+          integrationInfo: {
+            integrationBranch: undefined,
+            mergedCount: allCompletedTaskIds.length,
+            conflictCount: 0,
+            completionScore: session.finalJudgement?.completionScore,
+            missingAspects: session.finalJudgement?.missingAspects ?? [],
+          },
         });
       }
 
@@ -1222,6 +1259,13 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         allTaskIds,
         completedTaskIds: allCompletedTaskIds,
         failedTaskIds: allFailedTaskIds,
+        integrationInfo: {
+          integrationBranch: undefined,
+          mergedCount: allCompletedTaskIds.length,
+          conflictCount: 0,
+          completionScore: undefined,
+          missingAspects: [],
+        },
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
