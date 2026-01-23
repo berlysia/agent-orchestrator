@@ -9,9 +9,7 @@ export { collectReportData } from './collector.ts';
 export { formatReportAsMarkdown } from './formatter.ts';
 export type {
   ReportData,
-  ReportPeriod,
-  TaskStatistics,
   TaskSummary,
   ReportEvent,
-  ReportEventType,
+  TaskStatistics as ReportStatistics,
 } from './types.ts';
