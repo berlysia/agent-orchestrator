@@ -23,14 +23,14 @@
 | [013](013-score-noise-tolerance.md) | スコア差分ノイズ耐性 | ⏳ Proposed | 2026-01-23 |
 | [014](014-required-terms-preservation.md) | 要件カバレッジ検証 | 🔶 Partial | 2026-01-23 |
 | [015](015-integration-worktree-signature-control.md) | 統合worktree署名制御 | ✅ Implemented | 2026-01-23 |
-| [016](016-merge-failure-error-recovery.md) | マージ失敗時エラーリカバリ | ⏳ Proposed | 2026-01-23 |
+| [016](016-merge-failure-error-recovery.md) | マージ失敗時エラーリカバリ | ✅ Implemented | 2026-01-23 |
 | [017](017-integration-result-visibility.md) | 統合結果の可視化 | ⏳ Proposed | 2026-01-23 |
 
 ## サマリー
 
-- **Implemented**: 6件
+- **Implemented**: 7件
 - **Partially Implemented**: 1件
-- **Proposed**: 5件
+- **Proposed**: 4件
 
 ---
 

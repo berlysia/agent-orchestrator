@@ -582,6 +582,12 @@ export const createIntegrationOperations = (deps: IntegrationDeps) => {
         const commitResult = await gitEffects.commit(repo, commitMessage, { gpgSign: deps.config.commit.autoSignature });
 
         if (isErr(commitResult)) {
+          // WHY: コミット失敗時はMERGE_HEADが残る可能性があるため、
+          //      クリーンアップして次のマージに備える
+          console.log(
+            `  ❌ Commit failed, cleaning up merge state: ${commitResult.err.message}`,
+          );
+          await gitEffects.abortMerge(repo);
           return createErr(commitResult.err);
         }
 
