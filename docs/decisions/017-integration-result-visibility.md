@@ -2,9 +2,9 @@
 
 ## ステータス
 
-**Proposed** ⏳
+**Accepted** ✅
 
-IntegrationInfo型等は未実装。
+実装完了。
 
 ## 選定日時
 
