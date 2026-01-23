@@ -108,10 +108,17 @@ const IntegrationConfigSchema = z
  */
 const CommitConfigSchema = z
   .object({
-    /** Worker実行時の自動コミットでGPG署名を有効化 */
+    /**
+     * Worker実行時・統合worktree内の自動コミットでGPG署名を有効化
+     *
+     * - true: 自動コミットに署名を付与（ユーザーの常時監視が必要）
+     * - false (default): 自動コミットは署名なし
+     *
+     * NOTE: 統合worktree内のマージコミットもこの設定に従う。
+     */
     autoSignature: z.boolean().default(false),
     /**
-     * Integration完了時の署名コマンド案内を有効化
+     * Integration完了時（finalizeコマンド）の署名を有効化
      *
      * WHY: GPG署名にはユーザー認証（pinentry等）が必要で、長時間オーケストレーション後に
      *      ユーザーが不在だと認証タイムアウトで失敗する。そのため、自動rebaseではなく
@@ -119,6 +126,9 @@ const CommitConfigSchema = z
      *
      * - true (default): 署名付きfinalizeコマンド (`agent finalize`) を案内
      * - false: 自動的にrebase & mergeを実行（署名なし）
+     *
+     * NOTE: このフラグはfinalizeコマンドのみに影響する。
+     *       統合worktree内のコミットはautoSignatureを参照する。
      */
     integrationSignature: z.boolean().default(true),
   })

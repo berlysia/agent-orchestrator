@@ -403,4 +403,343 @@ describe('Integration Operations', () => {
       }
     });
   });
+
+  // ADR-015: 統合worktree内コミットの署名制御テスト
+  describe('signature control (ADR-015)', () => {
+    it('integrateTasks should use autoSignature for merge options, not integrationSignature', async () => {
+      const mergeCallArgs: string[][] = [];
+
+      const mockTaskStore = {
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
+      };
+
+      const mockGitEffects = {
+        createBranch: mock.fn(async () => createOk(branchName('integration/merge-123'))),
+        switchBranch: mock.fn(async () => createOk(undefined)),
+        merge: mock.fn(async (_repo, _branch, options: string[]) => {
+          mergeCallArgs.push(options);
+          const mergeResult: MergeResult = {
+            success: true,
+            mergedFiles: ['file1.ts'],
+            hasConflicts: false,
+            conflicts: [],
+            status: 'success',
+          };
+          return createOk(mergeResult);
+        }),
+        abortMerge: mock.fn(async () => createOk(undefined)),
+        getConflictedFiles: mock.fn(async () => createOk([])),
+        getConflictContent: mock.fn(async () =>
+          createErr({
+            type: 'GitCommandFailedError',
+            command: 'show',
+            stderr: '',
+            exitCode: 1,
+            message: '',
+          }),
+        ),
+        getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+        hasRemote: mock.fn(async () => createOk(false)),
+      };
+
+      // WHY: autoSignature=false, integrationSignature=trueの場合、
+      //      統合worktree内のマージは--no-gpg-signを使用するべき（autoSignatureに従う）
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+      };
+
+      const integrationOps = createIntegrationOperations({
+        taskStore: mockTaskStore as any,
+        gitEffects: mockGitEffects as any,
+        appRepoPath: '/test/repo',
+        config: mockConfig as any,
+      });
+
+      const task = createInitialTask({
+        id: taskId('task-1'),
+        repo: repoPath('/test/repo'),
+        branch: branchName('feature/task-1'),
+        scopePaths: ['src/file1.ts'],
+        acceptance: 'Task 1 complete',
+        taskType: 'implementation',
+        context: 'Test task 1',
+      });
+
+      await integrationOps.integrateTasks([task], branchName('main'));
+
+      // autoSignature=falseなので--no-gpg-signが含まれるべき
+      assert.strictEqual(mergeCallArgs.length, 1);
+      assert(
+        mergeCallArgs[0].includes('--no-gpg-sign'),
+        'Should use --no-gpg-sign when autoSignature is false',
+      );
+      assert(
+        !mergeCallArgs[0].includes('--gpg-sign'),
+        'Should not use --gpg-sign when autoSignature is false',
+      );
+    });
+
+    it('integrateTasks should use --gpg-sign when autoSignature is true', async () => {
+      const mergeCallArgs: string[][] = [];
+
+      const mockTaskStore = {
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
+      };
+
+      const mockGitEffects = {
+        createBranch: mock.fn(async () => createOk(branchName('integration/merge-123'))),
+        switchBranch: mock.fn(async () => createOk(undefined)),
+        merge: mock.fn(async (_repo, _branch, options: string[]) => {
+          mergeCallArgs.push(options);
+          const mergeResult: MergeResult = {
+            success: true,
+            mergedFiles: ['file1.ts'],
+            hasConflicts: false,
+            conflicts: [],
+            status: 'success',
+          };
+          return createOk(mergeResult);
+        }),
+        abortMerge: mock.fn(async () => createOk(undefined)),
+        getConflictedFiles: mock.fn(async () => createOk([])),
+        getConflictContent: mock.fn(async () =>
+          createErr({
+            type: 'GitCommandFailedError',
+            command: 'show',
+            stderr: '',
+            exitCode: 1,
+            message: '',
+          }),
+        ),
+        getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+        hasRemote: mock.fn(async () => createOk(false)),
+      };
+
+      // WHY: autoSignature=trueの場合、マージに--gpg-signを使用するべき
+      const mockConfig = {
+        commit: {
+          autoSignature: true,
+          integrationSignature: false, // これが違っても影響しないことを確認
+        },
+      };
+
+      const integrationOps = createIntegrationOperations({
+        taskStore: mockTaskStore as any,
+        gitEffects: mockGitEffects as any,
+        appRepoPath: '/test/repo',
+        config: mockConfig as any,
+      });
+
+      const task = createInitialTask({
+        id: taskId('task-1'),
+        repo: repoPath('/test/repo'),
+        branch: branchName('feature/task-1'),
+        scopePaths: ['src/file1.ts'],
+        acceptance: 'Task 1 complete',
+        taskType: 'implementation',
+        context: 'Test task 1',
+      });
+
+      await integrationOps.integrateTasks([task], branchName('main'));
+
+      // autoSignature=trueなので--gpg-signが含まれるべき
+      assert.strictEqual(mergeCallArgs.length, 1);
+      assert(
+        mergeCallArgs[0].includes('--gpg-sign'),
+        'Should use --gpg-sign when autoSignature is true',
+      );
+      assert(
+        !mergeCallArgs[0].includes('--no-gpg-sign'),
+        'Should not use --no-gpg-sign when autoSignature is true',
+      );
+    });
+
+    it('mergeTasksInWorktree should use autoSignature for commits, not integrationSignature', async () => {
+      const commitCallOptions: Array<{ gpgSign?: boolean }> = [];
+
+      const mockTaskStore = {
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
+      };
+
+      const mockGitEffects = {
+        createBranch: mock.fn(async () => createOk(branchName('integration/merge-123'))),
+        switchBranch: mock.fn(async () => createOk(undefined)),
+        createWorktree: mock.fn(async () => createOk('/test/worktree')),
+        removeWorktree: mock.fn(async () => createOk(undefined)),
+        merge: mock.fn(async () => {
+          const mergeResult: MergeResult = {
+            success: true,
+            mergedFiles: ['file1.ts'],
+            hasConflicts: false,
+            conflicts: [],
+            status: 'success',
+          };
+          return createOk(mergeResult);
+        }),
+        commit: mock.fn(async (_repo, _msg, options) => {
+          commitCallOptions.push(options || {});
+          return createOk('commit-hash');
+        }),
+        abortMerge: mock.fn(async () => createOk(undefined)),
+        getConflictedFiles: mock.fn(async () => createOk([])),
+        getConflictContent: mock.fn(async () =>
+          createErr({
+            type: 'GitCommandFailedError',
+            command: 'show',
+            stderr: '',
+            exitCode: 1,
+            message: '',
+          }),
+        ),
+        getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+        hasRemote: mock.fn(async () => createOk(false)),
+        pull: mock.fn(async () => createOk(undefined)),
+      };
+
+      // WHY: autoSignature=false, integrationSignature=trueの場合、
+      //      worktree内のコミットはgpgSign=falseを使用するべき（autoSignatureに従う）
+      const mockConfig = {
+        commit: {
+          autoSignature: false,
+          integrationSignature: true,
+        },
+        integration: {
+          mergeStrategy: 'ff-prefer',
+        },
+      };
+
+      const integrationOps = createIntegrationOperations({
+        taskStore: mockTaskStore as any,
+        gitEffects: mockGitEffects as any,
+        appRepoPath: '/test/repo',
+        config: mockConfig as any,
+      });
+
+      const task = createInitialTask({
+        id: taskId('task-1'),
+        repo: repoPath('/test/repo'),
+        branch: branchName('feature/task-1'),
+        scopePaths: ['src/file1.ts'],
+        acceptance: 'Task 1 complete',
+        taskType: 'implementation',
+        context: 'Test task 1',
+      });
+
+      const worktreeInfo = {
+        worktreePath: '/test/worktree',
+        integrationBranch: branchName('integration/eval-123'),
+      };
+
+      await integrationOps.mergeTasksInWorktree(worktreeInfo, [task], 'abc123');
+
+      // autoSignature=falseなのでgpgSign=falseが渡されるべき
+      assert.strictEqual(commitCallOptions.length, 1);
+      assert.strictEqual(
+        commitCallOptions[0].gpgSign,
+        false,
+        'Should use gpgSign=false when autoSignature is false',
+      );
+    });
+
+    it('mergeTasksInWorktree should use gpgSign=true when autoSignature is true', async () => {
+      const commitCallOptions: Array<{ gpgSign?: boolean }> = [];
+
+      const mockTaskStore = {
+        createTask: mock.fn(async (_task: Task) => createOk(undefined)),
+        readTask: mock.fn(async (id) =>
+          createErr({ type: 'TaskNotFoundError', taskId: id, message: 'Not found' }),
+        ),
+      };
+
+      const mockGitEffects = {
+        createBranch: mock.fn(async () => createOk(branchName('integration/merge-123'))),
+        switchBranch: mock.fn(async () => createOk(undefined)),
+        createWorktree: mock.fn(async () => createOk('/test/worktree')),
+        removeWorktree: mock.fn(async () => createOk(undefined)),
+        merge: mock.fn(async () => {
+          const mergeResult: MergeResult = {
+            success: true,
+            mergedFiles: ['file1.ts'],
+            hasConflicts: false,
+            conflicts: [],
+            status: 'success',
+          };
+          return createOk(mergeResult);
+        }),
+        commit: mock.fn(async (_repo, _msg, options) => {
+          commitCallOptions.push(options || {});
+          return createOk('commit-hash');
+        }),
+        abortMerge: mock.fn(async () => createOk(undefined)),
+        getConflictedFiles: mock.fn(async () => createOk([])),
+        getConflictContent: mock.fn(async () =>
+          createErr({
+            type: 'GitCommandFailedError',
+            command: 'show',
+            stderr: '',
+            exitCode: 1,
+            message: '',
+          }),
+        ),
+        getCurrentBranch: mock.fn(async () => createOk(branchName('main'))),
+        hasRemote: mock.fn(async () => createOk(false)),
+        pull: mock.fn(async () => createOk(undefined)),
+      };
+
+      // WHY: autoSignature=trueの場合、コミットにgpgSign=trueを使用するべき
+      const mockConfig = {
+        commit: {
+          autoSignature: true,
+          integrationSignature: false, // これが違っても影響しないことを確認
+        },
+        integration: {
+          mergeStrategy: 'ff-prefer',
+        },
+      };
+
+      const integrationOps = createIntegrationOperations({
+        taskStore: mockTaskStore as any,
+        gitEffects: mockGitEffects as any,
+        appRepoPath: '/test/repo',
+        config: mockConfig as any,
+      });
+
+      const task = createInitialTask({
+        id: taskId('task-1'),
+        repo: repoPath('/test/repo'),
+        branch: branchName('feature/task-1'),
+        scopePaths: ['src/file1.ts'],
+        acceptance: 'Task 1 complete',
+        taskType: 'implementation',
+        context: 'Test task 1',
+      });
+
+      const worktreeInfo = {
+        worktreePath: '/test/worktree',
+        integrationBranch: branchName('integration/eval-123'),
+      };
+
+      await integrationOps.mergeTasksInWorktree(worktreeInfo, [task], 'abc123');
+
+      // autoSignature=trueなのでgpgSign=trueが渡されるべき
+      assert.strictEqual(commitCallOptions.length, 1);
+      assert.strictEqual(
+        commitCallOptions[0].gpgSign,
+        true,
+        'Should use gpgSign=true when autoSignature is true',
+      );
+    });
+  });
 });

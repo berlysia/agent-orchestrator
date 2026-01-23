@@ -2,9 +2,7 @@
 
 ## ステータス
 
-**Proposed** ⏳
-
-integration-operations.ts内の5箇所で `integrationSignature` → `autoSignature` への修正が未実施。
+**Accepted** ✅
 
 ## 選定日時
 
