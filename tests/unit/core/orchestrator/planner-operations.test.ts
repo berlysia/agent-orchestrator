@@ -936,6 +936,7 @@ Suggestions:
       deltaThresholdPercent: 5,
       taskCountChangeThreshold: 0.3,
       taskCountChangeMinAbsolute: 2,
+      targetScore: 85,
     };
 
     describe('makeRefinementDecision', () => {
@@ -1100,7 +1101,9 @@ Suggestions:
         assert.strictEqual(result.reason, 'スコア取得失敗');
       });
 
-      it('should replan with suggestions when enabled and quality is OK', () => {
+      it('should replan with suggestions when enabled and quality is OK and targetScore reached', () => {
+        // targetScore到達かつrefineSuggestionsOnSuccess有効の場合、
+        // targetScore到達が優先されてacceptになる（優先順位3）
         const configWithSuggestions: RefinementConfig = {
           ...defaultConfig,
           refineSuggestionsOnSuccess: true,
@@ -1109,7 +1112,7 @@ Suggestions:
 
         const result = makeRefinementDecision({
           isAcceptable: true,
-          score: 78,
+          score: 90, // targetScore(85)以上
           previousScore: undefined,
           issues: [],
           suggestions: ['Add edge case handling'],
@@ -1118,11 +1121,37 @@ Suggestions:
           config: configWithSuggestions,
         });
 
-        assert.strictEqual(result.decision, 'replan');
-        assert.strictEqual(result.reason, 'suggestions適用');
+        // targetScore到達が優先されてaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, 'targetScore到達');
       });
 
-      it('should accept when suggestions limit reached', () => {
+      it('should replan with suggestions when enabled and targetScore not reached', () => {
+        // targetScore未達かつrefineSuggestionsOnSuccess有効の場合、
+        // targetScore未達のreplanが優先される（優先順位6）
+        const configWithSuggestions: RefinementConfig = {
+          ...defaultConfig,
+          refineSuggestionsOnSuccess: true,
+          maxSuggestionReplans: 2,
+        };
+
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 78, // targetScore(85)未満
+          previousScore: undefined,
+          issues: [],
+          suggestions: ['Add edge case handling'],
+          attemptCount: 0,
+          suggestionReplanCount: 0,
+          config: configWithSuggestions,
+        });
+
+        // targetScore未達のreplan
+        assert.strictEqual(result.decision, 'replan');
+        assert.strictEqual(result.reason, 'targetScore未達');
+      });
+
+      it('should accept when suggestions limit reached and targetScore reached', () => {
         const configWithSuggestions: RefinementConfig = {
           ...defaultConfig,
           refineSuggestionsOnSuccess: true,
@@ -1131,7 +1160,7 @@ Suggestions:
 
         const result = makeRefinementDecision({
           isAcceptable: true,
-          score: 90,
+          score: 90, // targetScore(85)以上
           previousScore: 78, // 12点改善 >= deltaThreshold(5) で停滞しない
           issues: [],
           suggestions: ['More suggestions'],
@@ -1140,20 +1169,64 @@ Suggestions:
           config: configWithSuggestions,
         });
 
-        // suggestionsあるがmaxSuggestionReplans到達なのでaccept
+        // targetScore到達が優先されてaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, 'targetScore到達');
+      });
+
+      it('should accept when suggestions limit reached and targetScore not reached', () => {
+        const configWithSuggestions: RefinementConfig = {
+          ...defaultConfig,
+          refineSuggestionsOnSuccess: true,
+          maxSuggestionReplans: 1,
+          targetScore: 95, // 高い目標スコア
+        };
+
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 90, // targetScore(95)未達
+          previousScore: 78,
+          issues: [],
+          suggestions: [], // suggestionsなし
+          attemptCount: 1,
+          suggestionReplanCount: 1, // 既に1回使用済み
+          config: configWithSuggestions,
+        });
+
+        // suggestionsがないので品質OKでaccept
         assert.strictEqual(result.decision, 'accept');
         assert.strictEqual(result.reason, '品質OK');
       });
 
       it('should detect stagnation with relative threshold (percent)', () => {
         // 相対閾値（5%）で停滞判定するケース
-        // 前回90点 → 今回95点 = 5点改善 (絶対値は閾値以上)
-        // しかし 5/90 = 5.5% なので相対閾値も超える
+        // 前回70点 → 今回75点 = 5点改善 (絶対値は閾値以上)
+        // しかし 5/70 = 7.1% なので相対閾値も超える
         // → 停滞しない
+        // targetScore(85)未満なのでtargetScore未達の判定対象だが、suggestionsがないので品質OKへ
 
         const result = makeRefinementDecision({
           isAcceptable: true,
-          score: 95,
+          score: 75, // targetScore(85)未満
+          previousScore: 70,
+          issues: [],
+          suggestions: [], // suggestionsなしで品質OKへ
+          attemptCount: 1,
+          suggestionReplanCount: 0,
+          config: defaultConfig,
+        });
+
+        // 5点改善 >= deltaThreshold(5) かつ 7.1% >= deltaThresholdPercent(5)
+        // なので停滞しない → suggestionsなしで品質OKでaccept
+        assert.strictEqual(result.decision, 'accept');
+        assert.strictEqual(result.reason, '品質OK');
+      });
+
+      it('should accept with targetScore reached even when improvement is large', () => {
+        // targetScore到達時は、改善率に関係なくacceptされる
+        const result = makeRefinementDecision({
+          isAcceptable: true,
+          score: 95, // targetScore(85)以上
           previousScore: 90,
           issues: [],
           suggestions: [],
@@ -1162,32 +1235,33 @@ Suggestions:
           config: defaultConfig,
         });
 
-        // 5点改善 >= deltaThreshold(5) かつ 5.5% >= deltaThresholdPercent(5)
-        // なので停滞しない → 品質OKでaccept
+        // targetScore到達が優先される
         assert.strictEqual(result.decision, 'accept');
-        assert.strictEqual(result.reason, '品質OK');
+        assert.strictEqual(result.reason, 'targetScore到達');
       });
 
-      it('should detect stagnation when relative improvement is too small', () => {
-        // 絶対値は閾値以上だが相対値が閾値未満のケース
-        // 前回30点 → 今回35点 = 5点改善 (絶対値は閾値ちょうど)
-        // しかし 5/30 = 16.7% なので相対閾値は超える
-        // → 停滞しない
+      it('should detect stagnation when relative improvement is too small and targetScore not reached', () => {
+        // 絶対値は閾値未満で相対値も閾値未満のケース（targetScore未達）
+        // 前回75点 → 今回79点 = 4点改善
+        // 4/75 = 5.3% >= 5% だが、4点 < 5点の絶対閾値なので停滞
+        const configWithHighTarget: RefinementConfig = {
+          ...defaultConfig,
+          targetScore: 90, // 高い目標スコアでtargetScore到達を回避
+        };
 
-        // 逆パターン: 前回95点 → 今回99点 = 4点改善
-        // 4/95 = 4.2% < 5% なので停滞
         const result = makeRefinementDecision({
           isAcceptable: true,
-          score: 99,
-          previousScore: 95,
+          score: 79, // targetScore(90)未満
+          previousScore: 75,
           issues: [],
-          suggestions: [],
+          suggestions: [], // suggestionsなしで停滞判定へ
           attemptCount: 1,
           suggestionReplanCount: 0,
-          config: defaultConfig,
+          config: configWithHighTarget,
         });
 
         // 4点改善 < deltaThreshold(5) なので停滞判定（OR条件）
+        // 品質OKなので改善停滞でaccept
         assert.strictEqual(result.decision, 'accept');
         assert.strictEqual(result.reason, '改善停滞');
       });
@@ -1208,6 +1282,137 @@ Suggestions:
         // なので停滞しない → 品質未達でreplan
         assert.strictEqual(result.decision, 'replan');
         assert.strictEqual(result.reason, '品質未達');
+      });
+
+      // targetScore関連のテストケース
+      describe('targetScore behavior', () => {
+        it('should accept when targetScore is reached', () => {
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 90, // targetScore(85)以上
+            previousScore: 80,
+            issues: [],
+            suggestions: ['Minor improvement possible'],
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: defaultConfig,
+          });
+
+          assert.strictEqual(result.decision, 'accept');
+          assert.strictEqual(result.reason, 'targetScore到達');
+        });
+
+        it('should accept when score equals targetScore', () => {
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 85, // targetScore(85)と同じ
+            previousScore: 80,
+            issues: [],
+            suggestions: ['Could be better'],
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: defaultConfig,
+          });
+
+          assert.strictEqual(result.decision, 'accept');
+          assert.strictEqual(result.reason, 'targetScore到達');
+        });
+
+        it('should replan when quality OK but below targetScore with suggestions', () => {
+          const result = makeRefinementDecision({
+            isAcceptable: true, // 品質OK (qualityThreshold超え)
+            score: 78, // targetScore(85)未達
+            previousScore: 70,
+            issues: [],
+            suggestions: ['Improve task decomposition', 'Add more context'],
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: defaultConfig,
+          });
+
+          // targetScore未達かつsuggestionsありでreplan
+          assert.strictEqual(result.decision, 'replan');
+          assert.strictEqual(result.reason, 'targetScore未達');
+          assert.ok(result.feedback);
+          assert.strictEqual(result.feedback.suggestions.length, 2);
+        });
+
+        it('should accept when quality OK and below targetScore but no suggestions', () => {
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 78, // targetScore(85)未達
+            previousScore: 70,
+            issues: [],
+            suggestions: [], // suggestionsがない
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: defaultConfig,
+          });
+
+          // suggestionsがないのでaccept
+          assert.strictEqual(result.decision, 'accept');
+          assert.strictEqual(result.reason, '品質OK');
+        });
+
+        it('should respect max attempts even when below targetScore', () => {
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 78, // targetScore(85)未達
+            previousScore: 75,
+            issues: [],
+            suggestions: ['Could improve more'],
+            attemptCount: 2, // maxRefinementAttempts(2)に到達
+            suggestionReplanCount: 0,
+            config: defaultConfig,
+          });
+
+          // 最大試行回数到達時は品質OKならaccept
+          assert.strictEqual(result.decision, 'accept');
+          assert.strictEqual(result.reason, '最大試行回数到達');
+        });
+
+        it('should work with custom targetScore', () => {
+          const customConfig: RefinementConfig = {
+            ...defaultConfig,
+            targetScore: 95, // 高い目標スコア
+          };
+
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 90, // 通常ならtargetScore到達だが、95には未達
+            previousScore: 85,
+            issues: [],
+            suggestions: ['Could be even better'],
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: customConfig,
+          });
+
+          assert.strictEqual(result.decision, 'replan');
+          assert.strictEqual(result.reason, 'targetScore未達');
+        });
+
+        it('should prioritize targetScore reached over suggestions', () => {
+          const configWithSuggestionReplan: RefinementConfig = {
+            ...defaultConfig,
+            refineSuggestionsOnSuccess: true, // suggestions適用を有効化
+          };
+
+          const result = makeRefinementDecision({
+            isAcceptable: true,
+            score: 90, // targetScore(85)以上
+            previousScore: 80,
+            issues: [],
+            suggestions: ['Minor improvement'], // suggestionsあり
+            attemptCount: 0,
+            suggestionReplanCount: 0,
+            config: configWithSuggestionReplan,
+          });
+
+          // targetScore到達が優先され、suggestionsがあってもaccept
+          assert.strictEqual(result.decision, 'accept');
+          assert.strictEqual(result.reason, 'targetScore到達');
+        });
       });
     });
   });

@@ -490,7 +490,8 @@
         "deltaThreshold": 5,
         "deltaThresholdPercent": 5,
         "taskCountChangeThreshold": 0.3,
-        "taskCountChangeMinAbsolute": 2
+        "taskCountChangeMinAbsolute": 2,
+        "targetScore": 85
       },
       "type": "object",
       "properties": {
@@ -536,6 +537,13 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991
+        },
+        "targetScore": {
+          "description": "目標スコア閾値（0-100）。品質OKでもtargetScore未達かつsuggestionsがある場合はrefinementを継続する。",
+          "default": 85,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
         }
       },
       "required": [
@@ -546,7 +554,8 @@
         "deltaThreshold",
         "deltaThresholdPercent",
         "taskCountChangeThreshold",
-        "taskCountChangeMinAbsolute"
+        "taskCountChangeMinAbsolute",
+        "targetScore"
       ],
       "additionalProperties": false
     },

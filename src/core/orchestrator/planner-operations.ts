@@ -2527,10 +2527,12 @@ function isStagnated(
  * 意思決定の優先順位:
  * 1. 最大試行回数到達時、品質OKならaccept、NGならreject
  * 2. スコア取得失敗時、品質OKならaccept、NGならreject
- * 3. 改善停滞時、品質OKならaccept、NGならreject
- * 4. 品質未達ならreplan
- * 5. 品質OK+suggestions+設定有効+上限未達ならreplan
- * 6. 品質OKならaccept
+ * 3. targetScore到達（早期終了）ならaccept
+ * 4. 改善停滞時、品質OKならaccept、NGなら継続
+ * 5. 品質未達ならreplan
+ * 6. targetScore未達+suggestions存在ならreplan
+ * 7. 品質OK+suggestions+設定有効+上限未達ならreplan
+ * 8. 品質OKならaccept
  *
  * @param params 意思決定に必要なパラメータ
  * @returns リファインメント結果
@@ -2602,10 +2604,24 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位3: 改善停滞時、品質OKならaccept、NGなら継続（試行回数残りあり）
+  // 優先順位3: targetScore到達時は早期終了でaccept
+  // WHY: 目標スコアに達した場合は、suggestionsがあっても十分な品質と判断してacceptする
+  if (score >= config.targetScore) {
+    return {
+      decision: 'accept',
+      reason: 'targetScore到達',
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位4: 改善停滞時、品質OKならaccept、NGなら継続（試行回数残りあり）
   // WHY: 停滞しても試行回数が残っていれば諦めずにreplanを継続する
   //      最大試行回数に達した場合は優先順位1で処理されるため、
   //      ここに到達した時点では必ず試行回数が残っている
+  //      targetScore到達チェックは優先順位3で行われるため、ここに到達した時点では未達
   if (isStagnated(score, previousScore, config)) {
     if (isAcceptable) {
       return {
@@ -2632,7 +2648,7 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位4: 品質未達ならreplan
+  // 優先順位5: 品質未達ならreplan
   if (!isAcceptable) {
     return {
       decision: 'replan',
@@ -2648,7 +2664,25 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位5: 品質OK+suggestions+設定有効+上限未達ならreplan
+  // 優先順位6: targetScore未達 + suggestions存在ならreplan
+  // WHY: 品質OKでも目標スコア未達の場合、suggestionsに基づいて改善を継続する
+  //      これにより、qualityThreshold(60)を超えても、targetScore(85)に向けてrefinementを継続できる
+  if (score < config.targetScore && suggestions.length > 0) {
+    return {
+      decision: 'replan',
+      reason: 'targetScore未達',
+      feedback: {
+        issues: [],
+        suggestions,
+      },
+      attemptCount,
+      suggestionReplanCount,
+      currentScore: score,
+      previousScore,
+    };
+  }
+
+  // 優先順位7: 品質OK+suggestions+設定有効+上限未達ならreplan
   if (
     isAcceptable &&
     suggestions.length > 0 &&
@@ -2669,7 +2703,7 @@ export function makeRefinementDecision(params: {
     };
   }
 
-  // 優先順位6: 品質OKならaccept
+  // 優先順位8: 品質OKならaccept
   return {
     decision: 'accept',
     reason: '品質OK',

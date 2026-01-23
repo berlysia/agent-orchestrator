@@ -184,6 +184,7 @@ function createDefaultRefinementConfig(overrides?: Partial<RefinementConfig>): R
     deltaThresholdPercent: 5,
     taskCountChangeThreshold: 0.3,
     taskCountChangeMinAbsolute: 2,
+    targetScore: 85,
     ...overrides,
   };
 }
@@ -234,7 +235,7 @@ describe('Refinement Integration', () => {
     const llmClient = new MockLLMClient([replanedTasks]);
     const qualityJudge = new MockQualityJudge([
       { isAcceptable: false, score: 40, issues: ['Issue 1'], suggestions: [] },
-      { isAcceptable: true, score: 85, issues: [], suggestions: [] },
+      { isAcceptable: true, score: 90, issues: [], suggestions: [] }, // targetScore(85)以上
     ]);
 
     const config = createDefaultRefinementConfig();

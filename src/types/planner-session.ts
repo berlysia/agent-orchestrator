@@ -145,6 +145,13 @@ export type RefinementConfig = {
   deltaThresholdPercent: number; // default 5
   taskCountChangeThreshold: number; // default 0.3
   taskCountChangeMinAbsolute: number; // default 2
+  /**
+   * 目標スコア閾値（デフォルト 85）
+   *
+   * WHY: qualityThresholdを超えても、targetScore未達かつsuggestionsがある場合は
+   *      refinementを継続することで、より高品質なプランを目指す
+   */
+  targetScore: number; // default 85
 };
 
 /**

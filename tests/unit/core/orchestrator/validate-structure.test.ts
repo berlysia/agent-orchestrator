@@ -47,6 +47,7 @@ const defaultConfig: RefinementConfig = {
   deltaThresholdPercent: 5,
   taskCountChangeThreshold: 0.3, // 30%
   taskCountChangeMinAbsolute: 2,
+  targetScore: 85,
 };
 
 describe('validateStructure', () => {

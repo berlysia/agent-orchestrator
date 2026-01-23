@@ -206,6 +206,13 @@ const RefinementConfigSchema = z
     taskCountChangeThreshold: z.number().min(0).max(1).default(0.3),
     /** タスク数変化の最小絶対値 */
     taskCountChangeMinAbsolute: z.number().int().min(0).max(10).default(2),
+    /**
+     * 目標スコア閾値（0-100）
+     *
+     * WHY: qualityThresholdを超えても、targetScore未達かつsuggestionsがある場合は
+     *      refinementを継続することで、より高品質なプランを目指す
+     */
+    targetScore: z.number().min(0).max(100).default(85),
   })
   .default({
     maxRefinementAttempts: 2,
@@ -216,6 +223,7 @@ const RefinementConfigSchema = z
     deltaThresholdPercent: 5,
     taskCountChangeThreshold: 0.3,
     taskCountChangeMinAbsolute: 2,
+    targetScore: 85,
   });
 
 /**
@@ -360,6 +368,7 @@ export const DEFAULT_REFINEMENT_CONFIG: RefinementConfig = {
   deltaThresholdPercent: 5,
   taskCountChangeThreshold: 0.3,
   taskCountChangeMinAbsolute: 2,
+  targetScore: 85,
 };
 
 /**
