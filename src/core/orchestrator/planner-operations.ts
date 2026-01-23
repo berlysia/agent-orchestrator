@@ -18,7 +18,7 @@ import {
 } from '../../types/planner-session.ts';
 import path from 'node:path';
 import { truncateSummary } from './utils/log-utils.ts';
-import { extractSessionShort } from './task-helpers.ts';
+import { extractSessionShort, parseTaskId } from './task-helpers.ts';
 import { TaskBreakdownSchema, type TaskBreakdown } from '../../types/task-breakdown.ts';
 import { isRateLimited } from './utils/rate-limit-utils.ts';
 
@@ -607,18 +607,26 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           const qualityJudge: QualityJudge = {
             evaluate: async (tasks: Task[]) => {
               // Convert tasks back to TaskBreakdown for existing quality evaluation
-              const breakdowns: TaskBreakdown[] = tasks.map((task) => ({
-                id: String(task.id).split('-').slice(0, -1).join('-'), // Remove session suffix
-                description: task.acceptance, // Use acceptance as description
-                branch: String(task.branch),
-                scopePaths: task.scopePaths,
-                acceptance: task.acceptance,
-                type: task.taskType,
-                estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
-                context: task.context,
-                dependencies: task.dependencies.map((dep) => String(dep).split('-').slice(0, -1).join('-')),
-                summary: task.summary ?? undefined,
-              }));
+              // WHY: Task ID is "task-{sessionShort}-{number}", need to extract "task-{number}"
+              const breakdowns: TaskBreakdown[] = tasks.map((task) => {
+                const parsed = parseTaskId(String(task.id));
+                const breakdownId = parsed ? `task-${parsed.taskNumber}` : String(task.id);
+                return {
+                  id: breakdownId,
+                  description: task.acceptance, // Use acceptance as description
+                  branch: String(task.branch),
+                  scopePaths: task.scopePaths,
+                  acceptance: task.acceptance,
+                  type: task.taskType,
+                  estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
+                  context: task.context,
+                  dependencies: task.dependencies.map((dep) => {
+                    const depParsed = parseTaskId(String(dep));
+                    return depParsed ? `task-${depParsed.taskNumber}` : String(dep);
+                  }),
+                  summary: task.summary ?? undefined,
+                };
+              });
 
               const result = await judgeTaskQuality(userInstruction, breakdowns, accumulatedFeedback);
               return {
@@ -700,18 +708,26 @@ export const createPlannerOperations = (deps: PlannerDeps) => {
           }
 
           // Convert refined tasks back to TaskBreakdown
-          taskBreakdowns = refinementResult.val.finalTasks.map((task) => ({
-            id: String(task.id).split('-').slice(0, -1).join('-'), // Remove session suffix
-            description: task.acceptance, // Use acceptance as description
-            branch: String(task.branch),
-            scopePaths: task.scopePaths,
-            acceptance: task.acceptance,
-            type: task.taskType,
-            estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
-            context: task.context,
-            dependencies: task.dependencies.map((dep) => String(dep).split('-').slice(0, -1).join('-')),
-            summary: task.summary ?? undefined,
-          }));
+          // WHY: Task ID is "task-{sessionShort}-{number}", need to extract "task-{number}"
+          taskBreakdowns = refinementResult.val.finalTasks.map((task) => {
+            const parsed = parseTaskId(String(task.id));
+            const breakdownId = parsed ? `task-${parsed.taskNumber}` : String(task.id);
+            return {
+              id: breakdownId,
+              description: task.acceptance, // Use acceptance as description
+              branch: String(task.branch),
+              scopePaths: task.scopePaths,
+              acceptance: task.acceptance,
+              type: task.taskType,
+              estimatedDuration: deps.maxTaskDuration ?? 4, // Use default duration
+              context: task.context,
+              dependencies: task.dependencies.map((dep) => {
+                const depParsed = parseTaskId(String(dep));
+                return depParsed ? `task-${depParsed.taskNumber}` : String(dep);
+              }),
+              summary: task.summary ?? undefined,
+            };
+          });
 
           // Store refinement history for session
           const refinementHistory = refinementResult.val.refinementHistory;
