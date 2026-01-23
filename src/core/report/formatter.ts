@@ -73,6 +73,30 @@ export function formatReportAsMarkdown(data: ReportData): string {
     }
   }
 
+  // 統合情報
+  if (data.integration) {
+    sections.push('');
+    sections.push('## 統合結果');
+    sections.push('- 統合ブランチ: ' + (data.integration.integrationBranch ?? '未作成'));
+    sections.push('- マージ成功: ' + data.integration.mergedCount);
+    sections.push('- コンフリクト: ' + data.integration.conflictCount);
+    if (data.integration.conflictResolutionTaskId) {
+      sections.push('- コンフリクト解決タスク: ' + data.integration.conflictResolutionTaskId);
+    }
+    if (data.integration.completionScore !== undefined) {
+      sections.push('');
+      sections.push('### 完了評価');
+      sections.push('- スコア: ' + data.integration.completionScore + '%');
+    }
+    if (data.integration.missingAspects.length > 0) {
+      sections.push('');
+      sections.push('### 未達成の側面');
+      for (const aspect of data.integration.missingAspects) {
+        sections.push('- ' + aspect);
+      }
+    }
+  }
+
   return sections.join('\n');
 }
 
