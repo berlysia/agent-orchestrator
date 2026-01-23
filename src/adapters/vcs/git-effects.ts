@@ -191,6 +191,33 @@ export interface GitEffects {
   ): Promise<Result<void, GitError>>;
 
   /**
+   * 進行中のrebaseを続行
+   * @param path リポジトリまたは Worktree のパス
+   * @param options rebaseオプション
+   * @param options.gpgSign GPG署名を有効化
+   */
+  rebaseContinue(
+    path: RepoPath | WorktreePath,
+    options?: { gpgSign?: boolean },
+  ): Promise<Result<void, GitError>>;
+
+  /**
+   * rebaseが進行中かどうかをチェック
+   * @param path リポジトリまたは Worktree のパス
+   */
+  isRebaseInProgress(path: RepoPath | WorktreePath): Promise<Result<boolean, GitError>>;
+
+  /**
+   * ファイルにコンフリクトマーカーが残っているかチェック
+   * @param path リポジトリまたは Worktree のパス
+   * @param filePath チェックするファイルパス
+   */
+  hasConflictMarkers(
+    path: RepoPath | WorktreePath,
+    filePath: string,
+  ): Promise<Result<boolean, GitError>>;
+
+  /**
    * リモートにプッシュ
    * @param path リポジトリまたは Worktree のパス
    * @param remote リモート名（デフォルト: 'origin'）

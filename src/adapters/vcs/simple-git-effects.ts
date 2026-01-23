@@ -135,6 +135,58 @@ export const createSimpleGitEffects = (): Omit<
     return mapErrForResult(result, toGitError('rebase'));
   };
 
+  const rebaseContinue: GitEffects['rebaseContinue'] = async (path, options) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      const args = ['rebase', '--continue'];
+      if (options?.gpgSign) {
+        args.push('--gpg-sign');
+      }
+      await git.raw(args);
+    });
+    return mapErrForResult(result, toGitError('rebaseContinue'));
+  };
+
+  const isRebaseInProgress: GitEffects['isRebaseInProgress'] = async (path) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const git = simpleGit(path);
+      // .git/rebase-merge または .git/rebase-apply が存在すればrebase進行中
+      const gitDir = await git.revparse(['--git-dir']);
+      const fs = await import('node:fs/promises');
+      const rebaseMerge = `${path}/${gitDir.trim()}/rebase-merge`;
+      const rebaseApply = `${path}/${gitDir.trim()}/rebase-apply`;
+
+      try {
+        await fs.access(rebaseMerge);
+        return true;
+      } catch {
+        // rebase-merge doesn't exist
+      }
+
+      try {
+        await fs.access(rebaseApply);
+        return true;
+      } catch {
+        // rebase-apply doesn't exist
+      }
+
+      return false;
+    });
+    return mapErrForResult(result, toGitError('isRebaseInProgress'));
+  };
+
+  const hasConflictMarkers: GitEffects['hasConflictMarkers'] = async (path, filePath) => {
+    const result = await tryCatchIntoResultAsync(async () => {
+      const fs = await import('node:fs/promises');
+      const fullPath = `${path}/${filePath}`;
+      const content = await fs.readFile(fullPath, 'utf-8');
+      // コンフリクトマーカーのパターンをチェック
+      const markers = ['<<<<<<<', '=======', '>>>>>>>'];
+      return markers.some((marker) => content.includes(marker));
+    });
+    return mapErrForResult(result, toGitError('hasConflictMarkers'));
+  };
+
   const push: GitEffects['push'] = async (path, remote, branch) => {
     const result = await tryCatchIntoResultAsync(async () => {
       const git = simpleGit(path);
@@ -341,6 +393,9 @@ export const createSimpleGitEffects = (): Omit<
     stageFiles,
     commit,
     rebase,
+    rebaseContinue,
+    isRebaseInProgress,
+    hasConflictMarkers,
     push,
     pull,
     hasRemote,

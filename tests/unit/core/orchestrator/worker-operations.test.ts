@@ -36,6 +36,9 @@ const createMockGitEffects = (): GitEffects => ({
   hasRemote: mock.fn(async () => createOk(true)),
   merge: mock.fn(),
   rebase: mock.fn(async () => createOk(undefined)),
+  rebaseContinue: mock.fn(async () => createOk(undefined)),
+  isRebaseInProgress: mock.fn(async () => createOk(false)),
+  hasConflictMarkers: mock.fn(async () => createOk(false)),
   abortMerge: mock.fn(async () => createOk(undefined)),
   getStatus: mock.fn(async () =>
     createOk({
