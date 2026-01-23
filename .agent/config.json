@@ -31,11 +31,7 @@
     "qualityThreshold": 60,
     "strictContextValidation": false,
     "maxTaskDuration": 2,
-    "maxTasks": 20,
-    "planQualityJudge": {
-      "type": "codex",
-      "model": "gpt-5.2-codex"
-    }
+    "maxTasks": 20
   },
   "iterations": {
     "plannerQualityRetries": 5,
