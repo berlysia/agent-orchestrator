@@ -22,18 +22,29 @@ import { extractSessionShort } from './task-helpers.ts';
  * @param task 元のタスク情報
  * @param runLog Worker実行ログ
  * @param judgement Judge判定結果
+ * @param userInstruction 元のユーザー指示（オプショナル）
  * @returns Planner再評価用プロンプト
  */
 export const buildReplanningPrompt = (
   task: Task,
   runLog: string,
   judgement: JudgementResult,
+  userInstruction?: string,
 ): string => {
   const truncatedLog = runLog.length > 5000 ? runLog.slice(-5000) + '\n...(truncated)' : runLog;
 
+  // WHY: 再計画時も元のユーザー指示を参照することで、要件欠落を防止（ADR-014）
+  const userInstructionSection = userInstruction
+    ? `## Original User Instruction
+
+${userInstruction}
+
+`
+    : '';
+
   return `You are a Planner in a multi-agent development system. A task failed to complete and needs replanning.
 
-## Original Task Information
+${userInstructionSection}## Original Task Information
 
 Branch: ${String(task.branch)}
 Type: ${task.taskType}
@@ -130,7 +141,7 @@ export const replanFailedTask = async (
   runLog: string,
   judgement: JudgementResult,
 ): Promise<Result<{ taskIds: TaskId[] }, TaskStoreError>> => {
-  const prompt = buildReplanningPrompt(task, runLog, judgement);
+  const prompt = buildReplanningPrompt(task, runLog, judgement, deps.userInstruction);
 
   // Planner実行
   const agentResult =

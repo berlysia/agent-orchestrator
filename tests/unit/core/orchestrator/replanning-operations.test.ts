@@ -72,5 +72,31 @@ describe('Replanning Operations', () => {
       assert.ok(prompt.length < 15000);
       assert.match(prompt, /truncated/);
     });
+
+    it('should include userInstruction when provided (ADR-014)', () => {
+      const mockTask = createMockTask();
+      const mockJudgement = createMockJudgement();
+      const runLog = 'Worker execution log...';
+      const userInstruction = '認証機能とバリデーションを実装して';
+
+      const prompt = buildReplanningPrompt(mockTask, runLog, mockJudgement, userInstruction);
+
+      // ユーザー指示がプロンプトに含まれているか確認
+      assert.match(prompt, /Original User Instruction/);
+      assert.match(prompt, /認証機能とバリデーションを実装して/);
+    });
+
+    it('should work without userInstruction for backward compatibility (ADR-014)', () => {
+      const mockTask = createMockTask();
+      const mockJudgement = createMockJudgement();
+      const runLog = 'Worker execution log...';
+
+      // userInstruction を省略
+      const prompt = buildReplanningPrompt(mockTask, runLog, mockJudgement);
+
+      // プロンプトは正常に生成されるが、Original User Instruction セクションはない
+      assert.doesNotMatch(prompt, /Original User Instruction/);
+      assert.match(prompt, /Original Task Information/);
+    });
   });
 });

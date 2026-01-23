@@ -276,6 +276,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         judgeModel: deps.config.agents.judge.model,
         planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
         planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
+        userInstruction,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -495,6 +496,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
             judgeModel: deps.config.agents.judge.model,
             planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
             planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
+            userInstruction,
           });
 
           const additionalCompletedIds = additionalPipelineResult.completedTaskIds;
@@ -859,6 +861,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         judgeModel: deps.config.agents.judge.model,
         planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
         planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
+        userInstruction: session.instruction,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -1154,6 +1157,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           judgeModel: deps.config.agents.judge.model,
           planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
           planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
+          userInstruction: session.instruction,
         });
 
         allCompletedTaskIds.push(...pipelineResult.completedTaskIds);

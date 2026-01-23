@@ -108,6 +108,11 @@ export interface PlannerDeps {
    * 設定がなければrefinementをスキップ
    */
   readonly refinementConfig?: import('../../types/planner-session.ts').RefinementConfig;
+  /**
+   * 元のユーザー指示（オプショナル）
+   * WHY: 再計画時に元の要件を参照するため（ADR-014）
+   */
+  readonly userInstruction?: string;
 }
 
 /**

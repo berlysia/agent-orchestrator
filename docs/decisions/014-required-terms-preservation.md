@@ -5,7 +5,7 @@
 **Partially Implemented** 🔶
 
 - 通常計画・refinement時のCoverage評価: ✅ 実装済み
-- 再計画時の元指示追加: ⏳ 未実装（High優先度）
+- 再計画時の元指示追加: ✅ 実装済み
 - fail-closedオプション: ⏳ 未実装（Medium優先度）
 
 ## 選定日時
