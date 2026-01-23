@@ -20,13 +20,16 @@ import { formatReportAsMarkdown } from './formatter.ts';
 export class ReportGenerator {
   private readonly sessionEffects: PlannerSessionEffects;
   private readonly taskStore: TaskStore;
+  private readonly coordPath: string;
 
   constructor(
     sessionEffects: PlannerSessionEffects,
     taskStore: TaskStore,
+    coordPath: string,
   ) {
     this.sessionEffects = sessionEffects;
     this.taskStore = taskStore;
+    this.coordPath = coordPath;
   }
 
   /**
@@ -67,7 +70,7 @@ export class ReportGenerator {
   async saveReport(rootSessionId: string): Promise<string | undefined> {
     try {
       const content = await this.generate(rootSessionId);
-      const dir = 'agent-coord/reports';
+      const dir = join(this.coordPath, 'reports');
       await mkdir(dir, { recursive: true });
       const path = join(dir, `${rootSessionId}.md`);
       await writeFile(path, content, 'utf-8');

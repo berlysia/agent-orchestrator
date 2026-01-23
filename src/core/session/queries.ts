@@ -5,7 +5,7 @@
  */
 
 import type { Result } from 'option-t/plain_result';
-import { createOk, createErr } from 'option-t/plain_result';
+import { createOk } from 'option-t/plain_result';
 import type { TaskStoreError } from '../../types/errors.ts';
 import type { PlannerSession } from '../../types/planner-session.ts';
 import type { PlannerSessionEffects } from '../orchestrator/planner-session-effects.ts';
