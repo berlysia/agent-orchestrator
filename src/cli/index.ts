@@ -11,6 +11,7 @@ import { createInfoCommand } from './commands/info.ts';
 import { createIntegrateCommand } from './commands/integrate.ts';
 import { createFinalizeCommand } from './commands/finalize.ts';
 import { createReportCommand } from './commands/report.ts';
+import { createConfigCommand } from './commands/config.ts';
 import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
@@ -31,5 +32,6 @@ program.addCommand(createInfoCommand());
 program.addCommand(createIntegrateCommand());
 program.addCommand(createFinalizeCommand());
 program.addCommand(createReportCommand());
+program.addCommand(createConfigCommand());
 
 program.parse(process.argv);

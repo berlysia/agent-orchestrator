@@ -16,6 +16,9 @@ dist/
 .env
 .env.local
 
+# Local configuration overrides
+*.local.json
+
 # IDE
 .vscode/
 .idea/

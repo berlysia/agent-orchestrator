@@ -113,7 +113,7 @@ async function executeRun(params: {
 
     // レポート自動生成（成功・失敗どちらでも）
     if (!noReport) {
-      await generateReportSafely(result.sessionId, config.agentCoordPath, result.integrationInfo);
+      await generateReportSafely(result.sessionId, config.agentCoordPath);
     }
 
     if (!result.success) {

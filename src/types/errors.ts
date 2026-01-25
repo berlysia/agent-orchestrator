@@ -371,3 +371,64 @@ export const conflictResolutionRequired = (
   tempBranch,
   message: `Conflict resolution required for task ${parentTaskId}: created resolution task ${conflictTaskId} on ${tempBranch}`,
 });
+
+// ===== Config Errors =====
+
+export type ConfigError =
+  | ConfigFileNotFoundError
+  | ConfigParseError
+  | ConfigValidationError
+  | ConfigMergeError;
+
+export interface ConfigFileNotFoundError {
+  readonly type: 'ConfigFileNotFoundError';
+  readonly filePath: string;
+  readonly message: string;
+}
+
+export interface ConfigParseError {
+  readonly type: 'ConfigParseError';
+  readonly filePath: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface ConfigValidationError {
+  readonly type: 'ConfigValidationError';
+  readonly filePath?: string;
+  readonly details: string;
+  readonly message: string;
+}
+
+export interface ConfigMergeError {
+  readonly type: 'ConfigMergeError';
+  readonly details: string;
+  readonly message: string;
+}
+
+// ConfigError コンストラクタ
+export const configFileNotFound = (filePath: string): ConfigFileNotFoundError => ({
+  type: 'ConfigFileNotFoundError',
+  filePath,
+  message: `Configuration file not found: ${filePath}`,
+});
+
+export const configParseError = (filePath: string, cause?: unknown): ConfigParseError => ({
+  type: 'ConfigParseError',
+  filePath,
+  cause,
+  message: `Failed to parse configuration file: ${filePath}${cause instanceof Error ? `\n${cause.message}` : ''}`,
+});
+
+export const configValidationError = (details: string, filePath?: string): ConfigValidationError => ({
+  type: 'ConfigValidationError',
+  filePath,
+  details,
+  message: `Configuration validation failed${filePath ? ` (${filePath})` : ''}: ${details}`,
+});
+
+export const configMergeError = (details: string): ConfigMergeError => ({
+  type: 'ConfigMergeError',
+  details,
+  message: `Configuration merge failed: ${details}`,
+});

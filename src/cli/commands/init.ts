@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { createDefaultConfig, ConfigSchema } from '../../types/config.ts';
 import { toDisplayPath } from '../utils/display-path.ts';
 
@@ -14,6 +15,7 @@ import { toDisplayPath } from '../utils/display-path.ts';
 export function createInitCommand(): Command {
   const initCommand = new Command('init')
     .description('Initialize agent orchestrator configuration')
+    .option('--global', 'Initialize global configuration (~/.agent/config.json)', false)
     .option('--app-repo <path>', 'Path to application repository', process.cwd())
     .option(
       '--agent-coord <path>',
@@ -23,11 +25,15 @@ export function createInitCommand(): Command {
     .option('--force', 'Overwrite existing configuration without confirmation', false)
     .action(async (options) => {
       try {
-        await initializeProject({
-          appRepoPath: path.resolve(options.appRepo),
-          agentCoordPath: path.resolve(options.agentCoord),
-          force: options.force,
-        });
+        if (options.global) {
+          await initializeGlobalConfig({ force: options.force });
+        } else {
+          await initializeProject({
+            appRepoPath: path.resolve(options.appRepo),
+            agentCoordPath: path.resolve(options.agentCoord),
+            force: options.force,
+          });
+        }
       } catch (error) {
         console.error('Initialization failed:', error);
         process.exit(1);
@@ -108,4 +114,92 @@ async function createCoordRepoStructure(coordPath: string): Promise<void> {
   for (const dir of directories) {
     await fs.writeFile(path.join(dir, '.gitkeep'), '', 'utf-8');
   }
+}
+
+/**
+ * グローバル設定の初期化
+ *
+ * WHY: ユーザーごとのデフォルト設定を~/.agent/config.jsonに作成
+ */
+async function initializeGlobalConfig(params: { force: boolean }): Promise<void> {
+  const { force } = params;
+  const homeDir = os.homedir();
+  const globalConfigPath = path.join(homeDir, '.agent', 'config.json');
+
+  // 既存設定ファイルチェック
+  if (!force) {
+    try {
+      await fs.access(globalConfigPath);
+      console.error(
+        `Global configuration file already exists: ${toDisplayPath(globalConfigPath)}\nUse --force to overwrite`,
+      );
+      process.exit(1);
+    } catch {
+      // ファイルが存在しない場合は続行
+    }
+  }
+
+  // グローバル設定のテンプレート
+  // WHY: appRepoPathとagentCoordPathは必須フィールドだが、グローバル設定では
+  //      各プロジェクトで上書きされることを想定し、プレースホルダーを設定
+  const globalConfig = {
+    $schema: '../../.agent/config-schema.json',
+    appRepoPath: '.',
+    agentCoordPath: '.agent/coord',
+    maxWorkers: 3,
+    agents: {
+      planner: { type: 'claude', model: 'claude-opus-4-5' },
+      worker: { type: 'claude', model: 'claude-sonnet-4-5' },
+      judge: { type: 'claude', model: 'claude-haiku-4-5' },
+    },
+    checks: {
+      enabled: true,
+      failureMode: 'block',
+      commands: [],
+      maxRetries: 3,
+    },
+    commit: {
+      autoSignature: false,
+      integrationSignature: true,
+    },
+    integration: {
+      method: 'auto',
+      postIntegrationEvaluation: true,
+      maxAdditionalTaskIterations: 3,
+      mergeStrategy: 'ff-prefer',
+    },
+    planning: {
+      qualityThreshold: 60,
+      strictContextValidation: false,
+      maxTaskDuration: 4,
+      maxTasks: 5,
+    },
+    iterations: {
+      plannerQualityRetries: 5,
+      judgeTaskRetries: 3,
+      orchestrateMainLoop: 3,
+      serialChainTaskRetries: 3,
+    },
+    replanning: {
+      enabled: true,
+      maxIterations: 3,
+      timeoutSeconds: 300,
+    },
+    worktree: {
+      postCreate: [],
+    },
+  };
+
+  // ディレクトリ作成
+  await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+
+  // 設定ファイル書き込み
+  await fs.writeFile(globalConfigPath, JSON.stringify(globalConfig, null, 2) + '\n', 'utf-8');
+
+  console.log(`✓ Global configuration file created: ${toDisplayPath(globalConfigPath)}`);
+  console.log(`\nYou can now customize global defaults like:`);
+  console.log(`  - maxWorkers`);
+  console.log(`  - agents.*.model`);
+  console.log(`  - checks.commands`);
+  console.log(`\nProject-specific settings will override these values.`);
 }
