@@ -2880,9 +2880,17 @@ export const buildFeedbackPrompt = (
 ): string => {
   const lines: string[] = [];
 
+  // タスクIDマッピングを作成（セッションID付き → 連番形式）
+  // WHY: replan時にエージェントが正しい "task-1", "task-2" 形式のIDを生成できるよう、
+  //      feedbackプロンプトでは常に連番形式のIDを示す必要がある
+  const taskIdMap = new Map<string, string>();
+  currentTasks.forEach((task, index) => {
+    taskIdMap.set(task.id, `task-${index + 1}`);
+  });
+
   // 現在のタスク一覧をJSON形式で表示
-  const taskBreakdowns = currentTasks.map((task) => ({
-    id: task.id,
+  const taskBreakdowns = currentTasks.map((task, index) => ({
+    id: `task-${index + 1}`, // 連番形式のIDを使用（"task-1", "task-2", ...）
     description: task.acceptance, // acceptanceを説明として使用
     branch: task.branch,
     scopePaths: task.scopePaths,
@@ -2890,7 +2898,7 @@ export const buildFeedbackPrompt = (
     type: task.taskType,
     estimatedDuration: 4, // デフォルト値（元のタスクには保存されていない）
     context: task.context,
-    dependencies: task.dependencies,
+    dependencies: task.dependencies.map((depId) => taskIdMap.get(depId) ?? depId), // 依存関係も連番形式に変換
     summary: task.summary ?? undefined,
   }));
 
