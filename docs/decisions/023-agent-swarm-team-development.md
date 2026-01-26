@@ -189,7 +189,17 @@ Phase 1 で実装された基盤：
   - `allTasksCompleted()` - 全タスク完了判定
   - Judge判定結果に基づくアクション決定（accept/continue/replan/escalate）
   - ユニットテスト6件（全合格）
-- ⏳ Task 4: エスカレーション実装（未実装）
+- ✅ Task 4: エスカレーション実装（完了）
+  - `src/core/orchestrator/leader-escalation.ts` - エスカレーション処理実装
+  - `createEscalationRecord()` - エスカレーション記録作成ヘルパー
+  - `handleUserEscalation()` - User エスカレーション記録と停止
+  - `handlePlannerEscalation()` - Planner 再計画を実際に実行
+  - `handleTechnicalEscalation()` - 技術的困難を User へフォールバック
+  - `getEscalationHistory()` / `getPendingEscalations()` - エスカレーション履歴取得
+  - `leader-execution-loop.ts` 統合 - Planner/User エスカレーション処理更新
+  - ユニットテスト9件（全合格）、統合テスト6件（全合格）
+  - Planner エスカレーション時に実際に再計画を実行し、新タスクを生成
+  - User エスカレーション時に停止（Phase 3 で対話型解決実装予定）
 - ⏳ Task 5: 完了判定（未実装）
 - ⏳ Task 6: orchestrate.ts 統合（未実装）
 - ⏳ Task 7: E2E テスト（未実装）
@@ -488,22 +498,25 @@ Task 7 (E2E Tests)
 #### ファイル変更一覧
 
 **新規ファイル**:
-| ファイル | 説明 |
-|---------|------|
-| `src/core/orchestrator/leader-input-loader.ts` | Leader入力ローダー（パターンA/B対応） |
-| `src/core/orchestrator/leader-execution-loop.ts` | Leader 実行ループ |
-| `src/core/orchestrator/leader-escalation.ts` | エスカレーション実装 |
-| `src/core/orchestrator/leader-completion.ts` | 完了判定 |
-| `tests/unit/leader-input-loader.test.ts` | 入力ローダーユニットテスト |
-| `tests/e2e/lead-execution.test.ts` | E2E テスト |
+| ファイル | 説明 | 状態 |
+|---------|------|------|
+| `src/core/orchestrator/leader-input-loader.ts` | Leader入力ローダー（パターンA/B対応） | ✅ 完了 |
+| `src/core/orchestrator/leader-execution-loop.ts` | Leader 実行ループ | ✅ 完了 |
+| `src/core/orchestrator/leader-escalation.ts` | エスカレーション実装 | ✅ 完了 |
+| `src/core/orchestrator/leader-completion.ts` | 完了判定 | ⏳ 未実装 |
+| `tests/unit/leader-input-loader.test.ts` | 入力ローダーユニットテスト | ✅ 完了 |
+| `tests/unit/leader-escalation.test.ts` | エスカレーションユニットテスト | ✅ 完了 |
+| `tests/unit/leader-execution-loop.test.ts` | 実行ループユニットテスト | ✅ 完了 |
+| `tests/e2e/lead-execution.test.ts` | E2E テスト | ⏳ 未実装 |
 
 **修正ファイル**:
-| ファイル | 変更内容 |
-|---------|---------|
-| `src/core/orchestrator/leader-operations.ts` | `LeaderDeps` 拡張、関数実装 |
-| `src/core/orchestrator/orchestrate.ts` | `executeWithLeader()` TODO 実装 |
-| `src/cli/commands/lead.ts` | Phase 2 では既存コマンドのみ（`start`, `status`, `list`） |
-| `src/types/leader-session.ts` | `childPlannerSessionIds` フィールド追加（replan時の追跡用） |
+| ファイル | 変更内容 | 状態 |
+|---------|---------|------|
+| `src/core/orchestrator/leader-operations.ts` | `LeaderDeps` 拡張、関数実装 | ✅ 完了 |
+| `src/core/orchestrator/leader-execution-loop.ts` | Planner/User エスカレーション処理統合 | ✅ 完了 |
+| `src/core/orchestrator/orchestrate.ts` | `executeWithLeader()` TODO 実装 | ⏳ 未実装 |
+| `src/cli/commands/lead.ts` | Phase 2 では既存コマンドのみ（`start`, `status`, `list`） | ✅ 完了 |
+| `src/types/leader-session.ts` | `childPlannerSessionIds` フィールド追加（replan時の追跡用） | ⏳ 不要（Phase 3 で検討） |
 
 **Phase 3 追加予定**:
 - `src/cli/commands/lead.ts` - `resolve`, `escalations`, `resume` サブコマンド

@@ -11,9 +11,11 @@ import type { LeaderDeps } from './leader-operations.ts';
 import {
   assignTaskToMember,
   updateLeaderSessionStatus,
-  escalateToUser,
-  escalateToPlanner,
 } from './leader-operations.ts';
+import {
+  handleUserEscalation,
+  handlePlannerEscalation,
+} from './leader-escalation.ts';
 
 /**
  * Leader 実行ループの結果
@@ -248,38 +250,73 @@ export async function executeLeaderLoop(
         // 再計画が必要
         console.log(`  🔄 Task needs replanning`);
 
-        // Planner へエスカレーション
-        const escalationResult = await escalateToPlanner(
-          deps,
-          currentSession,
-          `Task ${task.id} failed and needs replanning: ${judgementResult.reason}`,
-          task.id,
-        );
+        // Worker 実行ログを取得
+        const { workerResult } = assignResult.val;
+        const runLogResult = await deps.runnerEffects.readLog(workerResult.runId);
+        if (isErr(runLogResult)) {
+          console.error(`  ⚠️  Failed to read run log: ${runLogResult.err.message}`);
+          // ログ取得失敗時は空文字列でフォールバック
+        }
+        const runLog = runLogResult.ok ? runLogResult.val : '';
 
-        if (isErr(escalationResult)) {
+        // 最新のセッションをロード（assignTaskToMember が履歴を追加している）
+        const sessionReloadResult = await deps.sessionEffects.loadSession(
+          currentSession.sessionId,
+        );
+        if (isErr(sessionReloadResult)) {
           return createErr(
-            ioError(`Failed to escalate to Planner: ${escalationResult.err.message}`),
+            ioError(`Failed to reload session: ${sessionReloadResult.err.message}`),
           );
         }
+        currentSession = sessionReloadResult.val;
 
-        currentSession = escalationResult.val;
+        // Planner 再計画を実行（Phase 2 Task 4）
+        const plannerResult = await handlePlannerEscalation(
+          deps,
+          currentSession,
+          task,
+          runLog,
+          `Task ${task.id} failed and needs replanning: ${judgementResult.reason}`,
+        );
 
-        // Phase 2: Plannerエスカレーションは停止（Phase 3 で実際の再計画実行）
-        pendingEscalation = {
-          target: 'planner',
-          reason: `Task needs replanning: ${judgementResult.reason}`,
-          relatedTaskId: task.id,
-        };
+        if (isErr(plannerResult)) {
+          console.error(`  ❌ Failed to replan task: ${plannerResult.err.message}`);
+          console.log(`  ↪️  Falling back to User escalation`);
 
-        console.log(`  ⏸️  Escalated to Planner, stopping execution`);
-        break;
+          // 再計画失敗時は User エスカレーションへフォールバック
+          const userEscalationResult = await handleUserEscalation(
+            deps,
+            currentSession,
+            `Replanning failed: ${plannerResult.err.message}. Original reason: ${judgementResult.reason}`,
+            task.id,
+          );
+
+          if (isErr(userEscalationResult)) {
+            return createErr(
+              ioError(`Failed to escalate to User: ${userEscalationResult.err.message}`),
+            );
+          }
+
+          currentSession = userEscalationResult.val;
+          pendingEscalation = {
+            target: 'user',
+            reason: `Replanning failed, needs user intervention`,
+            relatedTaskId: task.id,
+          };
+          break;
+        }
+
+        // 再計画成功: 新タスクが生成されているので実行を継続
+        currentSession = plannerResult.val.session;
+        console.log(`  ▶️  Replanning successful, continuing execution with new tasks`);
+        // break しない（継続実行）
       } else {
         // その他の失敗（ユーザーエスカレーション）
         console.log(`  ⚠️  Task failed: ${judgementResult.reason}`);
         failedTaskIds.push(task.id);
 
-        // ユーザーへエスカレーション
-        const escalationResult = await escalateToUser(
+        // ユーザーへエスカレーション（Phase 2 Task 4）
+        const escalationResult = await handleUserEscalation(
           deps,
           currentSession,
           `Task ${task.id} failed: ${judgementResult.reason}`,
@@ -299,7 +336,6 @@ export async function executeLeaderLoop(
           relatedTaskId: task.id,
         };
 
-        console.log(`  ⏸️  Escalated to User, stopping execution`);
         break;
       }
     }

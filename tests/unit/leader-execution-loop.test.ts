@@ -22,6 +22,9 @@ describe('leader-execution-loop', () => {
     // タスク状態管理用 Map
     tasksState = new Map();
 
+    // セッション状態管理用変数（テスト間で共有）
+    let savedSession: LeaderSession | null = null;
+
     // Mock TaskStore
     taskStore = {
       createTask: async (task: Task) => {
@@ -52,10 +55,13 @@ describe('leader-execution-loop', () => {
       writeCheck: async () => createOk(undefined),
     } as TaskStore;
 
-    // Mock SessionEffects
+    // Mock SessionEffects（セッションの保存・読み込みを実装）
     sessionEffects = {
-      saveSession: async (_s: LeaderSession) => createOk(undefined),
-      loadSession: async () => createOk(session),
+      saveSession: async (s: LeaderSession) => {
+        savedSession = s;
+        return createOk(undefined);
+      },
+      loadSession: async () => createOk(savedSession || session),
       sessionExists: async () => createOk(true),
       listSessions: async () => createOk([]),
     };
@@ -278,21 +284,69 @@ describe('leader-execution-loop', () => {
     });
 
     it('should escalate to Planner when shouldReplan is true', async () => {
-      // Mock JudgeOps: shouldReplan を返す
+      // Mock JudgeOps: 1回目は shouldReplan、2回目以降は success
+      let judgeCallCount = 0;
       const customJudgeOps = {
-        judgeTask: async () =>
-          createOk({
-            taskId: taskId('task-1'),
-            success: false,
-            shouldContinue: false,
-            shouldReplan: true,
-            alreadySatisfied: false,
-            reason: 'Task needs replanning',
-            missingRequirements: ['Missing requirement X'],
-          }),
+        judgeTask: async (tid: any) => {
+          judgeCallCount++;
+          if (judgeCallCount === 1) {
+            // 最初のタスク: shouldReplan
+            return createOk({
+              taskId: tid,
+              success: false,
+              shouldContinue: false,
+              shouldReplan: true,
+              alreadySatisfied: false,
+              reason: 'Task needs replanning',
+              missingRequirements: ['Missing requirement X'],
+            });
+          } else {
+            // 再計画後の新タスク: success
+            return createOk({
+              taskId: tid,
+              success: true,
+              shouldContinue: false,
+              shouldReplan: false,
+              alreadySatisfied: false,
+              reason: 'Task completed successfully',
+              missingRequirements: [],
+            });
+          }
+        },
       } as any;
 
-      const customDeps = { ...deps, judgeOps: customJudgeOps };
+      // Mock RunnerEffects: readLog と runClaudeAgent を実装
+      const customRunnerEffects = {
+        readLog: async () => createOk('Test log content'),
+        runClaudeAgent: async () =>
+          createOk({
+            finalResponse: JSON.stringify([
+              {
+                id: 'task-1',
+                description: 'Replanned task',
+                branch: 'feature/replanned',
+                scopePaths: ['test.ts'],
+                acceptance: 'Replanned acceptance',
+                type: 'implementation',
+                estimatedDuration: 2,
+                context: 'Replanned context',
+                dependencies: [],
+              },
+            ]),
+          }),
+        ensureRunsDir: async () => createOk(undefined),
+        initializeLogFile: async () => createOk(undefined),
+        appendLog: async () => createOk(undefined),
+        saveRunMetadata: async () => createOk(undefined),
+        loadRunMetadata: async () => createOk({} as any),
+        listRunLogs: async () => createOk([]),
+      } as any;
+
+      const customDeps = {
+        ...deps,
+        judgeOps: customJudgeOps,
+        runnerEffects: customRunnerEffects,
+      };
 
       const task: Task = {
         id: taskId('task-1'),
@@ -324,12 +378,18 @@ describe('leader-execution-loop', () => {
       if (!result.ok) throw new Error('Unreachable');
 
       const loopResult = result.val;
-      assert.equal(loopResult.session.status, LeaderSessionStatus.ESCALATING);
-      assert.equal(loopResult.completedTaskIds.length, 0);
-      assert.equal(loopResult.failedTaskIds.length, 0);
-      assert.ok(loopResult.pendingEscalation, 'Should have pending escalation');
-      assert.equal(loopResult.pendingEscalation?.target, 'planner');
-      assert.equal(loopResult.pendingEscalation?.relatedTaskId, 'task-1');
+
+      // Phase 2 Task 4: Planner エスカレーションは再計画を実行し、成功時は実行を継続
+      // タスクは REPLACED_BY_REPLAN 状態になるが、新タスクが生成されているため、
+      // 最終状態は COMPLETED（全タスク完了）または REVIEWING（新タスク待ち）になる
+      assert.ok(
+        loopResult.session.status === LeaderSessionStatus.COMPLETED ||
+          loopResult.session.status === LeaderSessionStatus.REVIEWING,
+        `Status should be COMPLETED or REVIEWING, got ${loopResult.session.status}`,
+      );
+      // エスカレーション記録は保存されている（最初の Planner エスカレーション）
+      assert.ok(loopResult.session.escalationRecords.length >= 1, 'Should have at least one escalation record');
+      assert.equal(loopResult.session.escalationRecords[0]?.target, 'planner');
     });
 
     it('should escalate to User when task fails without shouldReplan', async () => {
