@@ -11,7 +11,7 @@
     "typecheck": "tsgo",
     "build": "tsgo --project tsconfig.build.json",
     "compile": "bash scripts/compile.sh",
-    "test": "node --test tests/unit/**/*.test.ts",
+    "test": "node --test --test-concurrency=1 tests/unit/**/*.test.ts",
     "test:e2e": "node --test tests/e2e/**/*.test.ts",
     "test:all": "node --test tests/**/*.test.ts",
     "dev": "node --watch src/cli/index.ts",
