@@ -15,7 +15,7 @@ export type FailedTaskHandling = 'retry' | 'continue' | 'skip';
  * @param choices 選択肢の配列（例: ['1', '2', '3']）
  * @returns ユーザーの入力（choicesのいずれかが保証される）
  */
-async function promptChoice(question: string, choices: string[]): Promise<string> {
+export async function promptChoice(question: string, choices: string[]): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -98,4 +98,45 @@ export async function promptYesNo(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * 自由入力（1行）
+ *
+ * @param question 質問文
+ * @returns ユーザーの入力
+ */
+export async function promptFreeText(question: string): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question(`${question}\n> `);
+    return answer.trim();
+  } finally {
+    rl.close();
+  }
+}
+
+/**
+ * 複数選択肢から選択
+ *
+ * @param question 質問文
+ * @param choices 選択肢の配列（label と value を持つオブジェクト）
+ * @returns 選択されたvalue
+ */
+export async function promptSelect(
+  question: string,
+  choices: { label: string; value: string }[],
+): Promise<string> {
+  console.log(`\n${question}`);
+  choices.forEach((choice, idx) => {
+    console.log(`  ${idx + 1}. ${choice.label}`);
+  });
+
+  const validChoices = choices.map((_, idx) => String(idx + 1));
+  const choice = await promptChoice('選択してください: ', validChoices);
+  return choices[Number(choice) - 1]!.value;
 }

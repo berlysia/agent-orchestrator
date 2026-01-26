@@ -2,9 +2,13 @@
 
 ## ステータス
 
-**Proposed** 📝
+**Accepted** ✅
 
 ## 提案日時
+
+2026-01-27
+
+## 承認日時
 
 2026-01-27
 
@@ -325,26 +329,27 @@ agent plan --resume planning-abc123
 ## 実装チェックリスト
 
 ### Phase 1: Foundation（型・ストレージ）
-- [ ] 型定義の作成（planning-session.ts）
-- [ ] ストレージインターフェース（planning-session-effects.ts）
-- [ ] ストレージ実装（planning-session-effects-impl.ts）
-- [ ] ユニットテスト（planning-session-effects.test.ts）
+- [x] 型定義の作成（planning-session.ts）
+- [x] ストレージインターフェース（planning-session-effects.ts）
+- [x] ストレージ実装（planning-session-effects-impl.ts）
+- [x] ユニットテスト（planning-session-effects.test.ts）
 
 ### Phase 2: Core Operations
-- [ ] コアロジックの実装（planning-operations.ts）
-- [ ] Discovery/Design/Reviewプロンプト設計
-- [ ] PlannerSession連携（approvePlan()）
-- [ ] ユニットテスト（planning-operations.test.ts）
+- [x] コアロジックの実装（planning-operations.ts）
+- [x] Discovery/Design/Reviewプロンプト設計
+- [x] PlannerSession連携（approvePlan()）
+- [x] ユニットテスト（planning-operations.test.ts）
 
 ### Phase 3: CLI Integration
-- [ ] promptFreeText()追加（prompt.ts）
-- [ ] CLIコマンド実装（plan.ts）
-- [ ] コマンド登録（index.ts）
-- [ ] E2Eテスト（cli-plan.test.ts）
+- [x] promptFreeText(), promptSelect()追加（prompt.ts）
+- [x] CLIコマンド実装（plan.ts）
+- [x] コマンド登録（index.ts）
+- [x] E2Eテスト（cli-plan.test.ts）
 
 ### Phase 4: Documentation
-- [ ] ADR作成（本文書）
-- [ ] アーキテクチャドキュメント更新
+- [x] ADR作成（本文書）
+- [x] ADRステータス更新（Proposed → Accepted）
+- [x] アーキテクチャドキュメント更新
 
 ## エッジケース処理
 

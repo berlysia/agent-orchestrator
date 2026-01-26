@@ -6,17 +6,45 @@ Agent Orchestratorは、Planner/Worker/Judge アーキテクチャに基づく�
 
 ## Core Concepts
 
-### 1. Session (PlannerSession)
+### 1. Planning Session
 
-セッションは、Plannerによる1回のタスク分解とその結果を表す中央的なエンティティです。
+**Planning Session**は、タスク実行前に要件を明確化し、設計を決定するための対話セッションです。
+
+- **SessionId**: `planning-<UUID>` 形式の一意識別子
+- **状態遷移**: DISCOVERY → DESIGN → REVIEW → APPROVED
+- **責務**: 要件明確化、設計選択、仕様確定
+- **次ステップ**: 承認後に PlannerSession を作成し、タスク分解へ移行
+
+**状態遷移図**:
+
+```
+DISCOVERY  : 要件明確化（質問生成・回答収集）
+    ↓
+DESIGN     : 設計決定（選択肢提示・決定記録）
+    ↓
+REVIEW     : レビュー・承認（サマリー確認）
+    ↓ (approve)
+APPROVED   : 承認済み（PlannerSessionへ移行）
+
+REVIEW → (reject) → DESIGN  : 拒否時はDESIGNに戻る（最大3回）
+任意の状態 → CANCELLED      : ユーザーが明示的にキャンセル
+任意の状態 → FAILED         : LLM呼び出し失敗等
+```
+
+詳細は [docs/decisions/021-interactive-planning-mode.md](decisions/021-interactive-planning-mode.md) を参照。
+
+### 2. Planner Session
+
+**Planner Session**は、Plannerによる1回のタスク分解とその結果を表す中央的なエンティティです。
 
 - **SessionId**: `planner-<UUID>` 形式の一意識別子
 - **Session → Task**: 1対多。1セッションが複数タスクを生成
 - **Task → Run**: 1対多。1タスクに複数の実行履歴
+- **連携**: Planning Session からの情報を引き継いでタスク分解を実行
 
 詳細は [docs/session-concept.md](session-concept.md) を参照。
 
-### 2. Task State Management
+### 3. Task State Management
 
 タスクは以下の状態を持ちます：
 

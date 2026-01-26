@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { createInitCommand } from './commands/init.ts';
 import { createRunCommand } from './commands/run.ts';
+import { createPlanCommand } from './commands/plan.ts';
 import { createStatusCommand } from './commands/status.ts';
 import { createStopCommand } from './commands/stop.ts';
 import { createResumeCommand } from './commands/resume.ts';
@@ -24,6 +25,7 @@ program
 // Register subcommands
 program.addCommand(createInitCommand());
 program.addCommand(createRunCommand());
+program.addCommand(createPlanCommand());
 program.addCommand(createStatusCommand());
 program.addCommand(createStopCommand());
 program.addCommand(createResumeCommand());
