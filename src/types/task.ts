@@ -31,6 +31,109 @@ export const TaskState = {
 export type TaskState = (typeof TaskState)[keyof typeof TaskState];
 
 /**
+ * Worker Feedback Type
+ *
+ * Worker がタスク実行後に報告するフィードバックの種類
+ *
+ * - implementation: 実装タスクの結果報告
+ * - exploration: 調査・探索タスクの結果報告
+ * - difficulty: 実行困難・障害の報告
+ */
+export const WorkerFeedbackType = {
+  IMPLEMENTATION: 'implementation',
+  EXPLORATION: 'exploration',
+  DIFFICULTY: 'difficulty',
+} as const;
+
+export type WorkerFeedbackType =
+  (typeof WorkerFeedbackType)[keyof typeof WorkerFeedbackType];
+
+/**
+ * Impediment Category
+ *
+ * Worker が実行困難に遭遇した際の障害カテゴリ
+ *
+ * - technical: 技術的問題（バグ、API制限、ツールの問題など）
+ * - ambiguity: 要件の曖昧さ（仕様が不明確、判断基準が不明など）
+ * - scope: スコープの問題（想定外の作業範囲、追加の依存など）
+ * - dependency: 依存関係の問題（他タスクの未完了、外部サービス依存など）
+ */
+export const ImpedimentCategory = {
+  TECHNICAL: 'technical',
+  AMBIGUITY: 'ambiguity',
+  SCOPE: 'scope',
+  DEPENDENCY: 'dependency',
+} as const;
+
+export type ImpedimentCategory =
+  (typeof ImpedimentCategory)[keyof typeof ImpedimentCategory];
+
+/**
+ * Requested Action
+ *
+ * Worker が障害に対して要求するアクション
+ *
+ * - clarification: 要件の明確化を求める
+ * - replan: タスクの再計画を求める
+ * - escalate: 上位へのエスカレーションを求める
+ * - continue: 継続実行を試みる
+ */
+export const RequestedAction = {
+  CLARIFICATION: 'clarification',
+  REPLAN: 'replan',
+  ESCALATE: 'escalate',
+  CONTINUE: 'continue',
+} as const;
+
+export type RequestedAction = (typeof RequestedAction)[keyof typeof RequestedAction];
+
+/**
+ * Worker Feedback Schema
+ *
+ * Worker がタスク実行後に報告する詳細なフィードバック
+ * Leader が次のアクションを決定する際に使用
+ */
+export const WorkerFeedbackSchema = z.discriminatedUnion('type', [
+  // Implementation feedback: 実装タスクの結果
+  z.object({
+    type: z.literal(WorkerFeedbackType.IMPLEMENTATION),
+    result: z.enum(['success', 'partial', 'failed']),
+    changes: z.array(z.string()),
+    notes: z.string().optional(),
+  }),
+  // Exploration feedback: 調査・探索タスクの結果
+  z.object({
+    type: z.literal(WorkerFeedbackType.EXPLORATION),
+    findings: z.string(),
+    recommendations: z.array(z.string()),
+    confidence: z.enum(['high', 'medium', 'low']),
+  }),
+  // Difficulty feedback: 実行困難・障害の報告
+  z.object({
+    type: z.literal(WorkerFeedbackType.DIFFICULTY),
+    issue: z.string(),
+    attempts: z.array(z.string()),
+    impediment: z.object({
+      category: z.enum([
+        ImpedimentCategory.TECHNICAL,
+        ImpedimentCategory.AMBIGUITY,
+        ImpedimentCategory.SCOPE,
+        ImpedimentCategory.DEPENDENCY,
+      ]),
+      requestedAction: z.enum([
+        RequestedAction.CLARIFICATION,
+        RequestedAction.REPLAN,
+        RequestedAction.ESCALATE,
+        RequestedAction.CONTINUE,
+      ]),
+    }),
+    suggestion: z.string().optional(),
+  }),
+]);
+
+export type WorkerFeedback = z.infer<typeof WorkerFeedbackSchema>;
+
+/**
  * BLOCKED状態の理由
  *
  * WHY: BLOCKED理由を細分化することで、統合ブランチからの再試行可否を判定できる
@@ -167,6 +270,16 @@ export const TaskSchema = z.object({
     })
     .nullable()
     .optional(),
+
+  /**
+   * Worker フィードバック（Leader セッション用）
+   *
+   * WHY: Leader が Worker の実行結果を詳細に把握し、適切な次アクションを決定するため
+   *      - 実装タスクの成功/部分成功/失敗の詳細
+   *      - 探索タスクの発見事項と推奨事項
+   *      - 実行困難時の障害カテゴリと要求アクション
+   */
+  workerFeedback: WorkerFeedbackSchema.nullable().optional(),
 
   /** コンフリクト解消待ちの情報（BLOCKED状態時のみ） */
   pendingConflictResolution: z

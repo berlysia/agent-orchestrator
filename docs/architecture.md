@@ -44,7 +44,37 @@ REVIEW → (reject) → DESIGN  : 拒否時はDESIGNに戻る（最大3回）
 
 詳細は [docs/session-concept.md](session-concept.md) を参照。
 
-### 3. Task State Management
+### 3. Leader Session (Phase 1: In Development)
+
+**Leader Session**は、Worker の実行を動的に管理し、フィードバックに基づいて次アクションを決定するセッションです。
+
+- **SessionId**: `leader-<UUID>` 形式の一意識別子
+- **状態遷移**: PLANNING → EXECUTING → REVIEWING → ESCALATING → COMPLETED
+- **責務**: メンバー指揮、フィードバック解釈、エスカレーション判断
+- **連携**: Planning Session から計画を引き継ぎ、Planner と協調して動作
+
+**エスカレーション戦略**:
+
+```
+Worker フィードバック
+    ↓
+Leader 評価
+    ↓
+┌─────────────────┬──────────────────┬─────────────────┐
+│ 要件・方針      │ タスク構造       │ 技術的助言      │
+│ → User          │ → Planner        │ → External      │
+│                 │                  │    Advisor      │
+└─────────────────┴──────────────────┴─────────────────┘
+```
+
+**Worker フィードバック形式**:
+- `implementation`: 実装タスクの成功/失敗詳細
+- `exploration`: 探索タスクの発見事項と推奨事項
+- `difficulty`: 実行困難時の障害カテゴリと要求アクション
+
+詳細は [docs/decisions/023-agent-swarm-team-development.md](decisions/023-agent-swarm-team-development.md) を参照。
+
+### 4. Task State Management
 
 タスクは以下の状態を持ちます：
 
@@ -67,7 +97,7 @@ NEEDS_CONTINUATION → RUNNING → (Judge判定) → DONE
                                            → NEEDS_CONTINUATION (継続)
 ```
 
-### 3. Concurrency Control (CAS)
+### 5. Concurrency Control (CAS)
 
 **Compare-And-Swap (CAS)** による楽観的並行制御：
 
@@ -94,7 +124,7 @@ Worktreeで各Workerは独立した作業ディレクトリを持ちますが、
 
 詳細: [docs/decisions/001-cas-implementation-approach.md](decisions/001-cas-implementation-approach.md)
 
-### 4. Storage Layer
+### 6. Storage Layer
 
 **TaskStore インターフェース**:
 

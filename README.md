@@ -5,6 +5,7 @@ Multi-agent collaborative development tool with Planner/Worker/Judge architectur
 ## Features
 
 - **Multi-agent orchestration**: Planner designs tasks, Workers implement, Judge validates
+- **Leader-directed execution**: Leader agent coordinates members with dynamic feedback and escalation (Phase 1: In Development)
 - **Worktree-based parallelization**: Parallel task execution using Git worktrees
 - **CAS concurrency control**: Optimistic concurrency using Compare-And-Swap
 - **SDK integration**: Claude Agent SDK and OpenAI Codex SDK support
