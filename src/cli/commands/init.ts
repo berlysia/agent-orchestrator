@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { createDefaultConfig, ConfigSchema } from '../../types/config.ts';
+import * as readline from 'node:readline/promises';
 import { toDisplayPath } from '../utils/display-path.ts';
 
 /**
@@ -79,6 +79,39 @@ export function createInitCommand(): Command {
 }
 
 /**
+ * グローバル設定の存在確認
+ */
+async function checkGlobalConfigExists(): Promise<boolean> {
+  const homeDir = os.homedir();
+  const configHome = process.env['XDG_CONFIG_HOME'] || path.join(homeDir, '.config');
+  const globalConfigPath = path.join(configHome, 'agent-orchestrator', 'config.json');
+
+  try {
+    await fs.access(globalConfigPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ユーザーに確認を求める
+ */
+async function askUser(question: string): Promise<boolean> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const answer = await rl.question(`${question} (y/n): `);
+    return answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+/**
  * プロジェクト初期化の実装
  */
 async function initializeProject(params: {
@@ -103,19 +136,27 @@ async function initializeProject(params: {
     }
   }
 
-  // 設定ファイル生成
-  const config = createDefaultConfig({
+  // グローバル設定の確認
+  const hasGlobalConfig = await checkGlobalConfigExists();
+  if (!hasGlobalConfig) {
+    console.log('⚠️  Global configuration not found.');
+    const shouldCreateGlobal = await askUser('Would you like to create global configuration now?');
+
+    if (shouldCreateGlobal) {
+      await initializeGlobalConfig({ force: false });
+      console.log('');
+    } else {
+      console.log('⚠️  Continuing without global configuration.');
+      console.log('   You can create it later with: agent init --global\n');
+    }
+  }
+
+  // プロジェクト設定ファイル生成（最小限）
+  // WHY: グローバル設定から継承するため、プロジェクト固有の値のみ記載
+  const projectConfig = {
+    $schema: './config-schema.json',
     appRepoPath,
     agentCoordPath,
-  });
-
-  // スキーマバリデーション
-  const validatedConfig = ConfigSchema.parse(config);
-
-  // $schemaフィールドを追加
-  const configWithSchema = {
-    $schema: './config-schema.json',
-    ...validatedConfig,
   };
 
   // .agent ディレクトリ作成
