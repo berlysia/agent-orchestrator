@@ -122,7 +122,7 @@ async function initializeProject(params: {
   await fs.mkdir(path.dirname(configPath), { recursive: true });
 
   // config.json 書き込み
-  await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2) + '\n', 'utf-8');
+  await fs.writeFile(configPath, JSON.stringify(projectConfig, null, 2) + '\n', 'utf-8');
 
   console.log(`✓ Configuration file created: ${toDisplayPath(configPath)}`);
 
@@ -143,35 +143,12 @@ async function initializeProject(params: {
   // スキーマファイルをコピー
   await copySchemaFile(path.dirname(configPath));
 
-  // agent-coord リポジトリのディレクトリ構造作成
-  await createCoordRepoStructure(agentCoordPath);
+  // WHY: coord/ディレクトリは実行時に自動作成されるため、ここでは作成しない
 
   console.log(`\n✓ Initialization complete!`);
   console.log(`\nNext steps:`);
   console.log(`  1. Run: agent run "your task description"`);
   console.log(`  2. Check progress: agent status`);
-}
-
-/**
- * agent-coord リポジトリのディレクトリ構造を作成
- */
-async function createCoordRepoStructure(coordPath: string): Promise<void> {
-  const directories = [
-    path.join(coordPath, 'tasks'),
-    path.join(coordPath, 'runs'),
-    path.join(coordPath, 'checks'),
-  ];
-
-  for (const dir of directories) {
-    await fs.mkdir(dir, { recursive: true });
-  }
-
-  console.log(`✓ Coordination repository structure created: ${toDisplayPath(coordPath)}`);
-
-  // .gitkeep ファイルを各ディレクトリに作成（Git管理用）
-  for (const dir of directories) {
-    await fs.writeFile(path.join(dir, '.gitkeep'), '', 'utf-8');
-  }
 }
 
 /**
