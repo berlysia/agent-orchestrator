@@ -2,20 +2,55 @@ import { Command } from 'commander';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { createDefaultConfig, ConfigSchema } from '../../types/config.ts';
 import { toDisplayPath } from '../utils/display-path.ts';
+
+/**
+ * スキーマファイルのパスを取得
+ *
+ * WHY: dist/config.schema.json をコピーするため、実行時のパスから相対的に取得
+ */
+function getSchemaSourcePath(): string {
+  // ESM環境で__dirnameの代替
+  const currentFile = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFile);
+
+  // src/cli/commands/init.ts から dist/config.schema.json への相対パス
+  // ビルド後: dist/cli/commands/init.js から dist/config.schema.json
+  return path.join(currentDir, '..', '..', 'config.schema.json');
+}
+
+/**
+ * スキーマファイルをコピー
+ *
+ * WHY: IDE補完のため、config.jsonと同じディレクトリにスキーマファイルを配置
+ */
+async function copySchemaFile(targetDir: string): Promise<void> {
+  const sourceSchemaPath = getSchemaSourcePath();
+  const targetSchemaPath = path.join(targetDir, 'config-schema.json');
+
+  try {
+    const schemaContent = await fs.readFile(sourceSchemaPath, 'utf-8');
+    await fs.writeFile(targetSchemaPath, schemaContent, 'utf-8');
+    console.log(`✓ Schema file created: ${toDisplayPath(targetSchemaPath)}`);
+  } catch (error) {
+    console.warn(`⚠️  Could not copy schema file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 /**
  * `agent init` コマンドの実装
  *
  * プロジェクトの初期化を行う：
  * - .agent/config.json の生成
+ * - .agent/config-schema.json のコピー
  * - agent-coord リポジトリのディレクトリ構造作成
  */
 export function createInitCommand(): Command {
   const initCommand = new Command('init')
     .description('Initialize agent orchestrator configuration')
-    .option('--global', 'Initialize global configuration (~/.agent/config.json)', false)
+    .option('--global', 'Initialize global configuration (~/.config/agent-orchestrator/config.json)', false)
     .option('--app-repo <path>', 'Path to application repository', process.cwd())
     .option(
       '--agent-coord <path>',
@@ -77,13 +112,36 @@ async function initializeProject(params: {
   // スキーマバリデーション
   const validatedConfig = ConfigSchema.parse(config);
 
+  // $schemaフィールドを追加
+  const configWithSchema = {
+    $schema: './config-schema.json',
+    ...validatedConfig,
+  };
+
   // .agent ディレクトリ作成
   await fs.mkdir(path.dirname(configPath), { recursive: true });
 
   // config.json 書き込み
-  await fs.writeFile(configPath, JSON.stringify(validatedConfig, null, 2) + '\n', 'utf-8');
+  await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2) + '\n', 'utf-8');
 
   console.log(`✓ Configuration file created: ${toDisplayPath(configPath)}`);
+
+  // .agent/.gitignore 作成
+  const gitignorePath = path.join(path.dirname(configPath), '.gitignore');
+  const gitignoreContent = [
+    '# Agent coordination data',
+    'coord/',
+    '',
+    '# Local configuration overrides',
+    'config.local.json',
+    '',
+  ].join('\n');
+  await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+
+  console.log(`✓ Gitignore file created: ${toDisplayPath(gitignorePath)}`);
+
+  // スキーマファイルをコピー
+  await copySchemaFile(path.dirname(configPath));
 
   // agent-coord リポジトリのディレクトリ構造作成
   await createCoordRepoStructure(agentCoordPath);
@@ -119,12 +177,15 @@ async function createCoordRepoStructure(coordPath: string): Promise<void> {
 /**
  * グローバル設定の初期化
  *
- * WHY: ユーザーごとのデフォルト設定を~/.agent/config.jsonに作成
+ * WHY: XDG Base Directory仕様に従い、ユーザーごとのデフォルト設定を
+ *      ~/.config/agent-orchestrator/config.json に作成
  */
 async function initializeGlobalConfig(params: { force: boolean }): Promise<void> {
   const { force } = params;
   const homeDir = os.homedir();
-  const globalConfigPath = path.join(homeDir, '.agent', 'config.json');
+  const configHome = process.env['XDG_CONFIG_HOME'] || path.join(homeDir, '.config');
+  const globalConfigDir = path.join(configHome, 'agent-orchestrator');
+  const globalConfigPath = path.join(globalConfigDir, 'config.json');
 
   // 既存設定ファイルチェック
   if (!force) {
@@ -143,7 +204,7 @@ async function initializeGlobalConfig(params: { force: boolean }): Promise<void>
   // WHY: appRepoPathとagentCoordPathは必須フィールドだが、グローバル設定では
   //      各プロジェクトで上書きされることを想定し、プレースホルダーを設定
   const globalConfig = {
-    $schema: '../../.agent/config-schema.json',
+    $schema: './config-schema.json',
     appRepoPath: '.',
     agentCoordPath: '.agent/coord',
     maxWorkers: 3,
@@ -191,12 +252,23 @@ async function initializeGlobalConfig(params: { force: boolean }): Promise<void>
   };
 
   // ディレクトリ作成
-  await fs.mkdir(path.dirname(globalConfigPath), { recursive: true });
+  await fs.mkdir(globalConfigDir, { recursive: true });
 
   // 設定ファイル書き込み
   await fs.writeFile(globalConfigPath, JSON.stringify(globalConfig, null, 2) + '\n', 'utf-8');
 
   console.log(`✓ Global configuration file created: ${toDisplayPath(globalConfigPath)}`);
+
+  // スキーマファイルをコピー
+  await copySchemaFile(globalConfigDir);
+
+  // .gitignore 作成
+  const gitignorePath = path.join(globalConfigDir, '.gitignore');
+  const gitignoreContent = ['# Local configuration overrides', 'config.local.json', ''].join('\n');
+  await fs.writeFile(gitignorePath, gitignoreContent, 'utf-8');
+
+  console.log(`✓ Gitignore file created: ${toDisplayPath(gitignorePath)}`);
+
   console.log(`\nYou can now customize global defaults like:`);
   console.log(`  - maxWorkers`);
   console.log(`  - agents.*.model`);

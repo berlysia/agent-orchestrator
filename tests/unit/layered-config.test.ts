@@ -12,23 +12,38 @@ import {
 
 describe('Layered Config', () => {
   let tempDir: string;
+  let originalXdgConfigHome: string | undefined;
 
   beforeEach(async () => {
     // 一時ディレクトリを作成
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-config-test-'));
+
+    // XDG_CONFIG_HOMEを一時ディレクトリに設定してグローバル設定を隔離
+    originalXdgConfigHome = process.env['XDG_CONFIG_HOME'];
+    process.env['XDG_CONFIG_HOME'] = tempDir;
   });
 
   afterEach(async () => {
     // クリーンアップ
     await fs.rm(tempDir, { recursive: true, force: true });
+
+    // XDG_CONFIG_HOMEを復元
+    if (originalXdgConfigHome === undefined) {
+      delete process.env['XDG_CONFIG_HOME'];
+    } else {
+      process.env['XDG_CONFIG_HOME'] = originalXdgConfigHome;
+    }
   });
 
   describe('resolveConfigLayerPaths', () => {
     it('should resolve config paths correctly', () => {
       const paths = resolveConfigLayerPaths(tempDir);
 
-      assert.strictEqual(paths.global, path.join(os.homedir(), '.agent', 'config.json'));
-      assert.strictEqual(paths.globalLocal, path.join(os.homedir(), '.agent', 'config.local.json'));
+      const configHome = process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config');
+      const globalConfigDir = path.join(configHome, 'agent-orchestrator');
+
+      assert.strictEqual(paths.global, path.join(globalConfigDir, 'config.json'));
+      assert.strictEqual(paths.globalLocal, path.join(globalConfigDir, 'config.local.json'));
       assert.strictEqual(paths.project, path.join(tempDir, '.agent', 'config.json'));
       assert.strictEqual(paths.projectLocal, path.join(tempDir, '.agent', 'config.local.json'));
     });

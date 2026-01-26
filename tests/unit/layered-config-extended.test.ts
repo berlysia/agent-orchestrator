@@ -7,13 +7,25 @@ import { loadTrackedConfig } from '../../src/cli/utils/layered-config.ts';
 
 describe('Layered Config - Extended Tests', () => {
   let tempDir: string;
+  let originalXdgConfigHome: string | undefined;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-config-ext-test-'));
+
+    // XDG_CONFIG_HOMEを一時ディレクトリに設定してグローバル設定を隔離
+    originalXdgConfigHome = process.env['XDG_CONFIG_HOME'];
+    process.env['XDG_CONFIG_HOME'] = tempDir;
   });
 
   afterEach(async () => {
     await fs.rm(tempDir, { recursive: true, force: true });
+
+    // XDG_CONFIG_HOMEを復元
+    if (originalXdgConfigHome === undefined) {
+      delete process.env['XDG_CONFIG_HOME'];
+    } else {
+      process.env['XDG_CONFIG_HOME'] = originalXdgConfigHome;
+    }
   });
 
   describe('$replace marker', () => {

@@ -52,15 +52,21 @@ function isConfigObject(value: unknown): value is ConfigObject {
 /**
  * 階層ごとの設定ファイルパスを解決
  *
+ * WHY: XDG Base Directory仕様に従い、グローバル設定は~/.config/agent-orchestrator/に配置
+ *
  * @param projectRoot - プロジェクトルート（.agentディレクトリの親）
  */
 export function resolveConfigLayerPaths(projectRoot?: string): ConfigLayerPaths {
   const homeDir = os.homedir();
   const cwd = projectRoot ?? process.cwd();
 
+  // XDG Base Directory仕様に従う
+  const configHome = process.env['XDG_CONFIG_HOME'] || path.join(homeDir, '.config');
+  const globalConfigDir = path.join(configHome, 'agent-orchestrator');
+
   return {
-    global: path.join(homeDir, '.agent', 'config.json'),
-    globalLocal: path.join(homeDir, '.agent', 'config.local.json'),
+    global: path.join(globalConfigDir, 'config.json'),
+    globalLocal: path.join(globalConfigDir, 'config.local.json'),
     project: path.join(cwd, '.agent', 'config.json'),
     projectLocal: path.join(cwd, '.agent', 'config.local.json'),
   };
