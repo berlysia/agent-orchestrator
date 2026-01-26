@@ -29,6 +29,12 @@ import {
 import { executeTaskPipeline } from './task-execution-pipeline.ts';
 import { truncateSummary } from './utils/log-utils.ts';
 import { createGitHubEffects } from '../../adapters/github/index.ts';
+import {
+  initializeLeaderSession,
+  type LeaderDeps,
+} from './leader-operations.ts';
+import type { LeaderSessionEffects } from './leader-session-effects.ts';
+import type { LeaderSession } from '../../types/leader-session.ts';
 
 /**
  * Orchestrator依存関係
@@ -38,6 +44,7 @@ export interface OrchestrateDeps {
   readonly gitEffects: GitEffects;
   readonly runnerEffects: RunnerEffects;
   readonly sessionEffects: PlannerSessionEffects;
+  readonly leaderSessionEffects?: LeaderSessionEffects;
   readonly config: Config;
   readonly maxWorkers?: number;
 }
@@ -1279,10 +1286,86 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     }
   };
 
+  /**
+   * Leader セッションを使って計画を実行
+   *
+   * 計画文書から Leader セッションを作成し、Leader-Member パターンで実行
+   *
+   * @param planFilePath 計画文書のファイルパス（絶対パス）
+   * @param plannerSessionId 関連する PlannerSession ID（オプショナル）
+   * @returns Leader セッション
+   */
+  const executeWithLeader = async (
+    planFilePath: string,
+    plannerSessionId?: string,
+  ): Promise<Result<LeaderSession, OrchestratorError>> => {
+    try {
+      // LeaderSessionEffects が提供されているか確認
+      if (!deps.leaderSessionEffects) {
+        return createErr({
+          type: 'UNKNOWN_ERROR',
+          message: 'LeaderSessionEffects is not provided in OrchestrateDeps',
+        });
+      }
+
+      console.log('\n📋 Initializing Leader Session...\n');
+
+      // Leader 依存関係を構築
+      const leaderDeps: LeaderDeps = {
+        taskStore: deps.taskStore,
+        runnerEffects: deps.runnerEffects,
+        sessionEffects: deps.leaderSessionEffects,
+        coordRepoPath: deps.config.agentCoordPath,
+        agentType: getAgentType(deps.config, 'worker'), // Leader はデフォルトで Worker と同じエージェントタイプを使用
+        model: getModel(deps.config, 'worker'),
+      };
+
+      // Leader セッションを初期化
+      const initResult = await initializeLeaderSession(
+        leaderDeps,
+        planFilePath,
+        plannerSessionId,
+      );
+
+      if (isErr(initResult)) {
+        return createErr({
+          type: 'PLANNING_ERROR',
+          message: `Failed to initialize leader session: ${initResult.err.message}`,
+        });
+      }
+
+      const session = initResult.val;
+
+      console.log(`✅ Leader Session initialized: ${session.sessionId}\n`);
+      console.log(`   Plan File: ${session.planFilePath}`);
+      console.log(`   Status: ${session.status}\n`);
+
+      // TODO: Phase 1 では初期化のみ実装
+      // Phase 2 以降で実際の実行フローを追加：
+      // 1. 計画文書からタスクを読み込み
+      // 2. Worker にタスクを割り当て
+      // 3. Worker フィードバックを処理
+      // 4. エスカレーション判断
+      // 5. 完了判定
+
+      return createOk(session);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Leader execution error: ${errorMessage}`);
+
+      return createErr({
+        type: 'UNKNOWN_ERROR',
+        message: errorMessage,
+        cause: error,
+      });
+    }
+  };
+
   return {
     executeInstruction,
     resumeFromSession,
     continueFromSession,
+    executeWithLeader,
   };
 };
 
