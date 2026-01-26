@@ -7,6 +7,8 @@ import type { TaskStore } from '../../../../src/core/task-store/interface.ts';
 import type { PlannerSession } from '../../../../src/types/planner-session.ts';
 import type { Task } from '../../../../src/types/task.ts';
 import { TaskState } from '../../../../src/types/task.ts';
+import type { TaskId } from '../../../../src/types/branded.ts';
+import { taskId, repoPath, branchName } from '../../../../src/types/branded.ts';
 import { createOk } from 'option-t/plain_result';
 
 describe('collectReportData', () => {
@@ -15,9 +17,9 @@ describe('collectReportData', () => {
     // セッションサマリーを作成
     const summaries: PlannerSessionSummary[] = sessions.map(s => ({
       sessionId: s.sessionId,
-      instruction: 'Test instruction',
+      instruction: s.instruction,
       createdAt: s.createdAt,
-      taskCount: s.taskCount,
+      taskCount: s.generatedTasks.length,
     }));
 
     return {
@@ -46,36 +48,49 @@ describe('collectReportData', () => {
       return createOk(null);
     },
     createTask: async () => createOk(undefined),
-    updateTaskCAS: async () => createOk(true),
+    updateTaskCAS: async (_taskId: TaskId, _expectedVersion: number, updateFn: (task: Task) => Task) => {
+      const task = tasks.find((t) => t.id === _taskId);
+      if (!task) {
+        return createOk(tasks[0]!);
+      }
+      return createOk(updateFn(task));
+    },
     deleteTask: async () => createOk(undefined),
-  });
+  } as any);
 
   // 基本的なモックセッションを作成
   const createMockSession = (sessionId: string, rootSessionId: string): PlannerSession => ({
     sessionId,
     rootSessionId,
+    instruction: 'Test instruction',
+    conversationHistory: [],
+    generatedTasks: [],
     createdAt: new Date('2024-01-23T10:00:00.000Z').toISOString(),
     updatedAt: new Date('2024-01-23T12:00:00.000Z').toISOString(),
     status: 'completed',
-    taskCount: 1,
-    completedTaskCount: 1,
+    continueIterationCount: 0,
   });
 
   // 基本的なモックタスクを作成
-  const createMockTask = (taskId: string, rootSessionId: string, state: TaskState = TaskState.DONE): Task => ({
-    id: taskId,
+  const createMockTask = (id: string, rootSessionId: string, state: TaskState = TaskState.DONE): Task => ({
+    id: taskId(id),
     rootSessionId,
-    sessionId: `session-${taskId}`,
-    summary: `Task ${taskId}`,
-    acceptance: `Acceptance criteria for ${taskId}`,
+    sessionId: `session-${id}`,
+    summary: `Task ${id}`,
+    acceptance: `Acceptance criteria for ${id}`,
     state,
     createdAt: new Date('2024-01-23T10:00:00.000Z').toISOString(),
     updatedAt: new Date('2024-01-23T11:00:00.000Z').toISOString(),
     version: 1,
+    owner: null,
+    repo: repoPath('/test/repo'),
+    branch: branchName(`task-${id}`),
+    scopePaths: [],
+    taskType: 'implementation',
+    context: 'Test context',
     dependencies: [],
-    baseBranch: 'main',
-    workingBranch: `task-${taskId}`,
-    worktreePath: `/tmp/worktree-${taskId}`,
+    check: null,
+    integrationRetried: false,
   });
 
   describe('integration info handling', () => {

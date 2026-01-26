@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { createIntegrationOperations } from '../../../../src/core/orchestrator/integration-operations.ts';
 import type { Task } from '../../../../src/types/task.ts';
 import { createInitialTask } from '../../../../src/types/task.ts';
-import { taskId, repoPath, branchName } from '../../../../src/types/branded.ts';
+import { taskId, repoPath, branchName, worktreePath } from '../../../../src/types/branded.ts';
 import { createOk, createErr } from 'option-t/plain_result';
 import type { MergeResult } from '../../../../src/types/integration.ts';
 
@@ -475,12 +475,14 @@ describe('Integration Operations', () => {
 
       // autoSignature=falseなので--no-gpg-signが含まれるべき
       assert.strictEqual(mergeCallArgs.length, 1);
+      const firstMergeCall = mergeCallArgs[0];
+      assert(firstMergeCall !== undefined, 'mergeCallArgs[0] should exist');
       assert(
-        mergeCallArgs[0].includes('--no-gpg-sign'),
+        firstMergeCall.includes('--no-gpg-sign'),
         'Should use --no-gpg-sign when autoSignature is false',
       );
       assert(
-        !mergeCallArgs[0].includes('--gpg-sign'),
+        !firstMergeCall.includes('--gpg-sign'),
         'Should not use --gpg-sign when autoSignature is false',
       );
     });
@@ -553,12 +555,14 @@ describe('Integration Operations', () => {
 
       // autoSignature=trueなので--gpg-signが含まれるべき
       assert.strictEqual(mergeCallArgs.length, 1);
+      const firstMergeCall = mergeCallArgs[0];
+      assert(firstMergeCall !== undefined, 'mergeCallArgs[0] should exist');
       assert(
-        mergeCallArgs[0].includes('--gpg-sign'),
+        firstMergeCall.includes('--gpg-sign'),
         'Should use --gpg-sign when autoSignature is true',
       );
       assert(
-        !mergeCallArgs[0].includes('--no-gpg-sign'),
+        !firstMergeCall.includes('--no-gpg-sign'),
         'Should not use --no-gpg-sign when autoSignature is true',
       );
     });
@@ -638,7 +642,7 @@ describe('Integration Operations', () => {
       });
 
       const worktreeInfo = {
-        worktreePath: '/test/worktree',
+        worktreePath: worktreePath('/test/worktree'),
         integrationBranch: branchName('integration/eval-123'),
       };
 
@@ -646,8 +650,10 @@ describe('Integration Operations', () => {
 
       // autoSignature=falseなのでgpgSign=falseが渡されるべき
       assert.strictEqual(commitCallOptions.length, 1);
+      const firstCommitOption = commitCallOptions[0];
+      assert(firstCommitOption !== undefined, 'commitCallOptions[0] should exist');
       assert.strictEqual(
-        commitCallOptions[0].gpgSign,
+        firstCommitOption.gpgSign,
         false,
         'Should use gpgSign=false when autoSignature is false',
       );
@@ -727,7 +733,7 @@ describe('Integration Operations', () => {
       });
 
       const worktreeInfo = {
-        worktreePath: '/test/worktree',
+        worktreePath: worktreePath('/test/worktree'),
         integrationBranch: branchName('integration/eval-123'),
       };
 
@@ -735,8 +741,10 @@ describe('Integration Operations', () => {
 
       // autoSignature=trueなのでgpgSign=trueが渡されるべき
       assert.strictEqual(commitCallOptions.length, 1);
+      const firstCommitOption = commitCallOptions[0];
+      assert(firstCommitOption !== undefined, 'commitCallOptions[0] should exist');
       assert.strictEqual(
-        commitCallOptions[0].gpgSign,
+        firstCommitOption.gpgSign,
         true,
         'Should use gpgSign=true when autoSignature is true',
       );

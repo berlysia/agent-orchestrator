@@ -96,7 +96,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -163,7 +163,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -218,7 +218,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -271,7 +271,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -328,7 +328,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -375,18 +375,32 @@ describe('Judge Operations', () => {
         writeCheck: mock.fn(),
       };
 
-      const rateLimitError = agentExecutionError('claude', {
-        status: 429,
-        headers: { 'retry-after': '0' },
-      });
-
+      let callCount = 0;
       const mockRunnerEffects: RunnerEffects = {
         readLog: mock.fn(async () => createOk('Log content')),
-        runClaudeAgent: mock.fn(async () => createErr(rateLimitError)),
+        runClaudeAgent: mock.fn(async () => {
+          callCount += 1;
+          if (callCount === 1) {
+            // WHY: エラーオブジェクトを毎回新しく作成することで、
+            // node:testのシリアライゼーションエラーを回避
+            return createErr(agentExecutionError('claude', {
+              status: 429,
+              headers: { 'retry-after': '0' },
+            }));
+          }
+          return createOk({
+            finalResponse: JSON.stringify({
+              success: true,
+              reason: 'All acceptance criteria met',
+              missingRequirements: [],
+              shouldContinue: false,
+            }),
+          });
+        }),
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -403,23 +417,6 @@ describe('Judge Operations', () => {
       };
 
       const ops = createJudgeOperations(deps);
-
-      let callCount = 0;
-      mockRunnerEffects.runClaudeAgent = mock.fn(async () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return createErr(rateLimitError);
-        }
-        return createOk({
-          finalResponse: JSON.stringify({
-            success: true,
-            reason: 'All acceptance criteria met',
-            missingRequirements: [],
-            shouldContinue: false,
-          }),
-        });
-      });
-
       const result = await ops.judgeTask(tid, runId);
 
       assert(result.ok);
@@ -457,7 +454,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -524,7 +521,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -600,7 +597,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -682,7 +679,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -744,7 +741,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
@@ -801,7 +798,7 @@ describe('Judge Operations', () => {
         runCodexAgent: mock.fn(),
         ensureRunsDir: mock.fn(),
         initializeLogFile: mock.fn(),
-        appendLog: mock.fn(),
+        appendLog: mock.fn(async () => createOk(undefined)),
         saveRunMetadata: mock.fn(),
         loadRunMetadata: mock.fn(),
         listRunLogs: mock.fn(),
