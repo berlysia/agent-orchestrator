@@ -2,7 +2,7 @@
 
 ## ステータス
 
-**Implementing** 🟡 (Phase 1 進行中)
+**Implementing** 🟡 (Phase 1 完了、Phase 2 準備中)
 
 ## 提案日時
 
@@ -121,26 +121,52 @@ type WorkerFeedback =
 
 ## 実装フェーズ
 
-### Phase 1: Agent Orchestrator に Leader 機能追加
+### Phase 1: Agent Orchestrator に Leader 機能追加 ✅
 
 **目標**: 既存アーキテクチャを拡張し、Leader-Member パターンを実現
 
 **主要タスク**:
 
-1. **LeaderSession 型定義** (`src/types/leader-session.ts`)
-2. **Worker フィードバック拡張** (`src/types/task.ts`)
-3. **LeaderOperations 実装** (`src/core/orchestrator/leader-operations.ts`)
-4. **CLI コマンド追加** (`src/cli/commands/lead.ts`)
+1. ✅ **LeaderSession 型定義** (`src/types/leader-session.ts`)
+2. ✅ **Worker フィードバック拡張** (`src/types/task.ts`)
+3. ✅ **LeaderOperations 実装** (`src/core/orchestrator/leader-operations.ts`)
+4. ✅ **CLI コマンド追加** (`src/cli/commands/lead.ts`)
+5. ✅ **orchestrate.ts 統合** (`executeWithLeader` 関数追加)
 
-**変更ファイル**:
-- `src/types/leader-session.ts` (新規)
-- `src/types/task.ts` (フィードバック型追加)
-- `src/core/orchestrator/leader-operations.ts` (新規)
-- `src/core/orchestrator/orchestrate.ts` (Leader フロー統合)
-- `src/cli/commands/lead.ts` (新規)
-- `src/cli/index.ts` (コマンド登録)
+**実装完了ファイル**:
+- `src/types/leader-session.ts` - Leader セッション型定義、エスカレーション型、メンバータスク履歴型
+- `src/types/task.ts` - Worker フィードバック型（implementation/exploration/difficulty）
+- `src/core/orchestrator/leader-operations.ts` - Leader 基本操作（初期化、フィードバック処理、エスカレーション）
+- `src/core/orchestrator/leader-session-effects.ts` - Effects インターフェース
+- `src/core/orchestrator/leader-session-effects-impl.ts` - Effects 実装
+- `src/core/orchestrator/orchestrate.ts` - `executeWithLeader` 関数統合
+- `src/cli/commands/lead.ts` - `agent lead start/status/list` コマンド
+- `src/cli/index.ts` - コマンド登録
 
-### Phase 2: Claude Code Skill 作成
+**動作確認**:
+- ✅ `agent lead start <planFile>` - Leader セッション作成・保存
+- ✅ `agent lead status [sessionId]` - セッション状態表示
+- ✅ `agent lead list` - セッション一覧表示
+- ✅ 型チェック通過
+- ✅ テスト通過（294/295 pass）
+
+### Phase 2: Leader 実行フローの実装（次のステップ）
+
+**目標**: Leader が実際にタスクを実行できるようにする
+
+**主要タスク**:
+
+1. **計画文書パーサー実装** - Markdown から TaskBreakdown を抽出
+2. **Worker タスク割り当て** - `assignTaskToMember` の完全実装
+3. **フィードバック処理ループ** - Worker 実行 → Judge 判定 → Leader 次アクション決定
+4. **エスカレーション実装** - User/Planner/LogicValidator/ExternalAdvisor への実際の通信
+5. **完了判定** - すべてのタスクが完了したか判定
+6. **E2E テスト** - 実際の実行フローをテスト
+
+**依存関係**:
+- Phase 1 完了（✅）
+
+### Phase 3: Claude Code Skill 作成
 
 **目標**: Claude Code からシームレスに Agent Orchestrator を操作
 
@@ -150,7 +176,10 @@ type WorkerFeedback =
 2. **Subagent 定義** (implementation/investigation/review)
 3. **ワークフロー統合**
 
-### Phase 3: MCP Server によるリアルタイム通信（オプション）
+**依存関係**:
+- Phase 2 完了
+
+### Phase 4: MCP Server によるリアルタイム通信（オプション）
 
 **目標**: リアルタイム双方向通信でより高度な協調を実現
 
@@ -158,6 +187,9 @@ type WorkerFeedback =
 
 1. **MCP Server 実装** (`src/mcp-server/`)
 2. **リアルタイムフィードバック**
+
+**依存関係**:
+- Phase 3 完了
 
 ## Leader の自律性レベル
 
