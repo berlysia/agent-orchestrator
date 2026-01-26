@@ -248,7 +248,9 @@ executeLeaderLoop()
 
 #### 実装タスク
 
-##### Task 1: Leader入力ローダー
+##### Task 1: Leader入力ローダー ✅
+
+**ステータス**: 完了
 
 **ファイル**: `src/core/orchestrator/leader-input-loader.ts` (新規)
 
@@ -284,6 +286,17 @@ export async function loadFromPlanDocument(
 - LLMに「タスクを抽出しJSON配列で出力」とプロンプト
 - `TaskBreakdownSchema` でバリデーション
 - instructionは計画文書のタイトル/概要から推測
+
+**実装完了内容**:
+- ✅ `src/core/orchestrator/leader-input-loader.ts` - Leader 入力ローダー実装
+- ✅ `tests/unit/leader-input-loader.test.ts` - ユニットテスト（9テスト成功）
+- ✅ 型チェック通過
+- ✅ 全体テストスイート通過（310/310）
+
+**検証結果**:
+- パターン A（PlannerSession経由）: 動作確認済み
+- パターン B（計画文書直接）: LLM解釈・バリデーション動作確認済み
+- エラーハンドリング: ファイル不在、JSON解析エラー、スキーマ不一致対応済み
 
 ##### Task 2: Worker タスク割り当て拡張
 
