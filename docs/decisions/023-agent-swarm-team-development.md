@@ -183,7 +183,12 @@ Phase 1 で実装された基盤：
 - ✅ Task 2: Worker タスク割り当て拡張（完了）
   - `assignTaskToMember()` - Worker実行・Judge判定・履歴記録
   - `processMemberFeedback()` - 判断ロジックのみ（Task 3 でアクション実行実装予定）
-- ⏳ Task 3: Leader 実行ループ（未実装）
+- ✅ Task 3: Leader 実行ループ（完了）
+  - `executeLeaderLoop()` - メイン実行ループ実装
+  - `getExecutableTasks()` - 依存関係を考慮した実行可能タスク選択
+  - `allTasksCompleted()` - 全タスク完了判定
+  - Judge判定結果に基づくアクション決定（accept/continue/replan/escalate）
+  - ユニットテスト6件（全合格）
 - ⏳ Task 4: エスカレーション実装（未実装）
 - ⏳ Task 5: 完了判定（未実装）
 - ⏳ Task 6: orchestrate.ts 統合（未実装）
@@ -351,7 +356,9 @@ export interface LeaderDeps {
 - ✅ テスト通過（310/310）
 - ✅ Worker 実行と Judge 判定の統合動作確認
 
-##### Task 3: Leader 実行ループ
+##### Task 3: Leader 実行ループ ✅
+
+**ステータス**: 完了
 
 **ファイル**: `src/core/orchestrator/leader-execution-loop.ts` (新規)
 
@@ -360,7 +367,11 @@ export interface LeaderLoopResult {
   session: LeaderSession;
   completedTaskIds: TaskId[];
   failedTaskIds: TaskId[];
-  pendingEscalation?: EscalationRecord;
+  pendingEscalation?: {
+    target: string;
+    reason: string;
+    relatedTaskId?: TaskId;
+  };
 }
 
 export async function executeLeaderLoop(
@@ -370,12 +381,29 @@ export async function executeLeaderLoop(
 ): Promise<Result<LeaderLoopResult, TaskStoreError>>;
 ```
 
-フロー:
+**実装内容**:
+- `executeLeaderLoop()` - タスクを順次実行し、Judge判定に基づいてアクション決定
+- `getExecutableTasks()` - 依存関係を考慮した実行可能タスク選択
+- `isTaskExecutable()` - タスク実行可能性チェック
+- `allTasksCompleted()` - 全タスク完了判定
+
+**フロー**:
 1. 実行可能タスク選択（依存関係考慮）
-2. `assignTaskToMember()` で Worker 実行
-3. `processMemberFeedback()` で次アクション決定
-4. アクションに応じて分岐（accept/continue/replan/escalate/skip）
+2. `assignTaskToMember()` で Worker 実行と Judge 判定
+3. Judge判定結果に基づいて次アクション決定
+4. アクションに応じて分岐（accept/continue/replan/escalate）
 5. 全タスク完了 or エスカレーション待ちで終了
+
+**Phase 2 実装範囲**:
+- Judge判定結果を直接使用（WorkerFeedbackはPhase 3）
+- タスクは1つずつ順次実行（並列化はPhase 3以降）
+- エスカレーション発生時は ESCALATING 状態で停止、記録のみ
+- Planner再計画とUser両方でエスカレーション時に停止
+
+**検証結果**:
+- ✅ ユニットテスト6件（全合格）
+- ✅ 型チェック通過
+- ✅ 全体テストスイート通過（316/316）
 
 ##### Task 4: エスカレーション実装（Phase 2 範囲限定）
 
