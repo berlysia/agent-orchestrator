@@ -1318,6 +1318,11 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         coordRepoPath: deps.config.agentCoordPath,
         agentType: getAgentType(deps.config, 'worker'), // Leader はデフォルトで Worker と同じエージェントタイプを使用
         model: getModel(deps.config, 'worker'),
+        gitEffects: deps.gitEffects,
+        config: deps.config,
+        workerOps,
+        judgeOps,
+        baseBranchResolver,
       };
 
       // Leader セッションを初期化

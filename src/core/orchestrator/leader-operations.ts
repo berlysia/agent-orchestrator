@@ -18,9 +18,16 @@ import { type TaskId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import type { LeaderSessionEffects } from './leader-session-effects.ts';
+import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
+import type { Config } from '../../types/config.ts';
+import { createWorkerOperations } from './worker-operations.ts';
+import { createJudgeOperations } from './judge-operations.ts';
+import { createBaseBranchResolver } from './base-branch-resolver.ts';
 
 /**
  * Leader 依存関係
+ *
+ * WHY: Phase 2 Task 2 - Worker/Judge/BaseBranchResolver を追加して実際の実行を可能にする
  */
 export interface LeaderDeps {
   readonly taskStore: TaskStore;
@@ -29,6 +36,11 @@ export interface LeaderDeps {
   readonly coordRepoPath: string;
   readonly agentType: 'claude' | 'codex';
   readonly model: string;
+  readonly gitEffects: GitEffects;
+  readonly config: Config;
+  readonly workerOps: ReturnType<typeof createWorkerOperations>;
+  readonly judgeOps: ReturnType<typeof createJudgeOperations>;
+  readonly baseBranchResolver: ReturnType<typeof createBaseBranchResolver>;
 }
 
 /**
@@ -76,38 +88,125 @@ export async function initializeLeaderSession(
 }
 
 /**
- * Worker への指示を生成
+ * Worker へのタスク割り当て結果
  *
- * タスクとコンテキストを元に、Worker が実行すべき指示を生成する
+ * WHY: Phase 2 Task 2 - Worker 実行結果と Judge 判定結果を返す
+ */
+export interface AssignTaskResult {
+  /** Worker 実行結果 */
+  readonly workerResult: {
+    readonly runId: string;
+    readonly checkFixRunIds?: readonly string[];
+    readonly success: boolean;
+    readonly error?: string;
+  };
+  /** Judge 判定結果 */
+  readonly judgementResult: {
+    readonly taskId: TaskId;
+    readonly success: boolean;
+    readonly shouldContinue: boolean;
+    readonly shouldReplan: boolean;
+    readonly alreadySatisfied: boolean;
+    readonly reason: string;
+    readonly missingRequirements?: string[];
+  };
+}
+
+/**
+ * Worker へのタスク割り当て
+ *
+ * Phase 2 Task 2: 実際に Worker を実行し、Judge 判定を行う
  *
  * @param deps Leader 依存関係
  * @param session Leader セッション
  * @param task 実行するタスク
- * @returns 生成された指示
+ * @returns Worker 実行結果と Judge 判定結果
  */
 export async function assignTaskToMember(
-  _deps: LeaderDeps,
-  _session: LeaderSession,
+  deps: LeaderDeps,
+  session: LeaderSession,
   task: Task,
-): Promise<Result<string, TaskStoreError>> {
+): Promise<Result<AssignTaskResult, TaskStoreError>> {
   try {
-    // タスクの基本情報から指示を生成
-    const instruction = `
-Task: ${task.summary || task.acceptance}
+    console.log(`  👤 Leader: Assigning task ${task.id} to member`);
 
-Context:
-${task.context}
+    // 1. 依存関係を解決
+    const resolutionResult = await deps.baseBranchResolver.resolveBaseBranch(task);
+    if (isErr(resolutionResult)) {
+      return createErr(
+        ioError(`Failed to resolve base branch: ${resolutionResult.err.message}`),
+      );
+    }
 
-Acceptance Criteria:
-${task.acceptance}
+    const resolution = resolutionResult.val;
+    console.log(`  📋 Dependency resolution: ${resolution.type}`);
 
-Scope:
-${task.scopePaths.join('\n')}
+    // 2. Worker を実行
+    console.log(`  🔨 Executing task with Worker...`);
+    const workerResult = await deps.workerOps.executeTaskWithWorktree(task, resolution);
+    if (isErr(workerResult)) {
+      return createErr(ioError(`Worker execution failed: ${workerResult.err.message}`));
+    }
 
-Please complete this task according to the acceptance criteria.
-`.trim();
+    const worker = workerResult.val;
+    console.log(`  ${worker.success ? '✅' : '❌'} Worker execution: ${worker.success ? 'success' : 'failed'}`);
 
-    return createOk(instruction);
+    // 3. Judge 判定
+    console.log(`  ⚖️  Evaluating task with Judge...`);
+    const judgementResult = await deps.judgeOps.judgeTask(task.id, worker.runId);
+    if (isErr(judgementResult)) {
+      return createErr(ioError(`Judge evaluation failed: ${judgementResult.err.message}`));
+    }
+
+    const judgement = judgementResult.val;
+    console.log(`  ${judgement.success ? '✅' : '⚠️'} Judge evaluation: ${judgement.success ? 'success' : 'needs work'}`);
+    console.log(`     Reason: ${judgement.reason}`);
+
+    // 4. MemberTaskHistory に記録
+    const history: MemberTaskHistory = {
+      taskId: task.id,
+      assignedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      workerResult: {
+        runId: worker.runId,
+        checkFixRunIds: worker.checkFixRunIds ? [...worker.checkFixRunIds] : undefined,
+        success: worker.success,
+        error: worker.error,
+      },
+      judgementResult: {
+        taskId: judgement.taskId,
+        success: judgement.success,
+        shouldContinue: judgement.shouldContinue,
+        shouldReplan: judgement.shouldReplan,
+        alreadySatisfied: judgement.alreadySatisfied,
+        reason: judgement.reason,
+        missingRequirements: judgement.missingRequirements ?? [],
+      },
+      workerFeedback: null, // Phase 2 では null（Phase 3 で実装）
+    };
+
+    const addHistoryResult = await addMemberTaskHistory(deps, session, history);
+    if (isErr(addHistoryResult)) {
+      return addHistoryResult;
+    }
+
+    return createOk({
+      workerResult: {
+        runId: worker.runId,
+        checkFixRunIds: worker.checkFixRunIds,
+        success: worker.success,
+        error: worker.error,
+      },
+      judgementResult: {
+        taskId: judgement.taskId,
+        success: judgement.success,
+        shouldContinue: judgement.shouldContinue,
+        shouldReplan: judgement.shouldReplan,
+        alreadySatisfied: judgement.alreadySatisfied,
+        reason: judgement.reason,
+        missingRequirements: judgement.missingRequirements,
+      },
+    });
   } catch (error) {
     return createErr(ioError(`Failed to assign task to member: ${String(error)}`));
   }

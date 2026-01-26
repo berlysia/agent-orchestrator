@@ -92,14 +92,21 @@ async function startLeaderSession(params: {
   const taskStore = createFileStore({ basePath: config.agentCoordPath });
 
   // Leader セッションを初期化
+  // NOTE: Phase 1 では initializeLeaderSession のみ使用するため、
+  // workerOps/judgeOps/baseBranchResolver はプレースホルダー
   const result = await initializeLeaderSession(
     {
       taskStore,
-      runnerEffects: {} as any, // TODO: 実装時に適切な値を設定
+      runnerEffects: {} as any, // TODO: Phase 2 Task 2+ で実装
       sessionEffects,
       coordRepoPath: config.agentCoordPath,
       agentType: 'claude', // TODO: 設定から取得
       model: 'claude-sonnet-4-5', // TODO: 設定から取得
+      gitEffects: {} as any, // TODO: Phase 2 Task 2+ で実装
+      config: {} as any, // TODO: Phase 2 Task 2+ で実装
+      workerOps: {} as any, // TODO: Phase 2 Task 2+ で実装
+      judgeOps: {} as any, // TODO: Phase 2 Task 2+ で実装
+      baseBranchResolver: {} as any, // TODO: Phase 2 Task 2+ で実装
     },
     absolutePlanFile,
     plannerSessionId,

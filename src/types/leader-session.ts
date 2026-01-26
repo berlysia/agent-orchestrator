@@ -74,20 +74,36 @@ export type EscalationRecord = z.infer<typeof EscalationRecordSchema>;
  * Member Task History Schema
  *
  * メンバータスク実行履歴
+ *
+ * WHY: Phase 2 Task 2 - Worker 実行結果と Judge 判定結果を完全に記録
  */
 export const MemberTaskHistorySchema = z.object({
   /** タスク ID */
   taskId: z.string().transform(taskId),
-  /** タスク開始時刻 */
-  startedAt: z.string().datetime(),
+  /** タスク割り当て時刻 */
+  assignedAt: z.string().datetime(),
   /** タスク完了時刻 */
   completedAt: z.string().datetime().nullable().optional(),
-  /** Worker フィードバック（後で Task 型から参照） */
+  /** Worker 実行結果（Phase 2 Task 2+） */
+  workerResult: z
+    .object({
+      runId: z.string(),
+      checkFixRunIds: z.array(z.string()).optional(),
+      success: z.boolean(),
+      error: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  /** Worker フィードバック（Phase 3 で実装） */
   workerFeedback: z.any().nullable().optional(),
-  /** Judge 判定結果 */
+  /** Judge 判定結果（Phase 2 Task 2 - 完全な JudgementResult 構造） */
   judgementResult: z
     .object({
-      isComplete: z.boolean(),
+      taskId: z.string().transform(taskId),
+      success: z.boolean(),
+      shouldContinue: z.boolean(),
+      shouldReplan: z.boolean(),
+      alreadySatisfied: z.boolean(),
       reason: z.string(),
       missingRequirements: z.array(z.string()),
     })

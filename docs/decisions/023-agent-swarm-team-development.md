@@ -174,10 +174,20 @@ Phase 1 で実装された基盤：
 
 - ✅ LeaderSession型定義（状態遷移: PLANNING→EXECUTING→REVIEWING→ESCALATING→COMPLETED）
 - ✅ `initializeLeaderSession()` - セッション作成・保存
-- ✅ `assignTaskToMember()` - テンプレート生成のみ（Worker実行なし）
-- ✅ `processMemberFeedback()` - 判断ロジックのみ（アクション実行なし）
 - ✅ エスカレーション関数群 - 記録作成のみ（外部通信なし）
-- ✅ `executeWithLeader()` - 初期化のみ（TODO: 実行フロー未実装）
+- ✅ `executeWithLeader()` - 初期化のみ（Phase 2 で実行フロー実装予定）
+
+#### Phase 2 実装進捗
+
+- ✅ Task 1: Leader 入力ローダー（完了）
+- ✅ Task 2: Worker タスク割り当て拡張（完了）
+  - `assignTaskToMember()` - Worker実行・Judge判定・履歴記録
+  - `processMemberFeedback()` - 判断ロジックのみ（Task 3 でアクション実行実装予定）
+- ⏳ Task 3: Leader 実行ループ（未実装）
+- ⏳ Task 4: エスカレーション実装（未実装）
+- ⏳ Task 5: 完了判定（未実装）
+- ⏳ Task 6: orchestrate.ts 統合（未実装）
+- ⏳ Task 7: E2E テスト（未実装）
 
 #### 設計決定
 
@@ -298,7 +308,9 @@ export async function loadFromPlanDocument(
 - パターン B（計画文書直接）: LLM解釈・バリデーション動作確認済み
 - エラーハンドリング: ファイル不在、JSON解析エラー、スキーマ不一致対応済み
 
-##### Task 2: Worker タスク割り当て拡張
+##### Task 2: Worker タスク割り当て拡張 ✅
+
+**ステータス**: 完了
 
 **ファイル**: `src/core/orchestrator/leader-operations.ts` (修正)
 
@@ -313,18 +325,31 @@ export interface LeaderDeps {
   readonly agentType: 'claude' | 'codex';
   readonly model: string;
   // 新規追加
-  readonly workerOps: WorkerOperations;
-  readonly judgeOps: JudgeOperations;
+  readonly workerOps: ReturnType<typeof createWorkerOperations>;
+  readonly judgeOps: ReturnType<typeof createJudgeOperations>;
+  readonly baseBranchResolver: ReturnType<typeof createBaseBranchResolver>;
   readonly gitEffects: GitEffects;
-  readonly baseBranchResolver: BaseBranchResolver;
   readonly config: Config;
 }
 ```
 
 `assignTaskToMember()` 拡張:
-- `workerOps.executeTaskWithWorktree()` で実際に Worker 実行
+- 依存関係解決: `baseBranchResolver.resolveBaseBranch()`
+- Worker 実行: `workerOps.executeTaskWithWorktree()`
+- Judge 判定: `judgeOps.judgeTask()`
 - `MemberTaskHistory` に記録
-- Judge 判定結果を返す
+- `AssignTaskResult` として Worker/Judge 結果を返す
+
+**実装完了ファイル**:
+- `src/core/orchestrator/leader-operations.ts` - `assignTaskToMember()` 実装、`AssignTaskResult` 型定義
+- `src/types/leader-session.ts` - `MemberTaskHistory` 型拡張（`workerResult`, `assignedAt` フィールド追加）
+- `src/core/orchestrator/orchestrate.ts` - `LeaderDeps` 構築
+- `src/cli/commands/lead.ts` - Phase 1 互換性維持
+
+**検証結果**:
+- ✅ 型チェック通過
+- ✅ テスト通過（310/310）
+- ✅ Worker 実行と Judge 判定の統合動作確認
 
 ##### Task 3: Leader 実行ループ
 
