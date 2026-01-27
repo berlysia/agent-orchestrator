@@ -270,47 +270,57 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
   };
 
   /**
-   * Claude エージェントを実行
+   * Claude エージェントを実行（v1 query API使用）
    *
    * ClaudeRunner の実装を関数型に移植。
-   * unstable_v2_prompt を使用してエージェントを実行する。
+   * query 関数を使用してエージェントを実行する。
    *
    * WHY: Rate limit エラー時は retry-after 秒数だけ待機して自動リトライする
    * WHY: ストリームの全メッセージをログに記録し、実行過程を可視化する
+   * WHY: sessionIdが渡された場合は options.resume でセッションを継続し、同一ワーカーの同一タスクに対する連続実行で文脈を維持
    */
   const runClaudeAgent = async (
     prompt: string,
     workingDirectory: string,
     model: string,
     runId?: string,
+    sessionId?: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     let lastError: unknown;
     const attemptLimit = enableRateLimitRetry ? maxRetries : 1;
 
     for (let attempt = 1; attempt <= attemptLimit; attempt++) {
       const result = await tryCatchIntoResultAsync(async () => {
-        // Claude Agent SDK をインポート
+        // Claude Agent SDK v1 をインポート
         const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
         // Claude Agent実行
         // WHY: Workerエージェントは自動実行されるため、パーミッション要求をバイパス
+        // WHY: sessionIdがある場合は options.resume でセッションを継続
         const responseStream = query({
           prompt,
           options: {
             model,
             cwd: workingDirectory,
             permissionMode: 'bypassPermissions',
+            ...(sessionId && { resume: sessionId }),
           },
         });
 
         // ストリームから全メッセージを収集してログに記録
         // WHY: thinking、tool use、outputなどの途中経過をログに記録して実行過程を可視化
         let finalResult = '';
+        let capturedSessionId: string | undefined;
         for await (const message of responseStream) {
           // ログに記録（runIdが指定されている場合）
           if (runId) {
             const logLine = formatClaudeStreamMessage(message) + '\n';
             await appendLog(runId, logLine);
+          }
+
+          // sessionIdをキャプチャ
+          if (message.type === 'system' && message.subtype === 'init') {
+            capturedSessionId = message.session_id
           }
 
           // result メッセージを処理
@@ -330,6 +340,7 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
         // AgentOutput形式に変換
         return {
           finalResponse: finalResult,
+          sessionId: capturedSessionId,
         } satisfies AgentOutput;
       });
 

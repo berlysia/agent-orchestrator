@@ -19,6 +19,8 @@ export interface AgentOutput {
   readonly items?: unknown[];
   /** Thread ID（Codexの場合） */
   readonly threadId?: string;
+  /** Session ID（Claudeの場合） */
+  readonly sessionId?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export interface RunnerEffects {
    * @param workingDirectory 作業ディレクトリ
    * @param model 使用するモデル
    * @param runId Run ID（ログ記録用、省略可）
+   * @param sessionId 継続するSession ID（省略可）
    * @returns エージェント出力
    */
   runClaudeAgent(
@@ -42,6 +45,7 @@ export interface RunnerEffects {
     workingDirectory: string,
     model: string,
     runId?: string,
+    sessionId?: string,
   ): Promise<Result<AgentOutput, RunnerError>>;
 
   /**
