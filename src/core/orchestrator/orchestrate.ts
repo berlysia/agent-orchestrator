@@ -35,6 +35,11 @@ import {
 } from './leader-operations.ts';
 import type { LeaderSessionEffects } from './leader-session-effects.ts';
 import type { LeaderSession } from '../../types/leader-session.ts';
+import {
+  loadFromPlannerSession,
+  loadFromPlanDocument,
+} from './leader-input-loader.ts';
+import { executeLeaderLoop } from './leader-execution-loop.ts';
 
 /**
  * Orchestrator依存関係

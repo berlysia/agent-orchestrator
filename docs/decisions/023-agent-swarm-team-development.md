@@ -200,8 +200,15 @@ Phase 1 で実装された基盤：
   - ユニットテスト9件（全合格）、統合テスト6件（全合格）
   - Planner エスカレーション時に実際に再計画を実行し、新タスクを生成
   - User エスカレーション時に停止（Phase 3 で対話型解決実装予定）
-- ⏳ Task 5: 完了判定（未実装）
-- ⏳ Task 6: orchestrate.ts 統合（未実装）
+- ✅ Task 5: 完了判定（完了 - Task 3 に統合済み）
+  - `executeLeaderLoop()` 内で完了判定ロジックを実装（356-372行目）
+  - `allTasksCompleted()` - 全タスク完了チェック（97-105行目）
+  - 最終状態決定（ESCALATING/COMPLETED/REVIEWING）
+  - `leader-completion.ts` として分離せず、実行ループと統合
+- ⏳ Task 6: orchestrate.ts 統合（実装中）
+  - インポート追加完了（leader-input-loader, leader-execution-loop）
+  - TODO 部分実装中（1348-1354行目）
+  - 残作業：TaskBreakdown → Task 変換、executeLeaderLoop 呼び出し
 - ⏳ Task 7: E2E テスト（未実装）
 
 #### 設計決定
