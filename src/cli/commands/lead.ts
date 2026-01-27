@@ -4,7 +4,12 @@ import { loadConfig } from '../utils/load-config.ts';
 import { LeaderSessionEffectsImpl } from '../../core/orchestrator/leader-session-effects-impl.ts';
 import { createFileStore } from '../../core/task-store/file-store.ts';
 import { initializeLeaderSession } from '../../core/orchestrator/leader-operations.ts';
+import {
+  getPendingEscalations,
+  getEscalationHistory,
+} from '../../core/orchestrator/leader-escalation.ts';
 import path from 'node:path';
+import * as readline from 'node:readline';
 
 /**
  * `agent lead` コマンドの実装
@@ -64,6 +69,66 @@ export function createLeadCommand(): Command {
         });
       } catch (error) {
         console.error('Failed to list leader sessions:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: escalations
+  leadCommand
+    .command('escalations')
+    .description('Show escalation history for a session')
+    .argument('[sessionId]', 'Session ID to show (defaults to latest)')
+    .option('--config <path>', 'Path to configuration file')
+    .option('--all', 'Show all escalations including resolved ones')
+    .action(async (sessionId: string | undefined, options) => {
+      try {
+        await showEscalations({
+          sessionId,
+          configPath: options.config,
+          showAll: options.all ?? false,
+        });
+      } catch (error) {
+        console.error('Failed to show escalations:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: resolve
+  leadCommand
+    .command('resolve')
+    .description('Resolve a pending escalation')
+    .argument('<sessionId>', 'Session ID')
+    .option('--config <path>', 'Path to configuration file')
+    .option('--escalation-id <id>', 'Specific escalation ID to resolve')
+    .option('--resolution <text>', 'Resolution text (prompts interactively if not provided)')
+    .action(async (sessionId: string, options) => {
+      try {
+        await resolveEscalation({
+          sessionId,
+          configPath: options.config,
+          escalationId: options.escalationId,
+          resolution: options.resolution,
+        });
+      } catch (error) {
+        console.error('Failed to resolve escalation:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: resume
+  leadCommand
+    .command('resume')
+    .description('Resume a paused session after escalation resolution')
+    .argument('<sessionId>', 'Session ID to resume')
+    .option('--config <path>', 'Path to configuration file')
+    .action(async (sessionId: string, options) => {
+      try {
+        await resumeSession({
+          sessionId,
+          configPath: options.config,
+        });
+      } catch (error) {
+        console.error('Failed to resume session:', error);
         process.exit(1);
       }
     });
@@ -280,6 +345,296 @@ async function listLeaderSessions(params: { configPath?: string }): Promise<void
     );
   }
 
+  console.log(`\n${'='.repeat(80)}\n`);
+}
+
+/**
+ * エスカレーション一覧を表示
+ */
+async function showEscalations(params: {
+  sessionId?: string;
+  configPath?: string;
+  showAll: boolean;
+}): Promise<void> {
+  const { sessionId, configPath, showAll } = params;
+
+  // 設定ファイルを読み込み
+  const config = await loadConfig(configPath);
+
+  // Effects を初期化
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッション ID が指定されていない場合は最新のセッションを取得
+  let targetSessionId = sessionId;
+  if (!targetSessionId) {
+    const listResult = await sessionEffects.listSessions();
+    if (isErr(listResult)) {
+      throw new Error(`Failed to list sessions: ${listResult.err.message}`);
+    }
+    const sessions = unwrapOk(listResult);
+    if (sessions.length === 0) {
+      console.log('\nNo leader sessions found.\n');
+      return;
+    }
+    targetSessionId = sessions[0]!.sessionId;
+  }
+
+  // セッションを読み込み
+  const loadResult = await sessionEffects.loadSession(targetSessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  const session = unwrapOk(loadResult);
+
+  // エスカレーション一覧を取得
+  const escalations = showAll
+    ? getEscalationHistory(session)
+    : getPendingEscalations(session);
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(
+    `Escalations for Session ${session.sessionId} (${showAll ? 'all' : 'pending only'})`,
+  );
+  console.log(`${'='.repeat(80)}\n`);
+
+  if (escalations.length === 0) {
+    console.log('  No escalations found.');
+    console.log(`\n${'='.repeat(80)}\n`);
+    return;
+  }
+
+  for (const escalation of escalations) {
+    const resolvedIcon = escalation.resolved ? '✅' : '⏳';
+    console.log(`${resolvedIcon} Escalation ID: ${escalation.id}`);
+    console.log(`   Target:     ${escalation.target}`);
+    console.log(`   Reason:     ${escalation.reason}`);
+    if (escalation.relatedTaskId) {
+      console.log(`   Task:       ${escalation.relatedTaskId}`);
+    }
+    console.log(`   Created:    ${new Date(escalation.escalatedAt).toLocaleString()}`);
+    if (escalation.resolved && escalation.resolvedAt) {
+      console.log(`   Resolved:   ${new Date(escalation.resolvedAt).toLocaleString()}`);
+      if (escalation.resolution) {
+        console.log(`   Resolution: ${escalation.resolution}`);
+      }
+    }
+    console.log();
+  }
+
+  const pendingCount = getPendingEscalations(session).length;
+  if (pendingCount > 0) {
+    console.log(`💡 ${pendingCount} pending escalation(s) require resolution.`);
+    console.log(`   Run 'agent lead resolve ${session.sessionId}' to resolve.`);
+  }
+
+  console.log(`${'='.repeat(80)}\n`);
+}
+
+/**
+ * エスカレーションを解決
+ */
+async function resolveEscalation(params: {
+  sessionId: string;
+  configPath?: string;
+  escalationId?: string;
+  resolution?: string;
+}): Promise<void> {
+  const { sessionId, configPath, escalationId, resolution } = params;
+
+  // 設定ファイルを読み込み
+  const config = await loadConfig(configPath);
+
+  // Effects を初期化
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッションを読み込み
+  const loadResult = await sessionEffects.loadSession(sessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  let session = unwrapOk(loadResult);
+  const pendingEscalations = getPendingEscalations(session);
+
+  if (pendingEscalations.length === 0) {
+    console.log('\n✅ No pending escalations to resolve.\n');
+    return;
+  }
+
+  // 解決するエスカレーションを特定
+  let targetEscalation = pendingEscalations[0]!;
+  if (escalationId) {
+    const found = pendingEscalations.find((e) => e.id === escalationId);
+    if (!found) {
+      throw new Error(`Escalation ${escalationId} not found or already resolved`);
+    }
+    targetEscalation = found;
+  }
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('Resolve Escalation');
+  console.log(`${'='.repeat(80)}\n`);
+
+  console.log(`⏳ Escalation ID: ${targetEscalation.id}`);
+  console.log(`   Target:     ${targetEscalation.target}`);
+  console.log(`   Reason:     ${targetEscalation.reason}`);
+  if (targetEscalation.relatedTaskId) {
+    console.log(`   Task:       ${targetEscalation.relatedTaskId}`);
+  }
+  console.log();
+
+  // 解決内容を取得（引数で指定されていなければインタラクティブに入力）
+  let resolutionText = resolution;
+  if (!resolutionText) {
+    resolutionText = await promptForResolution();
+  }
+
+  if (!resolutionText || resolutionText.trim() === '') {
+    console.log('\n❌ Resolution cannot be empty. Aborting.\n');
+    return;
+  }
+
+  // エスカレーションを解決済みに更新
+  const now = new Date().toISOString();
+  const updatedEscalations = session.escalationRecords.map((e) =>
+    e.id === targetEscalation.id
+      ? {
+          ...e,
+          resolved: true,
+          resolvedAt: now,
+          resolution: resolutionText,
+        }
+      : e,
+  );
+
+  // 未解決エスカレーションがなくなった場合、状態を REVIEWING に変更
+  const remainingPending = updatedEscalations.filter((e) => !e.resolved);
+  const newStatus =
+    remainingPending.length === 0 && session.status === 'escalating'
+      ? ('reviewing' as const)
+      : session.status;
+
+  session = {
+    ...session,
+    escalationRecords: updatedEscalations,
+    status: newStatus,
+    updatedAt: now,
+  };
+
+  // セッションを保存
+  const saveResult = await sessionEffects.saveSession(session);
+  if (isErr(saveResult)) {
+    throw new Error(`Failed to save session: ${saveResult.err.message}`);
+  }
+
+  console.log(`✅ Escalation resolved successfully.`);
+  console.log(`   Resolution: ${resolutionText}`);
+  console.log();
+
+  if (remainingPending.length > 0) {
+    console.log(`⚠️  ${remainingPending.length} escalation(s) still pending.`);
+    console.log(`   Run 'agent lead escalations ${sessionId}' to see them.`);
+  } else {
+    console.log(`✅ All escalations resolved.`);
+    console.log(`   Run 'agent lead resume ${sessionId}' to continue execution.`);
+  }
+
+  console.log(`\n${'='.repeat(80)}\n`);
+}
+
+/**
+ * インタラクティブに解決内容を入力
+ */
+async function promptForResolution(): Promise<string> {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    console.log('Enter your resolution (press Enter when done):');
+    rl.question('> ', (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+/**
+ * セッションを再開
+ */
+async function resumeSession(params: {
+  sessionId: string;
+  configPath?: string;
+}): Promise<void> {
+  const { sessionId, configPath } = params;
+
+  // 設定ファイルを読み込み
+  const config = await loadConfig(configPath);
+
+  // Effects を初期化
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッションを読み込み
+  const loadResult = await sessionEffects.loadSession(sessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  let session = unwrapOk(loadResult);
+
+  // 未解決エスカレーションがあるかチェック
+  const pendingEscalations = getPendingEscalations(session);
+  if (pendingEscalations.length > 0) {
+    console.log('\n⚠️  Cannot resume: there are pending escalations.');
+    console.log(`   Run 'agent lead resolve ${sessionId}' to resolve them first.`);
+    console.log();
+    for (const escalation of pendingEscalations) {
+      console.log(`   - ${escalation.id}: ${escalation.reason.substring(0, 50)}...`);
+    }
+    console.log();
+    return;
+  }
+
+  // セッション状態をチェック
+  if (session.status === 'completed') {
+    console.log('\n✅ Session is already completed. Nothing to resume.\n');
+    return;
+  }
+
+  if (session.status === 'failed') {
+    console.log('\n❌ Session has failed. Cannot resume.\n');
+    return;
+  }
+
+  if (session.status === 'executing') {
+    console.log('\n⚙️  Session is already executing.\n');
+    return;
+  }
+
+  // セッション状態を EXECUTING に更新
+  const now = new Date().toISOString();
+  session = {
+    ...session,
+    status: 'executing' as const,
+    updatedAt: now,
+  };
+
+  const saveResult = await sessionEffects.saveSession(session);
+  if (isErr(saveResult)) {
+    throw new Error(`Failed to save session: ${saveResult.err.message}`);
+  }
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('Session Resumed');
+  console.log(`${'='.repeat(80)}\n`);
+  console.log(`Session ID: ${session.sessionId}`);
+  console.log(`Status:     ⚙️  executing`);
+  console.log(`Progress:   ${session.completedTaskCount}/${session.totalTaskCount} tasks`);
+  console.log();
+  console.log('💡 The session is now ready for execution.');
+  console.log('   Run `agent run --leader-session <sessionId>` to continue task execution.');
   console.log(`\n${'='.repeat(80)}\n`);
 }
 

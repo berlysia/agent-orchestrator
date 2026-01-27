@@ -8,6 +8,8 @@ import {
   handleTechnicalEscalation,
   getEscalationHistory,
   getPendingEscalations,
+  resolveEscalation,
+  resumeFromEscalation,
 } from '../../src/core/orchestrator/leader-escalation.ts';
 import {
   createLeaderSession,
@@ -433,5 +435,175 @@ describe('leader-escalation', () => {
     if (result.ok) return;
 
     assert.ok(result.err.message.includes('Escalation limit reached'));
+  });
+
+  // Phase 3 テスト
+  describe('Phase 3 - エスカレーション解決と再開', () => {
+    test('resolveEscalation - resolves escalation successfully', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.ESCALATING;
+
+      // 未解決エスカレーションを追加
+      const record = createEscalationRecord(EscalationTarget.USER, 'Test reason');
+      session.escalationRecords = [record];
+
+      const result = await resolveEscalation(
+        deps,
+        session,
+        record.id,
+        'User resolved the issue',
+      );
+
+      assert.ok(result.ok);
+      if (!result.ok) return;
+
+      const updatedSession = result.val;
+      assert.strictEqual(updatedSession.escalationRecords[0]?.resolved, true);
+      assert.ok(updatedSession.escalationRecords[0]?.resolvedAt);
+      assert.strictEqual(
+        updatedSession.escalationRecords[0]?.resolution,
+        'User resolved the issue',
+      );
+      // すべてのエスカレーションが解決されたので REVIEWING に
+      assert.strictEqual(updatedSession.status, LeaderSessionStatus.REVIEWING);
+    });
+
+    test('resolveEscalation - keeps ESCALATING status when pending escalations remain', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.ESCALATING;
+
+      // 2つの未解決エスカレーションを追加
+      const record1 = createEscalationRecord(EscalationTarget.USER, 'Reason 1');
+      const record2 = createEscalationRecord(EscalationTarget.USER, 'Reason 2');
+      session.escalationRecords = [record1, record2];
+
+      const result = await resolveEscalation(
+        deps,
+        session,
+        record1.id,
+        'Resolved first',
+      );
+
+      assert.ok(result.ok);
+      if (!result.ok) return;
+
+      const updatedSession = result.val;
+      // まだ未解決が残っているので ESCALATING のまま
+      assert.strictEqual(updatedSession.status, LeaderSessionStatus.ESCALATING);
+    });
+
+    test('resolveEscalation - fails for non-existent escalation', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+
+      const result = await resolveEscalation(
+        deps,
+        session,
+        'non-existent-id',
+        'Resolution',
+      );
+
+      assert.ok(!result.ok);
+      if (result.ok) return;
+      assert.ok(result.err.message.includes('not found'));
+    });
+
+    test('resolveEscalation - fails for already resolved escalation', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+
+      const record = createEscalationRecord(EscalationTarget.USER, 'Test reason');
+      record.resolved = true;
+      record.resolvedAt = new Date().toISOString();
+      record.resolution = 'Already resolved';
+      session.escalationRecords = [record];
+
+      const result = await resolveEscalation(
+        deps,
+        session,
+        record.id,
+        'Try to resolve again',
+      );
+
+      assert.ok(!result.ok);
+      if (result.ok) return;
+      assert.ok(result.err.message.includes('already resolved'));
+    });
+
+    test('resumeFromEscalation - resumes session successfully', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.REVIEWING;
+      // すべてのエスカレーションが解決済み
+      const record = createEscalationRecord(EscalationTarget.USER, 'Test reason');
+      record.resolved = true;
+      record.resolvedAt = new Date().toISOString();
+      record.resolution = 'Resolved';
+      session.escalationRecords = [record];
+
+      const result = await resumeFromEscalation(deps, session);
+
+      assert.ok(result.ok);
+      if (!result.ok) return;
+
+      const updatedSession = result.val;
+      assert.strictEqual(updatedSession.status, LeaderSessionStatus.EXECUTING);
+    });
+
+    test('resumeFromEscalation - fails when pending escalations exist', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.ESCALATING;
+
+      // 未解決エスカレーションがある
+      const record = createEscalationRecord(EscalationTarget.USER, 'Test reason');
+      session.escalationRecords = [record];
+
+      const result = await resumeFromEscalation(deps, session);
+
+      assert.ok(!result.ok);
+      if (result.ok) return;
+      assert.ok(result.err.message.includes('still pending'));
+    });
+
+    test('resumeFromEscalation - fails for completed session', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.COMPLETED;
+
+      const result = await resumeFromEscalation(deps, session);
+
+      assert.ok(!result.ok);
+      if (result.ok) return;
+      assert.ok(result.err.message.includes('already completed'));
+    });
+
+    test('resumeFromEscalation - fails for failed session', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.FAILED;
+
+      const result = await resumeFromEscalation(deps, session);
+
+      assert.ok(!result.ok);
+      if (result.ok) return;
+      assert.ok(result.err.message.includes('cannot resume'));
+    });
+
+    test('resumeFromEscalation - returns session as-is when already executing', async () => {
+      const deps = createTestDeps();
+      const session = createLeaderSession('test-session', '/test/plan.md');
+      session.status = LeaderSessionStatus.EXECUTING;
+
+      const result = await resumeFromEscalation(deps, session);
+
+      assert.ok(result.ok);
+      if (!result.ok) return;
+
+      // 既に EXECUTING なのでそのまま返す
+      assert.strictEqual(result.val.status, LeaderSessionStatus.EXECUTING);
+    });
   });
 });

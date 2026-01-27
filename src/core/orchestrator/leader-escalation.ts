@@ -300,3 +300,144 @@ export function getEscalationHistory(
 export function getPendingEscalations(session: LeaderSession): EscalationRecord[] {
   return getEscalationHistory(session, false);
 }
+
+/**
+ * エスカレーションを解決
+ *
+ * WHY: Phase 3 - ユーザー判断の適用
+ *
+ * @param deps Leader 依存関係
+ * @param session Leader セッション
+ * @param escalationId 解決するエスカレーション ID
+ * @param resolution 解決内容
+ * @returns 更新された Leader セッション
+ */
+export async function resolveEscalation(
+  deps: LeaderDeps,
+  session: LeaderSession,
+  escalationId: string,
+  resolution: string,
+): Promise<Result<LeaderSession, TaskStoreError>> {
+  try {
+    // エスカレーション記録を検索
+    const escalation = session.escalationRecords.find((e) => e.id === escalationId);
+    if (!escalation) {
+      return createErr(ioError(`Escalation ${escalationId} not found`));
+    }
+
+    if (escalation.resolved) {
+      return createErr(ioError(`Escalation ${escalationId} is already resolved`));
+    }
+
+    // エスカレーション記録を更新
+    const now = new Date().toISOString();
+    const updatedEscalations = session.escalationRecords.map((e) =>
+      e.id === escalationId
+        ? {
+            ...e,
+            resolved: true,
+            resolvedAt: now,
+            resolution,
+          }
+        : e,
+    );
+
+    // 未解決エスカレーションがなくなった場合、状態を REVIEWING に変更
+    const remainingPending = updatedEscalations.filter((e) => !e.resolved);
+    const newStatus =
+      remainingPending.length === 0 && session.status === LeaderSessionStatus.ESCALATING
+        ? LeaderSessionStatus.REVIEWING
+        : session.status;
+
+    const updatedSession: LeaderSession = {
+      ...session,
+      escalationRecords: updatedEscalations,
+      status: newStatus,
+      updatedAt: now,
+    };
+
+    // セッションを保存
+    const saveResult = await deps.sessionEffects.saveSession(updatedSession);
+    if (isErr(saveResult)) {
+      return saveResult;
+    }
+
+    console.log(`✅ Escalation ${escalationId} resolved`);
+    console.log(`   Resolution: ${resolution}`);
+    if (remainingPending.length === 0) {
+      console.log(`   All escalations resolved. Session status: ${newStatus}`);
+    } else {
+      console.log(`   ${remainingPending.length} escalation(s) still pending`);
+    }
+
+    return createOk(updatedSession);
+  } catch (error) {
+    return createErr(ioError(`Failed to resolve escalation: ${String(error)}`));
+  }
+}
+
+/**
+ * エスカレーション解決後にセッションを再開
+ *
+ * WHY: Phase 3 - エスカレーション解決後の再開
+ *
+ * 前提条件:
+ * - すべてのエスカレーションが解決済み
+ * - セッション状態が ESCALATING または REVIEWING
+ *
+ * @param deps Leader 依存関係
+ * @param session Leader セッション
+ * @returns 更新された Leader セッション
+ */
+export async function resumeFromEscalation(
+  deps: LeaderDeps,
+  session: LeaderSession,
+): Promise<Result<LeaderSession, TaskStoreError>> {
+  try {
+    // 未解決エスカレーションがある場合はエラー
+    const pendingEscalations = getPendingEscalations(session);
+    if (pendingEscalations.length > 0) {
+      return createErr(
+        ioError(
+          `Cannot resume: ${pendingEscalations.length} escalation(s) still pending`,
+        ),
+      );
+    }
+
+    // セッション状態をチェック
+    if (session.status === LeaderSessionStatus.COMPLETED) {
+      return createErr(ioError('Session is already completed'));
+    }
+
+    if (session.status === LeaderSessionStatus.FAILED) {
+      return createErr(ioError('Session has failed, cannot resume'));
+    }
+
+    if (session.status === LeaderSessionStatus.EXECUTING) {
+      console.log('⚙️  Session is already executing');
+      return createOk(session);
+    }
+
+    // セッション状態を EXECUTING に更新
+    const now = new Date().toISOString();
+    const updatedSession: LeaderSession = {
+      ...session,
+      status: LeaderSessionStatus.EXECUTING,
+      updatedAt: now,
+    };
+
+    // セッションを保存
+    const saveResult = await deps.sessionEffects.saveSession(updatedSession);
+    if (isErr(saveResult)) {
+      return saveResult;
+    }
+
+    console.log(`▶️  Session ${session.sessionId} resumed`);
+    console.log(`   Status: EXECUTING`);
+    console.log(`   Progress: ${session.completedTaskCount}/${session.totalTaskCount} tasks`);
+
+    return createOk(updatedSession);
+  } catch (error) {
+    return createErr(ioError(`Failed to resume from escalation: ${String(error)}`));
+  }
+}

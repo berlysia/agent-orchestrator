@@ -2,7 +2,7 @@
 
 ## ステータス
 
-**Implementing** 🟡 (Phase 1 完了、Phase 2 完了、Phase 3 準備中)
+**Implementing** 🟡 (Phase 1 完了、Phase 2 完了、Phase 3 実装中)
 
 ## 提案日時
 
@@ -621,29 +621,51 @@ agent lead status <sessionId>
 
 ### Phase 3: 対話型機能と Claude Code Skill 作成
 
+**ステータス**: 🟡 実装中
+
 **目標**: エスカレーション解決とシームレスな Claude Code 統合
 
-**Phase 2 から移動したタスク**:
+#### Phase 3 実装進捗
 
-1. **対話型エスカレーション解決**
-   - `agent lead resolve <sessionId>` コマンド実装
-   - `agent lead escalations [sessionId]` コマンド実装
-   - `agent lead resume <sessionId>` コマンド実装
-   - エスカレーション解決ロジック
-   - セッション再開ロジック
+- ✅ Task 1: 対話型エスカレーション解決 CLI（完了）
+  - `agent lead escalations [sessionId]` - エスカレーション一覧表示
+  - `agent lead resolve <sessionId>` - エスカレーション解決
+  - `agent lead resume <sessionId>` - セッション再開
+- ✅ Task 2: エスカレーション解決ロジック（完了）
+  - `resolveEscalation()` - ユーザー判断の適用
+  - `resumeFromEscalation()` - エスカレーション解決後の再開
+- ✅ Task 3: ユニットテスト（完了）
+  - Phase 3 テスト 9 件追加（全体 334/334 pass）
+- ⏳ Task 4: LogicValidator/ExternalAdvisor 統合（未着手）
+- ⏳ Task 5: Claude Code Skill 作成（未着手）
 
-2. **LogicValidator/ExternalAdvisor 統合**
+**実装完了ファイル**:
+- `src/cli/commands/lead.ts` - `escalations`, `resolve`, `resume` サブコマンド追加
+- `src/core/orchestrator/leader-escalation.ts` - `resolveEscalation()`, `resumeFromEscalation()` 追加
+- `tests/unit/leader-escalation.test.ts` - Phase 3 テストケース追加
+
+**検証済み機能**:
+- ✅ エスカレーション一覧表示（全て / 未解決のみ）
+- ✅ インタラクティブ / コマンドライン引数によるエスカレーション解決
+- ✅ 全エスカレーション解決後のセッション状態遷移（ESCALATING → REVIEWING）
+- ✅ セッション再開（REVIEWING / ESCALATING → EXECUTING）
+- ✅ 未解決エスカレーションがある場合の再開ブロック
+- ✅ 型チェック通過
+- ✅ ユニットテスト通過（334/334）
+
+**残りタスク**:
+
+1. **LogicValidator/ExternalAdvisor 統合**
    - LogicValidator への LLM 呼び出し実装
    - ExternalAdvisor への通信実装
 
-**Claude Code Skill**:
-
-1. **team-orchestrator Skill** (`~/.claude/skills/team-orchestrator/SKILL.md`)
-2. **Subagent 定義** (implementation/investigation/review)
-3. **ワークフロー統合**
+2. **Claude Code Skill**:
+   - team-orchestrator Skill (`~/.claude/skills/team-orchestrator/SKILL.md`)
+   - Subagent 定義 (implementation/investigation/review)
+   - ワークフロー統合
 
 **依存関係**:
-- Phase 2 完了
+- Phase 2 完了（✅）
 
 ### Phase 4: MCP Server によるリアルタイム通信（オプション）
 
