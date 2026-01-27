@@ -225,9 +225,12 @@ export const TaskSchema = z.object({
   summary: z.string().max(50).nullable().optional(),
 
   /**
-   * このタスクが属するセッションID
+   * エージェントセッション/スレッドID
    *
    * WHY: セッション単位でのタスク検索・集計を可能にする
+   * WHY: 同一タスクの連続実行でセッション/スレッドを継続するため
+   * - Claude実行時: sessionId を保存
+   * - Codex実行時: threadId を保存
    */
   sessionId: z.string().nullable().optional(),
 

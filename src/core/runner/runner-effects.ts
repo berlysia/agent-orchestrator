@@ -17,9 +17,11 @@ export interface AgentOutput {
   readonly finalResponse?: string;
   /** 実行アイテム（Codexの場合） */
   readonly items?: unknown[];
-  /** Thread ID（Codexの場合） */
-  readonly threadId?: string;
-  /** Session ID（Claudeの場合） */
+  /**
+   * エージェントセッション/スレッドID
+   * - Claude実行時: sessionId
+   * - Codex実行時: threadId
+   */
   readonly sessionId?: string;
 }
 
@@ -54,6 +56,7 @@ export interface RunnerEffects {
    * @param workingDirectory 作業ディレクトリ
    * @param model 使用するモデル（省略時はCodexのデフォルト）
    * @param runId Run ID（ログ記録用、省略可）
+   * @param threadId 継続するThread ID（省略可）
    * @returns エージェント出力
    */
   runCodexAgent(
@@ -61,6 +64,7 @@ export interface RunnerEffects {
     workingDirectory: string,
     model?: string,
     runId?: string,
+    threadId?: string,
   ): Promise<Result<AgentOutput, RunnerError>>;
 
   // ===== ログ記録 =====

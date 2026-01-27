@@ -184,7 +184,7 @@ export const createRunTask = (deps: RunTaskDeps) => {
     }
 
     // Thread ID を取得
-    const threadId = agentResult.val.threadId;
+    const threadId = agentResult.val.sessionId;
 
     // 実行ログ記録
     await deps.effects.appendLog(rawRunId, `Thread ID: ${threadId}\n\n`);

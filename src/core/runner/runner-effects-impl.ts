@@ -495,23 +495,28 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
    * @openai/codex-sdk を使用してエージェントを実行する。
    *
    * WHY: runStreamed()を使用してストリームイベントをログに記録し、実行過程を可視化する
+   * WHY: threadIdが渡された場合はスレッドを再開し、同一ワーカーの同一タスクに対する連続実行で文脈を維持
    */
   const runCodexAgent = async (
     prompt: string,
     workingDirectory: string,
     model?: string,
     runId?: string,
+    threadId?: string,
   ): Promise<Result<AgentOutput, RunnerError>> => {
     const result = await tryCatchIntoResultAsync(async () => {
       // Codex SDK をインポート
       const { Codex } = await import('@openai/codex-sdk');
       const codex = new Codex();
 
-      // Codex Thread作成
-      const thread = codex.startThread({
-        workingDirectory,
-        model,
-      });
+      // Codex Thread作成または再開
+      // WHY: threadIdがある場合はスレッドを再開し、文脈を維持する
+      const thread = threadId
+        ? codex.resumeThread(threadId)
+        : codex.startThread({
+            workingDirectory,
+            model,
+          });
 
       // Codex実行（ストリーミング）
       // WHY: runStreamed()を使用して途中経過を取得し、ログに記録する
@@ -539,10 +544,11 @@ export const createRunnerEffects = (options: RunnerEffectsOptions): RunnerEffect
       }
 
       // AgentOutput形式に変換
+      // NOTE: threadIdをsessionIdフィールドに保存（Task型と統一）
       return {
         finalResponse,
         items,
-        threadId: thread.id ?? undefined,
+        sessionId: thread.id ?? undefined,
       } satisfies AgentOutput;
     });
 

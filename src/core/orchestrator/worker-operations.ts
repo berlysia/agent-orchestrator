@@ -904,7 +904,13 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
             theRunId,
             task.sessionId ?? undefined,
           )
-        : await deps.runnerEffects.runCodexAgent(agentPrompt, worktreePath as string, deps.model, theRunId);
+        : await deps.runnerEffects.runCodexAgent(
+            agentPrompt,
+            worktreePath as string,
+            deps.model,
+            theRunId,
+            task.sessionId ?? undefined, // Codexの場合もsessionIdフィールドを使用
+          );
 
     // 6. 結果をログに記録
     if (isErr(agentResult)) {
@@ -948,15 +954,16 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     };
     await deps.runnerEffects.saveRunMetadata(completedRun);
 
-    // 8. sessionIdを保存（Claude実行の場合）
-    // WHY: 次回の実行時にセッションを継続するため、sessionIdをタスクに保存
-    if (output.sessionId && deps.agentType === 'claude') {
+    // 8. sessionId/threadIdを保存
+    // WHY: 次回の実行時にセッション/スレッドを継続するため、IDをタスクに保存
+    // NOTE: Task型のsessionIdフィールドに、ClaudeのsessionIdまたはCodexのthreadIdを保存
+    if (output.sessionId) {
       const updateResult = await deps.taskStore.updateTaskCAS(task.id, task.version, (t) => ({
         ...t,
         sessionId: output.sessionId,
       }));
       if (!updateResult.ok) {
-        console.warn(`  ⚠️  Failed to save sessionId: ${updateResult.err.message}`);
+        console.warn(`  ⚠️  Failed to save agent session/thread ID: ${updateResult.err.message}`);
       }
     }
 
@@ -1244,15 +1251,16 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
     };
     await deps.runnerEffects.saveRunMetadata(completedRun);
 
-    // 8. sessionIdを保存（Claude実行の場合）
-    // WHY: 次回の実行時にセッションを継続するため、sessionIdをタスクに保存
-    if (output.sessionId && deps.agentType === 'claude') {
+    // 8. sessionId/threadIdを保存
+    // WHY: 次回の実行時にセッション/スレッドを継続するため、IDをタスクに保存
+    // NOTE: Task型のsessionIdフィールドに、ClaudeのsessionIdまたはCodexのthreadIdを保存
+    if (output.sessionId) {
       const updateResult = await deps.taskStore.updateTaskCAS(task.id, task.version, (t) => ({
         ...t,
         sessionId: output.sessionId,
       }));
       if (!updateResult.ok) {
-        console.warn(`  ⚠️  Failed to save sessionId: ${updateResult.err.message}`);
+        console.warn(`  ⚠️  Failed to save agent session/thread ID: ${updateResult.err.message}`);
       }
     }
 
@@ -1359,7 +1367,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
           `  📝 Conflict resolution log: ${getRunDisplayPath(conflictResolutionRunId, 'log')}`,
         );
 
-        // Claudeにコンフリクト解決を依頼
+        // エージェントにコンフリクト解決を依頼
         const resolutionResult =
           deps.agentType === 'claude'
             ? await deps.runnerEffects.runClaudeAgent(
@@ -1374,6 +1382,7 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
                 worktreePath as string,
                 deps.model,
                 conflictResolutionRunId,
+                task.sessionId ?? undefined, // Codexの場合もsessionIdフィールドを使用
               );
 
         if (isErr(resolutionResult)) {
@@ -1404,14 +1413,16 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
         };
         await deps.runnerEffects.saveRunMetadata(completedRun);
 
-        // sessionIdを保存（Claude実行の場合）
-        if (resolutionResult.val.sessionId && deps.agentType === 'claude') {
+        // sessionId/threadIdを保存
+        if (resolutionResult.val.sessionId) {
           const updateResult = await deps.taskStore.updateTaskCAS(task.id, task.version, (t) => ({
             ...t,
             sessionId: resolutionResult.val.sessionId,
           }));
           if (!updateResult.ok) {
-            console.warn(`  ⚠️  Failed to save sessionId after conflict resolution: ${updateResult.err.message}`);
+            console.warn(
+              `  ⚠️  Failed to save agent session/thread ID after conflict resolution: ${updateResult.err.message}`,
+            );
           }
         }
 
@@ -1602,7 +1613,13 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
                   fixRunId,
                   task.sessionId ?? undefined,
                 )
-              : await deps.runnerEffects.runCodexAgent(fixPrompt, worktreePath as string, deps.model, fixRunId);
+              : await deps.runnerEffects.runCodexAgent(
+                  fixPrompt,
+                  worktreePath as string,
+                  deps.model,
+                  fixRunId,
+                  task.sessionId ?? undefined, // Codexの場合もsessionIdフィールドを使用
+                );
 
           if (isErr(fixResult)) {
             console.log(`  ❌ Fix attempt failed: ${fixResult.err.message}`);
@@ -1644,14 +1661,16 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
           };
           await deps.runnerEffects.saveRunMetadata(completedRun);
 
-          // sessionIdを保存（Claude実行の場合）
-          if (fixResult.val.sessionId && deps.agentType === 'claude') {
+          // sessionId/threadIdを保存
+          if (fixResult.val.sessionId) {
             const updateResult = await deps.taskStore.updateTaskCAS(task.id, task.version, (t) => ({
               ...t,
               sessionId: fixResult.val.sessionId,
             }));
             if (!updateResult.ok) {
-              console.warn(`  ⚠️  Failed to save sessionId after check fix: ${updateResult.err.message}`);
+              console.warn(
+                `  ⚠️  Failed to save agent session/thread ID after check fix: ${updateResult.err.message}`,
+              );
             }
           }
 
