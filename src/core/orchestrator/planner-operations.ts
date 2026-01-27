@@ -211,7 +211,7 @@ export const TASK_BREAKDOWN_SCHEMA_VERSION = 2;
  * @param sessionShort セッション短縮ID
  * @returns 一意のタスクID（"task-7682b3a8-1"など）
  */
-const makeUniqueTaskId = (rawId: string, sessionShort: string): string => {
+export const makeUniqueTaskId = (rawId: string, sessionShort: string): string => {
   const baseId = rawId.replace(/^task-/, '');
   return `task-${sessionShort}-${baseId}`;
 };
@@ -226,7 +226,7 @@ const makeUniqueTaskId = (rawId: string, sessionShort: string): string => {
  * @param taskIdStr タスクID（"task-7682b3a8-1"など）
  * @returns タスクIDを含むブランチ名（"feature/auth-task-7682b3a8-1"など）
  */
-const makeBranchNameWithTaskId = (originalBranch: string, taskIdStr: string): string => {
+export const makeBranchNameWithTaskId = (originalBranch: string, taskIdStr: string): string => {
   return `${originalBranch}-${taskIdStr}`;
 };
 

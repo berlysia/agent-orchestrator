@@ -2,7 +2,7 @@
 
 ## ステータス
 
-**Implementing** 🟡 (Phase 1 完了、Phase 2 実装中)
+**Implementing** 🟡 (Phase 1 完了、Phase 2 実装完了、E2E テスト残り)
 
 ## 提案日時
 
@@ -150,9 +150,9 @@ type WorkerFeedback =
 - ✅ 型チェック通過
 - ✅ テスト通過（294/295 pass）
 
-### Phase 2: Leader 実行フローの実装（実装中）
+### Phase 2: Leader 実行フローの実装
 
-**ステータス**: 🟡 Implementing
+**ステータス**: ⏳ E2Eテスト残り（実装完了）
 
 **目標**: Phase 1 で確立された Leader セッション基盤を拡張し、Leader が実際にタスクを実行できるようにする
 
@@ -205,10 +205,12 @@ Phase 1 で実装された基盤：
   - `allTasksCompleted()` - 全タスク完了チェック（97-105行目）
   - 最終状態決定（ESCALATING/COMPLETED/REVIEWING）
   - `leader-completion.ts` として分離せず、実行ループと統合
-- ⏳ Task 6: orchestrate.ts 統合（実装中）
-  - インポート追加完了（leader-input-loader, leader-execution-loop）
-  - TODO 部分実装中（1348-1354行目）
-  - 残作業：TaskBreakdown → Task 変換、executeLeaderLoop 呼び出し
+- ✅ Task 6: orchestrate.ts 統合（完了）
+  - LeaderInput 読み込み（PlannerSession / 計画文書直接）
+  - TaskBreakdown → Task 変換（createInitialTask 使用）
+  - executeLeaderLoop 呼び出し
+  - 結果表示とエラーハンドリング
+  - 型チェック・ユニットテスト通過（318/319）
 - ⏳ Task 7: E2E テスト（未実装）
 
 #### 設計決定
@@ -521,9 +523,10 @@ Task 7 (E2E Tests)
 |---------|---------|------|
 | `src/core/orchestrator/leader-operations.ts` | `LeaderDeps` 拡張、関数実装 | ✅ 完了 |
 | `src/core/orchestrator/leader-execution-loop.ts` | Planner/User エスカレーション処理統合 | ✅ 完了 |
-| `src/core/orchestrator/orchestrate.ts` | `executeWithLeader()` TODO 実装 | ⏳ 未実装 |
+| `src/core/orchestrator/orchestrate.ts` | `executeWithLeader()` 実装完了（LeaderInput読み込み、Task変換、executeLeaderLoop呼び出し、結果処理） | ✅ 完了 |
+| `src/core/orchestrator/planner-operations.ts` | `makeUniqueTaskId`, `makeBranchNameWithTaskId` を export | ✅ 完了 |
 | `src/cli/commands/lead.ts` | Phase 2 では既存コマンドのみ（`start`, `status`, `list`） | ✅ 完了 |
-| `src/types/leader-session.ts` | `childPlannerSessionIds` フィールド追加（replan時の追跡用） | ⏳ 不要（Phase 3 で検討） |
+| `src/types/leader-session.ts` | `childPlannerSessionIds` フィールド追加（replan時の追跡用） | ⏸️ 不要（Phase 3 で検討） |
 
 **Phase 3 追加予定**:
 - `src/cli/commands/lead.ts` - `resolve`, `escalations`, `resume` サブコマンド

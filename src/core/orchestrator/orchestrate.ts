@@ -5,7 +5,11 @@ import type { GitEffects } from '../../adapters/vcs/git-effects.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { Config } from '../../types/config.ts';
 import { createSchedulerOperations } from './scheduler-operations.ts';
-import { createPlannerOperations } from './planner-operations.ts';
+import {
+  createPlannerOperations,
+  makeUniqueTaskId,
+  makeBranchNameWithTaskId,
+} from './planner-operations.ts';
 import { createWorkerOperations, type WorkerDeps } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
 import { createBaseBranchResolver } from './base-branch-resolver.ts';
@@ -16,7 +20,7 @@ import { getAgentType, getModel } from '../config/models.ts';
 import type { Result } from 'option-t/plain_result';
 import { createOk, createErr, isErr } from 'option-t/plain_result';
 import type { Task } from '../../types/task.ts';
-import { TaskState } from '../../types/task.ts';
+import { TaskState, createInitialTask } from '../../types/task.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
 import type { IntegrationWorktreeInfo } from '../../types/integration.ts';
 import type { IntegrationInfo } from '../report/types.ts';
@@ -1350,15 +1354,127 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       console.log(`   Plan File: ${session.planFilePath}`);
       console.log(`   Status: ${session.status}\n`);
 
-      // TODO: Phase 1 では初期化のみ実装
-      // Phase 2 以降で実際の実行フローを追加：
+      // Phase 2: 実行フローの実装
       // 1. 計画文書からタスクを読み込み
-      // 2. Worker にタスクを割り当て
-      // 3. Worker フィードバックを処理
-      // 4. エスカレーション判断
-      // 5. 完了判定
+      console.log('\n📥 Loading tasks from plan...\n');
 
-      return createOk(session);
+      let leaderInput;
+      if (plannerSessionId) {
+        // パターン A: PlannerSession 経由
+        console.log(`   Source: PlannerSession (${plannerSessionId})`);
+        const loadResult = await loadFromPlannerSession(plannerSessionId, deps.sessionEffects);
+        if (isErr(loadResult)) {
+          return createErr({
+            type: 'PLANNING_ERROR',
+            message: `Failed to load from PlannerSession: ${loadResult.err.message}`,
+          });
+        }
+        leaderInput = loadResult.val;
+      } else {
+        // パターン B: 計画文書直接
+        console.log(`   Source: Plan document (${planFilePath})`);
+        const loadResult = await loadFromPlanDocument(
+          planFilePath,
+          deps.runnerEffects,
+          getAgentType(deps.config, 'worker'),
+          getModel(deps.config, 'worker'),
+          deps.config.appRepoPath,
+        );
+        if (isErr(loadResult)) {
+          return createErr({
+            type: 'PLANNING_ERROR',
+            message: `Failed to load from plan document: ${loadResult.err.message}`,
+          });
+        }
+        leaderInput = loadResult.val;
+      }
+
+      console.log(`   Tasks loaded: ${leaderInput.tasks.length}`);
+      console.log(`   Instruction: ${truncateSummary(leaderInput.instruction)}\n`);
+
+      // 2. TaskBreakdown → Task 変換
+      console.log('🔄 Converting tasks...\n');
+
+      const sessionShort = extractSessionShort(session.sessionId);
+      const tasks: Task[] = [];
+      const errors: string[] = [];
+
+      for (const breakdown of leaderInput.tasks) {
+        const rawTaskId = breakdown.id;
+        const uniqueTaskId = makeUniqueTaskId(rawTaskId, sessionShort);
+        const task = createInitialTask({
+          id: taskId(uniqueTaskId),
+          repo: repoPath(deps.config.appRepoPath),
+          branch: branchName(makeBranchNameWithTaskId(breakdown.branch, uniqueTaskId)),
+          scopePaths: breakdown.scopePaths,
+          acceptance: breakdown.acceptance,
+          taskType: breakdown.type,
+          context: breakdown.context,
+          dependencies: breakdown.dependencies.map((depId) =>
+            taskId(makeUniqueTaskId(depId, sessionShort)),
+          ),
+          summary: breakdown.summary ?? null,
+          sessionId: session.sessionId,
+          parentSessionId: plannerSessionId ?? null,
+          rootSessionId: plannerSessionId ?? session.sessionId,
+          plannerLogPath: null, // Leader セッションでは Planner ログは使用しない
+          plannerMetadataPath: null,
+        });
+
+        // タスクストアに保存
+        const saveResult = await deps.taskStore.createTask(task);
+        if (isErr(saveResult)) {
+          const errorMsg = `Failed to create task ${uniqueTaskId}: ${saveResult.err.message}`;
+          errors.push(errorMsg);
+          console.error(`❌ ${errorMsg}`);
+          continue;
+        }
+
+        tasks.push(task);
+        console.log(`   ✅ Task created: ${uniqueTaskId} (${breakdown.branch})`);
+      }
+
+      if (tasks.length === 0) {
+        return createErr({
+          type: 'PLANNING_ERROR',
+          message: `No tasks created. Errors: ${errors.join('; ')}`,
+        });
+      }
+
+      console.log(`\n✅ ${tasks.length} tasks created successfully\n`);
+
+      // 3. Leader 実行ループを呼び出し
+      console.log('🚀 Starting Leader execution loop...\n');
+
+      const loopResult = await executeLeaderLoop(leaderDeps, session, tasks);
+      if (isErr(loopResult)) {
+        return createErr({
+          type: 'UNKNOWN_ERROR',
+          message: `Leader execution failed: ${loopResult.err.message}`,
+        });
+      }
+
+      const { session: finalSession, completedTaskIds, failedTaskIds, pendingEscalation } = loopResult.val;
+
+      // 4. 結果を表示
+      console.log('\n📊 Leader Execution Summary:\n');
+      console.log(`   Session: ${finalSession.sessionId}`);
+      console.log(`   Status: ${finalSession.status}`);
+      console.log(`   Completed tasks: ${completedTaskIds.length}`);
+      console.log(`   Failed tasks: ${failedTaskIds.length}`);
+
+      if (pendingEscalation) {
+        console.log(`\n⚠️  Pending escalation:`);
+        console.log(`   Target: ${pendingEscalation.target}`);
+        console.log(`   Reason: ${pendingEscalation.reason}`);
+        if (pendingEscalation.relatedTaskId) {
+          console.log(`   Related task: ${pendingEscalation.relatedTaskId}`);
+        }
+      }
+
+      console.log('');
+
+      return createOk(finalSession);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`❌ Leader execution error: ${errorMessage}`);
