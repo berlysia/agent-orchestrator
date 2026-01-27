@@ -635,13 +635,16 @@ agent lead status <sessionId>
   - `resolveEscalation()` - ユーザー判断の適用
   - `resumeFromEscalation()` - エスカレーション解決後の再開
 - ✅ Task 3: ユニットテスト（完了）
-  - Phase 3 テスト 9 件追加（全体 334/334 pass）
-- ⏳ Task 4: LogicValidator/ExternalAdvisor 統合（未着手）
+  - Phase 3 テスト 11 件追加（全体 336/336 pass）
+- ✅ Task 4: LogicValidator/ExternalAdvisor 統合（完了）
+  - `handleLogicValidatorEscalation()` - LLM による技術的困難の分析
+  - `handleExternalAdvisorEscalation()` - 外部アドバイザー統合（将来拡張用）
+  - `handleTechnicalEscalation()` を更新して LogicValidator を使用
 - ⏳ Task 5: Claude Code Skill 作成（未着手）
 
 **実装完了ファイル**:
 - `src/cli/commands/lead.ts` - `escalations`, `resolve`, `resume` サブコマンド追加
-- `src/core/orchestrator/leader-escalation.ts` - `resolveEscalation()`, `resumeFromEscalation()` 追加
+- `src/core/orchestrator/leader-escalation.ts` - LogicValidator/ExternalAdvisor 統合、`resolveEscalation()`, `resumeFromEscalation()` 追加
 - `tests/unit/leader-escalation.test.ts` - Phase 3 テストケース追加
 
 **検証済み機能**:
@@ -650,16 +653,29 @@ agent lead status <sessionId>
 - ✅ 全エスカレーション解決後のセッション状態遷移（ESCALATING → REVIEWING）
 - ✅ セッション再開（REVIEWING / ESCALATING → EXECUTING）
 - ✅ 未解決エスカレーションがある場合の再開ブロック
+- ✅ LogicValidator による技術的困難の分析と助言生成
+- ✅ LogicValidator の信頼度に基づく User エスカレーションへのフォールバック
 - ✅ 型チェック通過
-- ✅ ユニットテスト通過（334/334）
+- ✅ ユニットテスト通過（336/336）
+
+**LogicValidator フロー**:
+```
+Technical difficulty detected
+    ↓
+LogicValidator (LLM) で分析
+    ↓
+┌─────────────────┬────────────────────────┐
+│ 高信頼度の助言   │ ユーザー判断が必要 /   │
+│                 │ 低信頼度               │
+├─────────────────┼────────────────────────┤
+│ 実行継続        │ User エスカレーション  │
+│ (記録は解決済み) │ (ESCALATING 状態)     │
+└─────────────────┴────────────────────────┘
+```
 
 **残りタスク**:
 
-1. **LogicValidator/ExternalAdvisor 統合**
-   - LogicValidator への LLM 呼び出し実装
-   - ExternalAdvisor への通信実装
-
-2. **Claude Code Skill**:
+1. **Claude Code Skill**:
    - team-orchestrator Skill (`~/.claude/skills/team-orchestrator/SKILL.md`)
    - Subagent 定義 (implementation/investigation/review)
    - ワークフロー統合

@@ -257,7 +257,8 @@ describe('leader-escalation', () => {
     assert.ok(result.err.message.includes('Escalation limit reached'));
   });
 
-  test('handleTechnicalEscalation - falls back to user escalation', async () => {
+  test('handleTechnicalEscalation - uses LogicValidator and falls back to user on parse failure', async () => {
+    // デフォルトのモックは空配列を返すので、JSON パースに失敗して User にフォールバック
     const deps = createTestDeps();
     const session = createLeaderSession('test-session', '/test/plan.md');
 
@@ -273,14 +274,107 @@ describe('leader-escalation', () => {
 
     const updatedSession = result.val;
     assert.strictEqual(updatedSession.status, LeaderSessionStatus.ESCALATING);
+    // LogicValidator パース失敗 → User エスカレーション
+    assert.ok(updatedSession.escalationRecords.length >= 1);
+    // 最後のエスカレーションは User へ
+    const lastRecord =
+      updatedSession.escalationRecords[updatedSession.escalationRecords.length - 1];
+    assert.strictEqual(lastRecord?.target, EscalationTarget.USER);
+    assert.ok(lastRecord?.reason.includes('[LogicValidator parse failed]'));
+  });
+
+  test('handleTechnicalEscalation - LogicValidator provides advice and continues', async () => {
+    // LogicValidator が高信頼度の助言を返す場合
+    const logicValidatorResponse = {
+      rootCause: 'Missing dependency',
+      recommendation: 'Add the missing package',
+      confidence: 'high',
+      requiresUserDecision: false,
+      reasoning: 'The error indicates a missing module',
+    };
+
+    const deps = createTestDeps({
+      runnerEffects: {
+        runClaudeAgent: async () =>
+          createOk({ finalResponse: JSON.stringify(logicValidatorResponse) }),
+        runCodexAgent: async () => createOk({ finalResponse: JSON.stringify([]) }),
+        ensureRunsDir: async () => createOk(undefined),
+        initializeLogFile: async () => createOk(undefined),
+        appendLog: async () => createOk(undefined),
+        saveRunMetadata: async () => createOk(undefined),
+        loadRunMetadata: async () => createErr(agentExecutionError('test', 'Not found')),
+        readLog: async () => createOk('Test log content'),
+        listRunLogs: async () => createOk([]),
+      },
+    });
+    const session = createLeaderSession('test-session', '/test/plan.md');
+
+    const result = await handleTechnicalEscalation(
+      deps,
+      session,
+      'Technical difficulty',
+      taskId('test-1'),
+    );
+
+    assert.ok(result.ok);
+    if (!result.ok) return;
+
+    const updatedSession = result.val;
+    // LogicValidator が解決済みとして記録
     assert.strictEqual(updatedSession.escalationRecords.length, 1);
     assert.strictEqual(
       updatedSession.escalationRecords[0]?.target,
-      EscalationTarget.USER,
+      EscalationTarget.LOGIC_VALIDATOR,
     );
-    assert.ok(
-      updatedSession.escalationRecords[0]?.reason.includes('[Technical difficulty]'),
+    assert.strictEqual(updatedSession.escalationRecords[0]?.resolved, true);
+    // ESCALATING にならず、そのまま続行
+    assert.notStrictEqual(updatedSession.status, LeaderSessionStatus.ESCALATING);
+  });
+
+  test('handleTechnicalEscalation - LogicValidator requires user decision', async () => {
+    // LogicValidator がユーザー判断を求める場合
+    const logicValidatorResponse = {
+      rootCause: 'Ambiguous requirements',
+      recommendation: 'Clarify with stakeholder',
+      confidence: 'medium',
+      requiresUserDecision: true,
+      reasoning: 'The requirements are unclear',
+    };
+
+    const deps = createTestDeps({
+      runnerEffects: {
+        runClaudeAgent: async () =>
+          createOk({ finalResponse: JSON.stringify(logicValidatorResponse) }),
+        runCodexAgent: async () => createOk({ finalResponse: JSON.stringify([]) }),
+        ensureRunsDir: async () => createOk(undefined),
+        initializeLogFile: async () => createOk(undefined),
+        appendLog: async () => createOk(undefined),
+        saveRunMetadata: async () => createOk(undefined),
+        loadRunMetadata: async () => createErr(agentExecutionError('test', 'Not found')),
+        readLog: async () => createOk('Test log content'),
+        listRunLogs: async () => createOk([]),
+      },
+    });
+    const session = createLeaderSession('test-session', '/test/plan.md');
+
+    const result = await handleTechnicalEscalation(
+      deps,
+      session,
+      'Technical difficulty',
+      taskId('test-1'),
     );
+
+    assert.ok(result.ok);
+    if (!result.ok) return;
+
+    const updatedSession = result.val;
+    assert.strictEqual(updatedSession.status, LeaderSessionStatus.ESCALATING);
+    // LogicValidator 記録 + User エスカレーション
+    assert.ok(updatedSession.escalationRecords.length >= 2);
+    // 最後のエスカレーションは User へ
+    const lastRecord =
+      updatedSession.escalationRecords[updatedSession.escalationRecords.length - 1];
+    assert.strictEqual(lastRecord?.target, EscalationTarget.USER);
   });
 
   test('getEscalationHistory - returns all records', () => {

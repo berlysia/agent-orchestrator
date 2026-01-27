@@ -5,9 +5,12 @@ import { ioError } from '../../types/errors.ts';
 import type {
   LeaderSession,
   EscalationRecord,
+} from '../../types/leader-session.ts';
+import {
+  LeaderSessionStatus,
+  ESCALATION_LIMITS,
   EscalationTarget,
 } from '../../types/leader-session.ts';
-import { LeaderSessionStatus, ESCALATION_LIMITS } from '../../types/leader-session.ts';
 import type { Task } from '../../types/task.ts';
 import type { TaskId } from '../../types/branded.ts';
 import { randomUUID } from 'node:crypto';
@@ -231,18 +234,290 @@ export async function handlePlannerEscalation(
 }
 
 /**
+ * LogicValidator プロンプト生成
+ *
+ * WHY: Phase 3 - 技術的困難に対する論理的分析と助言を生成
+ */
+function buildLogicValidatorPrompt(
+  reason: string,
+  taskContext?: string,
+): string {
+  return `You are a Logic Validator assistant helping to analyze technical difficulties in a software development task.
+
+## Technical Difficulty
+${reason}
+
+${taskContext ? `## Task Context\n${taskContext}` : ''}
+
+## Your Role
+Analyze the technical difficulty and provide:
+1. Root cause analysis - What is the fundamental issue?
+2. Recommended approach - How should this be addressed?
+3. Confidence level - How confident are you in this advice? (high/medium/low)
+
+## Response Format
+Respond in JSON format:
+{
+  "rootCause": "description of the root cause",
+  "recommendation": "specific actionable recommendation",
+  "confidence": "high" | "medium" | "low",
+  "requiresUserDecision": true | false,
+  "reasoning": "explanation of your analysis"
+}
+
+If the issue requires human judgment (e.g., business decisions, unclear requirements), set requiresUserDecision to true.`;
+}
+
+/**
+ * LogicValidator レスポンス型
+ */
+interface LogicValidatorResponse {
+  rootCause: string;
+  recommendation: string;
+  confidence: 'high' | 'medium' | 'low';
+  requiresUserDecision: boolean;
+  reasoning: string;
+}
+
+/**
+ * LogicValidator エスカレーション処理
+ *
+ * WHY: Phase 3 - LLM を使用した技術的困難の分析と助言
+ *
+ * @param deps Leader 依存関係
+ * @param session Leader セッション
+ * @param reason エスカレーション理由
+ * @param relatedTaskId 関連タスク ID
+ * @returns 更新された Leader セッション と LogicValidator の助言
+ */
+export async function handleLogicValidatorEscalation(
+  deps: LeaderDeps,
+  session: LeaderSession,
+  reason: string,
+  relatedTaskId?: TaskId,
+): Promise<
+  Result<
+    { session: LeaderSession; advice: LogicValidatorResponse | null },
+    TaskStoreError
+  >
+> {
+  try {
+    console.log(`\n🧠 Escalating to LogicValidator`);
+    console.log(`   Reason: ${reason}`);
+
+    // エスカレーション回数チェック
+    if (session.escalationAttempts.logicValidator >= ESCALATION_LIMITS.logicValidator) {
+      console.log(`   ⚠️  LogicValidator escalation limit reached`);
+      console.log(`   ↪️  Falling back to User escalation`);
+      const userResult = await handleUserEscalation(
+        deps,
+        session,
+        `[LogicValidator limit reached] ${reason}`,
+        relatedTaskId,
+      );
+      if (isErr(userResult)) {
+        return userResult;
+      }
+      return createOk({ session: userResult.val, advice: null });
+    }
+
+    // タスクコンテキストを取得
+    let taskContext: string | undefined;
+    if (relatedTaskId) {
+      const taskResult = await deps.taskStore.readTask(relatedTaskId);
+      if (!isErr(taskResult)) {
+        const task = taskResult.val;
+        taskContext = `Task: ${task.id}\nAcceptance: ${task.acceptance}\nContext: ${task.context ?? 'N/A'}`;
+      }
+    }
+
+    // LLM 呼び出し
+    const prompt = buildLogicValidatorPrompt(reason, taskContext);
+    console.log(`   🤖 Running LogicValidator analysis...`);
+
+    const llmResult = await deps.runnerEffects.runClaudeAgent(
+      prompt,
+      deps.coordRepoPath,
+      deps.model,
+    );
+
+    if (isErr(llmResult)) {
+      console.log(`   ❌ LogicValidator failed: ${llmResult.err.message}`);
+      console.log(`   ↪️  Falling back to User escalation`);
+      const userResult = await handleUserEscalation(
+        deps,
+        session,
+        `[LogicValidator failed] ${reason}`,
+        relatedTaskId,
+      );
+      if (isErr(userResult)) {
+        return userResult;
+      }
+      return createOk({ session: userResult.val, advice: null });
+    }
+
+    // レスポンスをパース
+    let advice: LogicValidatorResponse;
+    try {
+      const responseText = llmResult.val.finalResponse;
+      if (!responseText) {
+        throw new Error('Empty response from LLM');
+      }
+      // JSON部分を抽出
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in response');
+      }
+      advice = JSON.parse(jsonMatch[0]) as LogicValidatorResponse;
+    } catch (parseError) {
+      console.log(`   ⚠️  Failed to parse LogicValidator response`);
+      console.log(`   ↪️  Falling back to User escalation`);
+      const userResult = await handleUserEscalation(
+        deps,
+        session,
+        `[LogicValidator parse failed] ${reason}`,
+        relatedTaskId,
+      );
+      if (isErr(userResult)) {
+        return userResult;
+      }
+      return createOk({ session: userResult.val, advice: null });
+    }
+
+    console.log(`   ✅ LogicValidator analysis complete`);
+    console.log(`   Root Cause: ${advice.rootCause}`);
+    console.log(`   Recommendation: ${advice.recommendation}`);
+    console.log(`   Confidence: ${advice.confidence}`);
+    console.log(`   Requires User Decision: ${advice.requiresUserDecision}`);
+
+    // エスカレーション記録を作成
+    const escalationRecord = createEscalationRecord(
+      EscalationTarget.LOGIC_VALIDATOR,
+      reason,
+      relatedTaskId,
+    );
+    escalationRecord.resolved = true;
+    escalationRecord.resolvedAt = new Date().toISOString();
+    escalationRecord.resolution = `LogicValidator advice: ${advice.recommendation}`;
+
+    const now = new Date().toISOString();
+    let updatedSession: LeaderSession = {
+      ...session,
+      escalationRecords: [...session.escalationRecords, escalationRecord],
+      escalationAttempts: {
+        ...session.escalationAttempts,
+        logicValidator: session.escalationAttempts.logicValidator + 1,
+      },
+      updatedAt: now,
+    };
+
+    // ユーザー判断が必要な場合は User エスカレーション
+    if (advice.requiresUserDecision || advice.confidence === 'low') {
+      console.log(`   ↪️  User decision required, escalating to User`);
+      const userReason = `[LogicValidator recommends user decision]\n\nAnalysis: ${advice.reasoning}\n\nRecommendation: ${advice.recommendation}`;
+      const userResult = await handleUserEscalation(
+        deps,
+        updatedSession,
+        userReason,
+        relatedTaskId,
+      );
+      if (isErr(userResult)) {
+        return userResult;
+      }
+      return createOk({ session: userResult.val, advice });
+    }
+
+    // セッション保存
+    const saveResult = await deps.sessionEffects.saveSession(updatedSession);
+    if (isErr(saveResult)) {
+      return saveResult;
+    }
+
+    return createOk({ session: updatedSession, advice });
+  } catch (error) {
+    return createErr(
+      ioError(`Failed to handle logic validator escalation: ${String(error)}`),
+    );
+  }
+}
+
+/**
+ * ExternalAdvisor エスカレーション処理
+ *
+ * WHY: Phase 3 - 外部アドバイザー（Codex MCP など）への統合
+ *
+ * 現時点では User へフォールバック。将来の拡張で Codex MCP などを統合予定。
+ *
+ * @param deps Leader 依存関係
+ * @param session Leader セッション
+ * @param reason エスカレーション理由
+ * @param relatedTaskId 関連タスク ID
+ * @returns 更新された Leader セッション
+ */
+export async function handleExternalAdvisorEscalation(
+  deps: LeaderDeps,
+  session: LeaderSession,
+  reason: string,
+  relatedTaskId?: TaskId,
+): Promise<Result<LeaderSession, TaskStoreError>> {
+  try {
+    console.log(`\n🔗 Escalating to ExternalAdvisor`);
+    console.log(`   Reason: ${reason}`);
+
+    // エスカレーション回数チェック
+    if (session.escalationAttempts.externalAdvisor >= ESCALATION_LIMITS.externalAdvisor) {
+      console.log(`   ⚠️  ExternalAdvisor escalation limit reached`);
+      console.log(`   ↪️  Falling back to User escalation`);
+      return await handleUserEscalation(
+        deps,
+        session,
+        `[ExternalAdvisor limit reached] ${reason}`,
+        relatedTaskId,
+      );
+    }
+
+    // TODO: 将来の拡張で Codex MCP などの外部アドバイザーを統合
+    // 現時点では User へフォールバック
+    console.log(`   ⚠️  ExternalAdvisor integration not yet implemented`);
+    console.log(`   ↪️  Falling back to User escalation`);
+
+    // エスカレーション記録を作成
+    const escalationRecord = createEscalationRecord(
+      EscalationTarget.EXTERNAL_ADVISOR,
+      reason,
+      relatedTaskId,
+    );
+
+    const now = new Date().toISOString();
+    const updatedSession: LeaderSession = {
+      ...session,
+      escalationRecords: [...session.escalationRecords, escalationRecord],
+      escalationAttempts: {
+        ...session.escalationAttempts,
+        externalAdvisor: session.escalationAttempts.externalAdvisor + 1,
+      },
+      updatedAt: now,
+    };
+
+    // User エスカレーションへフォールバック
+    const fallbackReason = `[ExternalAdvisor not available] ${reason}\n\nNote: ExternalAdvisor integration (Codex MCP) will be available in a future update.`;
+    return await handleUserEscalation(deps, updatedSession, fallbackReason, relatedTaskId);
+  } catch (error) {
+    return createErr(
+      ioError(`Failed to handle external advisor escalation: ${String(error)}`),
+    );
+  }
+}
+
+/**
  * 技術的困難エスカレーション処理
  *
- * WHY: Phase 2 Task 4 - LogicValidator/ExternalAdvisor が Phase 3 で実装されるまで
- *      User へフォールバック
+ * WHY: Phase 3 - LogicValidator を使用した技術的困難の分析
  *
- * Phase 2 実装範囲:
- * - 技術的困難を User エスカレーションへフォールバック
- * - フォールバック理由をログ出力
- *
- * Phase 3 以降:
- * - LogicValidator への LLM 呼び出し
- * - ExternalAdvisor への通信
+ * フロー:
+ * 1. LogicValidator で分析
+ * 2. 高信頼度の助言 → 実行継続
+ * 3. ユーザー判断が必要 or 低信頼度 → User エスカレーション
  *
  * @param deps Leader 依存関係
  * @param session Leader セッション
@@ -259,12 +534,20 @@ export async function handleTechnicalEscalation(
   try {
     console.log(`\n🔧 Technical difficulty detected`);
     console.log(`   Reason: ${reason}`);
-    console.log(`   ⚠️  LogicValidator/ExternalAdvisor not available in Phase 2`);
-    console.log(`   ↪️  Falling back to User escalation`);
 
-    // User エスカレーションへフォールバック
-    const fallbackReason = `[Technical difficulty] ${reason}\n\nNote: LogicValidator/ExternalAdvisor will be available in Phase 3.`;
-    return await handleUserEscalation(deps, session, fallbackReason, relatedTaskId);
+    // LogicValidator で分析
+    const validatorResult = await handleLogicValidatorEscalation(
+      deps,
+      session,
+      reason,
+      relatedTaskId,
+    );
+
+    if (isErr(validatorResult)) {
+      return validatorResult;
+    }
+
+    return createOk(validatorResult.val.session);
   } catch (error) {
     return createErr(ioError(`Failed to handle technical escalation: ${String(error)}`));
   }
