@@ -30,15 +30,20 @@
 | [018](018-merge-failure-evaluation-improvement.md) | マージ失敗時の評価改善 | 📝 Draft | 2026-01-23 |
 | [019](019-branch-cleanup-feature.md) | ブランチクリーンアップ機能 | 📝 Proposed | 2026-01-23 |
 | [020](020-layered-config-system.md) | 階層化コンフィグシステム | ✅ Implemented | 2026-01-26 |
+| [021](021-interactive-planning-mode.md) | Interactive Planning Mode | ✅ Accepted | 2026-01-27 |
+| [022](022-learning-feature.md) | Learning機能 - 失敗パターンの学習と改善提案 | ✅ Accepted | 2026-01-27 |
+| [023](023-agent-swarm-team-development.md) | エージェントスウォーム擬似チーム開発 | ✅ Accepted | 2026-01-27 |
+| [024](024-worker-feedback-dynamic-task-generation.md) | Workerフィードバック動的タスク生成 | ⏳ Proposed | 2026-01-31 |
+| [025](025-autonomous-exploration-mode.md) | 自律探索モード | ⏳ Proposed | 2026-01-31 |
 
 ## サマリー
 
-- **Implemented**: 9件
+- **Implemented/Accepted**: 12件
 - **Partially Implemented**: 1件
-- **Proposed**: 2件
+- **Proposed**: 4件
 - **Rejected**: 1件
 - **Draft**: 1件
 
 ---
 
-*最終更新: 2026-01-26*
+*最終更新: 2026-01-31*
