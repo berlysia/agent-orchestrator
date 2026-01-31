@@ -73,6 +73,27 @@ export interface PromptLoader {
   expandVariables(content: string, variables: PromptVariables): string;
 
   /**
+   * 自動注入変数をプロンプトに追加
+   *
+   * ADR-026: {task}, {previous_response}, {user_inputs} は
+   * テンプレートに明示的に含まれていなくても自動注入される
+   *
+   * @param content プロンプト内容
+   * @param variables 変数
+   * @returns 自動注入後のプロンプト
+   */
+  autoInjectVariables(content: string, variables: PromptVariables): string;
+
+  /**
+   * プロンプトを完全に処理（変数展開 + 自動注入）
+   *
+   * @param content プロンプトテンプレート
+   * @param variables 変数
+   * @returns 処理済みプロンプト
+   */
+  processPrompt(content: string, variables: PromptVariables): string;
+
+  /**
    * キャッシュをクリア
    */
   clearCache(): void;
@@ -244,6 +265,47 @@ export const createPromptLoader = (config: Partial<PromptConfig> = {}): PromptLo
   };
 
   /**
+   * 自動注入変数をプロンプトに追加
+   *
+   * ADR-026: {task}, {previous_response}, {user_inputs} は
+   * テンプレートに明示的に含まれていなくても自動注入される
+   */
+  const autoInjectVariables = (content: string, variables: PromptVariables): string => {
+    let result = content;
+
+    // 自動注入対象の変数
+    const autoInjectKeys: (keyof PromptVariables)[] = ['task', 'previous_response', 'user_inputs'];
+
+    for (const key of autoInjectKeys) {
+      const value = variables[key];
+      if (value === undefined) continue;
+
+      const placeholder = `{${key}}`;
+      // プレースホルダーが存在しない場合のみ自動注入
+      if (!content.includes(placeholder)) {
+        const sectionTitle = key === 'task' ? 'Current Task'
+          : key === 'previous_response' ? 'Previous Response'
+          : 'User Inputs';
+
+        result += `\n\n## ${sectionTitle}\n${value}`;
+      }
+    }
+
+    return result;
+  };
+
+  /**
+   * プロンプトを完全に処理（変数展開 + 自動注入）
+   */
+  const processPrompt = (content: string, variables: PromptVariables): string => {
+    // まず変数を展開
+    let result = expandVariables(content, variables);
+    // 次に自動注入
+    result = autoInjectVariables(result, variables);
+    return result;
+  };
+
+  /**
    * キャッシュをクリア
    */
   const clearCache = (): void => {
@@ -253,6 +315,8 @@ export const createPromptLoader = (config: Partial<PromptConfig> = {}): PromptLo
   return {
     loadPrompt,
     expandVariables,
+    autoInjectVariables,
+    processPrompt,
     clearCache,
   };
 };

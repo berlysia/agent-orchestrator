@@ -153,6 +153,8 @@ describe('PromptLoader', () => {
 
       const result1 = await loader.loadPrompt(AgentRole.WORKER);
       loader.clearCache();
+      // Wait a bit to ensure timestamp difference
+      await new Promise((resolve) => setTimeout(resolve, 10));
       const result2 = await loader.loadPrompt(AgentRole.WORKER);
 
       assert.ok(result1.ok && result2.ok);

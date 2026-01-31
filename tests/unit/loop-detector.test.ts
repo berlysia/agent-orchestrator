@@ -4,7 +4,7 @@
  * ADR-033: ループ検出と無限ループ防止
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { createLoopDetector } from '../../src/core/orchestrator/loop-detector.ts';
 import type { StateTransition } from '../../src/types/loop-detection.ts';
@@ -136,16 +136,17 @@ describe('LoopDetector', () => {
         { from: 'review', to: 'plan', reason: 'issues', timestamp: '2026-01-01T00:05:00Z' },
       ];
 
-      let result: ReturnType<typeof detector.recordTransition>;
+      let lastResult: ReturnType<typeof detector.recordTransition> | undefined;
       for (const t of transitions) {
-        result = detector.recordTransition(t);
+        lastResult = detector.recordTransition(t);
       }
 
       // Should detect the plan -> implement -> review pattern repeating
-      assert.strictEqual(result!.type, 'transition_pattern');
-      if (result!.type === 'transition_pattern') {
-        assert.ok(result.pattern.length >= 2);
-        assert.ok(result.occurrences >= 2);
+      assert.ok(lastResult !== undefined, 'Expected lastResult to be defined');
+      assert.strictEqual(lastResult.type, 'transition_pattern');
+      if (lastResult.type === 'transition_pattern') {
+        assert.ok(lastResult.pattern.length >= 2);
+        assert.ok(lastResult.occurrences >= 2);
       }
     });
   });
