@@ -238,6 +238,12 @@ const taskId: TaskId = workerId; // ❌
 すべての設計判断は `docs/decisions/` に記録されています：
 
 - [001: CAS実装方式の選定](decisions/001-cas-implementation-approach.md)
+- [012: CLI進捗表示機能](decisions/012-cli-progress-display.md)
+- [019: ブランチクリーンアップ機能](decisions/019-branch-cleanup-feature.md)
+- [021: インタラクティブ計画モード](decisions/021-interactive-planning-mode.md)
+- [023: エージェントスワーム開発](decisions/023-agent-swarm-team-development.md)
+- [024: ワーカーフィードバック収集](decisions/024-worker-feedback-to-leader.md)
+- [025: 自律探索モード](decisions/025-autonomous-exploration-mode.md)
 
 ## Implementation Principles
 
@@ -312,6 +318,8 @@ const taskId: TaskId = workerId; // ❌
 - `agent run` - タスク実行
 - `agent status` - 状態確認
 - `agent stop` - タスク中断
+- `agent cleanup-branches` - ブランチクリーンアップ
+- `agent explore` - 自律探索モード
 
 実装ファイル:
 
@@ -320,6 +328,55 @@ const taskId: TaskId = workerId; // ❌
 - `src/cli/commands/run.ts` - runコマンド
 - `src/cli/commands/status.ts` - statusコマンド
 - `src/cli/commands/stop.ts` - stopコマンド
+- `src/cli/commands/cleanup-branches.ts` - クリーンアップコマンド
+- `src/cli/commands/explore.ts` - 探索コマンド
+
+### CLI Progress Display
+
+✅ 実装完了 (ADR-012)
+
+- ProgressEmitterパターンによるイベント駆動
+- TTY/非TTYモードの自動判別
+- リアルタイム進捗表示（スピナー、プログレスバー）
+- stderrへの出力（パイプ処理との互換性維持）
+
+実装ファイル:
+
+- `src/types/progress.ts` - 進捗イベント型定義
+- `src/adapters/progress/progress-emitter.ts` - ProgressEmitterインターフェース
+- `src/adapters/progress/progress-emitter-impl.ts` - 実装（スロットリング付き）
+- `src/cli/progress/ansi-utils.ts` - ANSIエスケープシーケンス
+- `src/cli/progress/tty-renderer.ts` - TTYレンダラー
+
+### Branch Cleanup
+
+✅ 実装完了 (ADR-019)
+
+- `integration/*` と タスクブランチの自動検出
+- マージ済みブランチの判別
+- ローカル/リモートブランチの削除
+- `finalize` コマンドへの `--cleanup` オプション統合
+
+実装ファイル:
+
+- `src/core/orchestrator/branch-cleanup.ts` - クリーンアップロジック
+- `src/cli/commands/cleanup-branches.ts` - CLIコマンド
+
+### Autonomous Exploration Mode
+
+✅ 実装完了 (ADR-025)
+
+- 明示的な指示なしにコードベースを分析
+- セキュリティ、パフォーマンス、コード品質などのフォーカス指定
+- 発見事項の管理とタスク候補の生成
+- ユーザー承認後のタスク実行
+
+実装ファイル:
+
+- `src/types/exploration-session.ts` - 探索セッション型定義
+- `src/core/orchestrator/exploration-prompts.ts` - 探索プロンプト
+- `src/core/orchestrator/exploration-session-effects.ts` - セッション永続化
+- `src/core/orchestrator/exploration-operations.ts` - 探索操作
 
 ### Testing
 
