@@ -14,6 +14,8 @@ import { createFinalizeCommand } from './commands/finalize.ts';
 import { createReportCommand } from './commands/report.ts';
 import { createConfigCommand } from './commands/config.ts';
 import { createLeadCommand } from './commands/lead.ts';
+import { createCleanupBranchesCommand } from './commands/cleanup-branches.ts';
+import { createExploreCommand } from './commands/explore.ts';
 import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
@@ -37,5 +39,7 @@ program.addCommand(createFinalizeCommand());
 program.addCommand(createReportCommand());
 program.addCommand(createConfigCommand());
 program.addCommand(createLeadCommand());
+program.addCommand(createCleanupBranchesCommand());
+program.addCommand(createExploreCommand());
 
 program.parse(process.argv);

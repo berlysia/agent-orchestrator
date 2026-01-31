@@ -10,6 +10,7 @@ import type { SchedulerState } from './scheduler-state.ts';
 import type { TaskId } from '../../types/branded.ts';
 import type { RunnerEffects } from '../runner/runner-effects.ts';
 import type { PlannerSessionEffects } from './planner-session-effects.ts';
+import type { ProgressEmitter } from '../../adapters/progress/progress-emitter.ts';
 
 type WorkerOperations = ReturnType<typeof createWorkerOperations>;
 type BaseBranchResolver = ReturnType<typeof createBaseBranchResolver>;
@@ -73,6 +74,8 @@ export interface TaskExecutionPipelineInput {
   readonly planQualityJudgeModel?: string;
   /** 元のユーザー指示（オプショナル、再計画時の要件参照用） */
   readonly userInstruction?: string;
+  /** 進捗エミッター（オプショナル） */
+  readonly progressEmitter?: ProgressEmitter;
 }
 
 /**

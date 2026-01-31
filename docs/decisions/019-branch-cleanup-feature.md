@@ -2,7 +2,7 @@
 
 ## ステータス
 
-**Proposed** 📝
+**Implemented** ✅
 
 ## 提案日時
 

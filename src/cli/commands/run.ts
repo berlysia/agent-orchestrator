@@ -7,6 +7,8 @@ import { PlannerSessionEffectsImpl } from '../../core/orchestrator/planner-sessi
 import { isErr } from 'option-t/plain_result';
 import { loadConfig } from '../utils/load-config.ts';
 import { generateReportSafely } from '../utils/auto-report.ts';
+import { createProgressEmitter } from '../../adapters/progress/progress-emitter-impl.ts';
+import { createTTYRenderer } from '../progress/tty-renderer.ts';
 
 /**
  * `agent run` コマンドの実装
@@ -70,6 +72,10 @@ async function executeRun(params: {
   // SessionEffectsを初期化
   const sessionEffects = new PlannerSessionEffectsImpl(config.agentCoordPath);
 
+  // ProgressEmitterとTTYRendererを初期化
+  const progressEmitter = createProgressEmitter();
+  const renderer = createTTYRenderer(progressEmitter);
+
   // Orchestratorを初期化（新しい関数型実装）
   const orchestrator = createOrchestrator({
     taskStore,
@@ -78,13 +84,20 @@ async function executeRun(params: {
     sessionEffects,
     config,
     maxWorkers: config.maxWorkers,
+    progressEmitter,
   });
+
+  // レンダラーを開始
+  renderer.start();
 
   // タスクを実行
   console.log(`🚀 Starting orchestration...\n`);
 
   try {
     const resultOrError = await orchestrator.executeInstruction(instruction);
+
+    // レンダラーを停止
+    renderer.stop();
 
     // Result型をunwrap
     if (isErr(resultOrError)) {
@@ -120,6 +133,8 @@ async function executeRun(params: {
       process.exit(1);
     }
   } catch (error) {
+    // レンダラーを停止
+    renderer.stop();
     // 予期しないエラー時もレポート生成を試みる（可能なら）
     console.error('Unexpected error during orchestration:', error);
     process.exit(1);

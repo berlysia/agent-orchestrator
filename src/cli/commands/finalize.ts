@@ -2,6 +2,11 @@ import { Command } from 'commander';
 import { createGitEffects, type GitEffects } from '../../adapters/vcs/index.ts';
 import { repoPath, branchName, type RepoPath, type BranchName } from '../../types/branded.ts';
 import { isErr, isOk } from 'option-t/plain_result';
+import {
+  detectCleanupTargets,
+  cleanupBranches,
+  formatCleanupResult,
+} from '../../core/orchestrator/branch-cleanup.ts';
 
 /**
  * `agent finalize` コマンドの実装
@@ -17,6 +22,8 @@ export function createFinalizeCommand(): Command {
     .option('--branch <branch>', 'Branch to finalize (default: current branch)')
     .option('--no-merge', 'Skip merging into base branch after rebase')
     .option('--dry-run', 'Show what would be done without executing', false)
+    .option('--cleanup', 'Delete integration and task branches after finalize', false)
+    .option('--delete-remote', 'Also delete remote branches (requires --cleanup)', false)
     .action(async (options) => {
       try {
         await executeFinalize({
@@ -24,6 +31,8 @@ export function createFinalizeCommand(): Command {
           targetBranch: options.branch,
           merge: options.merge,
           dryRun: options.dryRun,
+          cleanup: options.cleanup,
+          deleteRemote: options.deleteRemote,
         });
       } catch (error) {
         console.error('Finalize failed:', error);
@@ -42,8 +51,10 @@ async function executeFinalize(params: {
   targetBranch?: string;
   merge: boolean;
   dryRun: boolean;
+  cleanup?: boolean;
+  deleteRemote?: boolean;
 }): Promise<void> {
-  const { baseBranch: baseBranchArg, targetBranch: targetBranchArg, merge, dryRun } = params;
+  const { baseBranch: baseBranchArg, targetBranch: targetBranchArg, merge, dryRun, cleanup, deleteRemote } = params;
 
   const gitEffects = createGitEffects();
   const repo = repoPath(process.cwd());
@@ -146,6 +157,35 @@ async function executeFinalize(params: {
   }
 
   console.log('\n   Verify with: git log --show-signature');
+
+  // ブランチクリーンアップ（--cleanup オプション指定時）
+  if (cleanup) {
+    console.log('\n🧹 Cleaning up branches...\n');
+
+    // マージされた統合ブランチとタスクブランチを対象
+    const cleanupTargetsResult = await detectCleanupTargets(gitEffects, repo, {
+      execute: !dryRun,
+      deleteRemote: deleteRemote,
+      targetBranches: [String(targetBranch)], // まず統合ブランチを対象
+    });
+
+    if (isErr(cleanupTargetsResult)) {
+      console.warn(`⚠️  Could not detect cleanup targets: ${cleanupTargetsResult.err.message}`);
+    } else {
+      const targets = cleanupTargetsResult.val;
+
+      if (targets.length > 0) {
+        const cleanupResult = await cleanupBranches(gitEffects, repo, targets, {
+          execute: !dryRun,
+          deleteRemote: deleteRemote,
+        });
+
+        console.log(formatCleanupResult(cleanupResult, !dryRun));
+      } else {
+        console.log('No branches to clean up.');
+      }
+    }
+  }
 }
 
 /**
