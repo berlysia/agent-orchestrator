@@ -2,9 +2,9 @@
 
 ## ステータス
 
-**Proposed** ⏳
+**Implemented** ✅
 
-ProgressEmitter、TTYRendererは未実装。
+ProgressEmitter、TTYRendererを実装済み。
 
 ## 決定日時
 

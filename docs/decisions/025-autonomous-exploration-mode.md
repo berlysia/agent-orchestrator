@@ -2,7 +2,9 @@
 
 ## ステータス
 
-**Proposed** ⏳
+**Implemented** ✅
+
+ExplorationSession型、探索プロンプト、セッション永続化、探索操作、およびCLIコマンドを実装済み。
 
 ## 提案日時
 

@@ -44,6 +44,16 @@ import {
   loadFromPlanDocument,
 } from './leader-input-loader.ts';
 import { executeLeaderLoop } from './leader-execution-loop.ts';
+import type { ProgressEmitter } from '../../adapters/progress/progress-emitter.ts';
+import {
+  ProgressEventType,
+  createProgressEvent,
+  type OrchestrationStartEvent,
+  type PlanningStartEvent,
+  type PlanningCompleteEvent,
+  type IntegrationStartEvent,
+  type OrchestrationCompleteEvent,
+} from '../../types/progress.ts';
 
 /**
  * Orchestrator依存関係
@@ -56,6 +66,8 @@ export interface OrchestrateDeps {
   readonly leaderSessionEffects?: LeaderSessionEffects;
   readonly config: Config;
   readonly maxWorkers?: number;
+  /** 進捗エミッター（オプショナル） */
+  readonly progressEmitter?: ProgressEmitter;
 }
 
 /**
@@ -236,6 +248,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     const blockedTaskIds: string[] = [];
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
     let integrationInfo: IntegrationInfo | undefined = undefined;
+    const { progressEmitter } = deps;
 
     try {
       // 早期設定検証: PR作成にはGitHub設定が必要
@@ -246,10 +259,21 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         });
       }
 
+      // 進捗イベント: オーケストレーション開始
+      progressEmitter?.emit(
+        createProgressEvent<OrchestrationStartEvent>(ProgressEventType.ORCHESTRATION_START, {
+          instruction: userInstruction,
+        }),
+      );
+
       // 0. .gitignore の推奨事項をチェック
       await checkGitignoreRecommendations();
 
       // 1. Planner: タスク分解
+      // 進捗イベント: 計画開始
+      progressEmitter?.emit(
+        createProgressEvent<PlanningStartEvent>(ProgressEventType.PLANNING_START, {}),
+      );
       console.log('🔍 Planning tasks...');
       const planningResult = await plannerOps.planTasks(userInstruction);
 
@@ -267,6 +291,14 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       const loadResult = await loadTasks(taskIds, deps.taskStore);
       const tasks = loadResult.tasks;
       failedTaskIds.push(...loadResult.failedTaskIds);
+
+      // 進捗イベント: 計画完了
+      progressEmitter?.emit(
+        createProgressEvent<PlanningCompleteEvent>(ProgressEventType.PLANNING_COMPLETE, {
+          taskCount: tasks.length,
+          taskIds: tasks.map((t) => t.id),
+        }),
+      );
 
       // 生成されたタスクを表示
       console.log(`📋 Generated ${tasks.length} tasks`);
@@ -299,6 +331,7 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         planQualityJudgeAgentType: deps.config.planning.planQualityJudge?.type,
         planQualityJudgeModel: deps.config.planning.planQualityJudge?.model,
         userInstruction,
+        progressEmitter,
       });
 
       schedulerState = pipelineResult.schedulerState;
@@ -345,6 +378,12 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
 
         // WHY: 統合後評価を有効化している場合、統合worktree上でコード差分を取得して評価する
         if (deps.config.integration.postIntegrationEvaluation && completedTasks.length > 1) {
+          // 進捗イベント: 統合開始
+          progressEmitter?.emit(
+            createProgressEvent<IntegrationStartEvent>(ProgressEventType.INTEGRATION_START, {
+              taskCount: completedTasks.length,
+            }),
+          );
           console.log('  📦 Creating integration worktree...');
 
           // 統合worktreeを作成
@@ -773,6 +812,17 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       const success = failedTaskIds.length === 0;
+
+      // 進捗イベント: オーケストレーション完了
+      progressEmitter?.emit(
+        createProgressEvent<OrchestrationCompleteEvent>(ProgressEventType.ORCHESTRATION_COMPLETE, {
+          success,
+          completedCount: completedTaskIds.length,
+          failedCount: failedTaskIds.length,
+          blockedCount: blockedTaskIds.length,
+        }),
+      );
+
       console.log(
         `\n${success ? '🎉' : '⚠️ '} Orchestration ${success ? 'completed' : 'finished with errors'}`,
       );
