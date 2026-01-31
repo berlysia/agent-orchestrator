@@ -100,6 +100,12 @@ export const WorkerFeedbackSchema = z.discriminatedUnion('type', [
     result: z.enum(['success', 'partial', 'failed']),
     changes: z.array(z.string()),
     notes: z.string().optional(),
+    /** 発見事項（ADR-024） */
+    findings: z.array(z.string()).optional(),
+    /** 推奨アクション（ADR-024） */
+    recommendations: z.array(z.string()).optional(),
+    /** 発見したパターン（ADR-024） */
+    patterns: z.array(z.string()).optional(),
   }),
   // Exploration feedback: 調査・探索タスクの結果
   z.object({
@@ -107,6 +113,8 @@ export const WorkerFeedbackSchema = z.discriminatedUnion('type', [
     findings: z.string(),
     recommendations: z.array(z.string()),
     confidence: z.enum(['high', 'medium', 'low']),
+    /** 発見したパターン（ADR-024） */
+    patterns: z.array(z.string()).optional(),
   }),
   // Difficulty feedback: 実行困難・障害の報告
   z.object({
@@ -128,6 +136,8 @@ export const WorkerFeedbackSchema = z.discriminatedUnion('type', [
       ]),
     }),
     suggestion: z.string().optional(),
+    /** 発見したパターン（ADR-024） */
+    patterns: z.array(z.string()).optional(),
   }),
 ]);
 

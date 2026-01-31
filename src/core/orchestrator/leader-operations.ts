@@ -23,6 +23,8 @@ import type { Config } from '../../types/config.ts';
 import { createWorkerOperations } from './worker-operations.ts';
 import { createJudgeOperations } from './judge-operations.ts';
 import { createBaseBranchResolver } from './base-branch-resolver.ts';
+import { extractWorkerFeedback } from './worker-feedback-extractor.ts';
+import { generateTaskCandidates } from './dynamic-task-generator.ts';
 
 /**
  * Leader 依存関係
@@ -162,7 +164,25 @@ export async function assignTaskToMember(
     console.log(`  ${judgement.success ? '✅' : '⚠️'} Judge evaluation: ${judgement.success ? 'success' : 'needs work'}`);
     console.log(`     Reason: ${judgement.reason}`);
 
-    // 4. MemberTaskHistory に記録
+    // 4. Worker 実行ログからフィードバック抽出（ADR-024）
+    let extractedFeedback: WorkerFeedback | null = null;
+    const runLogResult = await deps.runnerEffects.readLog(worker.runId);
+    if (!isErr(runLogResult)) {
+      extractedFeedback = extractWorkerFeedback(runLogResult.val);
+      if (extractedFeedback) {
+        console.log(`  💬 Extracted worker feedback (type: ${extractedFeedback.type})`);
+
+        // タスク候補を生成
+        const candidates = generateTaskCandidates(extractedFeedback, task);
+        if (candidates.length > 0) {
+          console.log(`  💡 Generated ${candidates.length} task candidate(s)`);
+          session.taskCandidates.push(...candidates);
+          await deps.sessionEffects.saveSession(session);
+        }
+      }
+    }
+
+    // 5. MemberTaskHistory に記録
     const history: MemberTaskHistory = {
       taskId: task.id,
       assignedAt: new Date().toISOString(),
@@ -182,7 +202,7 @@ export async function assignTaskToMember(
         reason: judgement.reason,
         missingRequirements: judgement.missingRequirements ?? [],
       },
-      workerFeedback: null, // Phase 2 では null（Phase 3 で実装）
+      workerFeedback: extractedFeedback,
     };
 
     const addHistoryResult = await addMemberTaskHistory(deps, session, history);

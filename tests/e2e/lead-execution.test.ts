@@ -246,6 +246,7 @@ describe('E2E: Leader Execution - Smoke Tests', () => {
           logicValidator: 0,
           externalAdvisor: 0,
         },
+        taskCandidates: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -323,6 +324,7 @@ describe('E2E: Leader Execution - Smoke Tests', () => {
           logicValidator: 0,
           externalAdvisor: 0,
         },
+        taskCandidates: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

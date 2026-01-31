@@ -8,6 +8,10 @@ import {
   getPendingEscalations,
   getEscalationHistory,
 } from '../../core/orchestrator/leader-escalation.ts';
+import {
+  type TaskCandidate,
+  TaskCandidateStatus,
+} from '../../types/leader-session.ts';
 import path from 'node:path';
 import * as readline from 'node:readline';
 
@@ -129,6 +133,64 @@ export function createLeadCommand(): Command {
         });
       } catch (error) {
         console.error('Failed to resume session:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: candidates (ADR-024)
+  leadCommand
+    .command('candidates')
+    .description('List task candidates generated from worker feedback')
+    .argument('[sessionId]', 'Session ID (defaults to latest)')
+    .option('--config <path>', 'Path to configuration file')
+    .option('--status <status>', 'Filter by status (pending, approved, rejected, executed)')
+    .action(async (sessionId: string | undefined, options) => {
+      try {
+        await listTaskCandidates({
+          sessionId,
+          configPath: options.config,
+          statusFilter: options.status,
+        });
+      } catch (error) {
+        console.error('Failed to list task candidates:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: approve (ADR-024)
+  leadCommand
+    .command('approve')
+    .description('Approve task candidates for execution')
+    .argument('<candidateId>', 'Candidate ID to approve (or "all" for all pending)')
+    .option('--session <sessionId>', 'Session ID (defaults to latest)')
+    .option('--config <path>', 'Path to configuration file')
+    .action(async (candidateId: string, options) => {
+      try {
+        await approveTaskCandidate({
+          candidateId,
+          sessionId: options.session,
+          configPath: options.config,
+        });
+      } catch (error) {
+        console.error('Failed to approve task candidate:', error);
+        process.exit(1);
+      }
+    });
+
+  // サブコマンド: execute-candidates (ADR-024)
+  leadCommand
+    .command('execute-candidates')
+    .description('Execute approved task candidates')
+    .argument('[sessionId]', 'Session ID (defaults to latest)')
+    .option('--config <path>', 'Path to configuration file')
+    .action(async (sessionId: string | undefined, options) => {
+      try {
+        await executeApprovedCandidates({
+          sessionId,
+          configPath: options.config,
+        });
+      } catch (error) {
+        console.error('Failed to execute task candidates:', error);
         process.exit(1);
       }
     });
@@ -657,5 +719,303 @@ function getStatusIcon(status: string): string {
       return '❌';
     default:
       return '❓';
+  }
+}
+
+/**
+ * タスク候補一覧を表示（ADR-024）
+ */
+async function listTaskCandidates(params: {
+  sessionId?: string;
+  configPath?: string;
+  statusFilter?: string;
+}): Promise<void> {
+  const { sessionId, configPath, statusFilter } = params;
+
+  const config = await loadConfig(configPath);
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッション ID が指定されていない場合は最新のセッションを取得
+  let targetSessionId = sessionId;
+  if (!targetSessionId) {
+    const listResult = await sessionEffects.listSessions();
+    if (isErr(listResult)) {
+      throw new Error(`Failed to list sessions: ${listResult.err.message}`);
+    }
+    const sessions = unwrapOk(listResult);
+    if (sessions.length === 0) {
+      console.log('\nNo leader sessions found.\n');
+      return;
+    }
+    targetSessionId = sessions[0]!.sessionId;
+  }
+
+  const loadResult = await sessionEffects.loadSession(targetSessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  const session = unwrapOk(loadResult);
+
+  // フィルタリング
+  let candidates = session.taskCandidates;
+  if (statusFilter) {
+    candidates = candidates.filter((c) => c.status === statusFilter);
+  }
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log(`Task Candidates for Session ${session.sessionId}`);
+  console.log(`${'='.repeat(80)}\n`);
+
+  if (candidates.length === 0) {
+    console.log('  No task candidates found.');
+    if (statusFilter) {
+      console.log(`  (Filtered by status: ${statusFilter})`);
+    }
+    console.log(`\n${'='.repeat(80)}\n`);
+    return;
+  }
+
+  // ヘッダー
+  console.log(`Total: ${candidates.length} candidate(s)`);
+  console.log();
+
+  // 候補一覧
+  for (const candidate of candidates) {
+    const statusIcon = getCandidateStatusIcon(candidate.status);
+    console.log(`${statusIcon} ${candidate.id}`);
+    console.log(`   Source:      ${candidate.source}`);
+    console.log(`   Priority:    ${getPriorityIcon(candidate.priority)} ${candidate.priority}`);
+    console.log(`   Category:    ${candidate.category}`);
+    console.log(`   Description: ${candidate.description.substring(0, 60)}${candidate.description.length > 60 ? '...' : ''}`);
+    console.log(`   Related:     ${candidate.relatedTaskId}`);
+    console.log(`   Created:     ${new Date(candidate.createdAt).toLocaleString()}`);
+    console.log();
+  }
+
+  // サマリー
+  const pendingCount = session.taskCandidates.filter(
+    (c) => c.status === TaskCandidateStatus.PENDING,
+  ).length;
+  const approvedCount = session.taskCandidates.filter(
+    (c) => c.status === TaskCandidateStatus.APPROVED,
+  ).length;
+
+  console.log('-'.repeat(80));
+  console.log(`Summary: ${pendingCount} pending, ${approvedCount} approved`);
+
+  if (pendingCount > 0) {
+    console.log(`\n💡 Run 'agent lead approve <candidateId>' to approve candidates.`);
+    console.log(`   Run 'agent lead approve all --session ${session.sessionId}' to approve all pending.`);
+  }
+  if (approvedCount > 0) {
+    console.log(`\n💡 Run 'agent lead execute-candidates ${session.sessionId}' to execute approved candidates.`);
+  }
+
+  console.log(`\n${'='.repeat(80)}\n`);
+}
+
+/**
+ * タスク候補を承認（ADR-024）
+ */
+async function approveTaskCandidate(params: {
+  candidateId: string;
+  sessionId?: string;
+  configPath?: string;
+}): Promise<void> {
+  const { candidateId, sessionId, configPath } = params;
+
+  const config = await loadConfig(configPath);
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッション ID が指定されていない場合は最新のセッションを取得
+  let targetSessionId = sessionId;
+  if (!targetSessionId) {
+    const listResult = await sessionEffects.listSessions();
+    if (isErr(listResult)) {
+      throw new Error(`Failed to list sessions: ${listResult.err.message}`);
+    }
+    const sessions = unwrapOk(listResult);
+    if (sessions.length === 0) {
+      throw new Error('No leader sessions found');
+    }
+    targetSessionId = sessions[0]!.sessionId;
+  }
+
+  const loadResult = await sessionEffects.loadSession(targetSessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  let session = unwrapOk(loadResult);
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('Approve Task Candidates');
+  console.log(`${'='.repeat(80)}\n`);
+
+  const now = new Date().toISOString();
+  let approvedCount = 0;
+
+  if (candidateId.toLowerCase() === 'all') {
+    // 全ての pending 候補を承認
+    const pendingCandidates = session.taskCandidates.filter(
+      (c) => c.status === TaskCandidateStatus.PENDING,
+    );
+
+    if (pendingCandidates.length === 0) {
+      console.log('  No pending candidates to approve.\n');
+      return;
+    }
+
+    session = {
+      ...session,
+      taskCandidates: session.taskCandidates.map((c) =>
+        c.status === TaskCandidateStatus.PENDING
+          ? { ...c, status: TaskCandidateStatus.APPROVED }
+          : c,
+      ),
+      updatedAt: now,
+    };
+
+    approvedCount = pendingCandidates.length;
+    console.log(`✅ Approved ${approvedCount} candidate(s):`);
+    for (const candidate of pendingCandidates) {
+      console.log(`   - ${candidate.id}: ${candidate.description.substring(0, 50)}...`);
+    }
+  } else {
+    // 特定の候補を承認
+    const candidate = session.taskCandidates.find((c) => c.id === candidateId);
+    if (!candidate) {
+      throw new Error(`Candidate ${candidateId} not found`);
+    }
+
+    if (candidate.status !== TaskCandidateStatus.PENDING) {
+      console.log(`⚠️  Candidate ${candidateId} is already ${candidate.status}.\n`);
+      return;
+    }
+
+    session = {
+      ...session,
+      taskCandidates: session.taskCandidates.map((c) =>
+        c.id === candidateId ? { ...c, status: TaskCandidateStatus.APPROVED } : c,
+      ),
+      updatedAt: now,
+    };
+
+    approvedCount = 1;
+    console.log(`✅ Approved candidate: ${candidateId}`);
+    console.log(`   Description: ${candidate.description}`);
+  }
+
+  const saveResult = await sessionEffects.saveSession(session);
+  if (isErr(saveResult)) {
+    throw new Error(`Failed to save session: ${saveResult.err.message}`);
+  }
+
+  console.log();
+  console.log(`💡 Run 'agent lead execute-candidates ${session.sessionId}' to execute approved candidates.`);
+  console.log(`\n${'='.repeat(80)}\n`);
+}
+
+/**
+ * 承認済みタスク候補を実行（ADR-024）
+ *
+ * NOTE: Phase 1 では候補を表示するのみ。実際の実行は Phase 2 以降で実装。
+ */
+async function executeApprovedCandidates(params: {
+  sessionId?: string;
+  configPath?: string;
+}): Promise<void> {
+  const { sessionId, configPath } = params;
+
+  const config = await loadConfig(configPath);
+  const sessionEffects = new LeaderSessionEffectsImpl(config.agentCoordPath);
+
+  // セッション ID が指定されていない場合は最新のセッションを取得
+  let targetSessionId = sessionId;
+  if (!targetSessionId) {
+    const listResult = await sessionEffects.listSessions();
+    if (isErr(listResult)) {
+      throw new Error(`Failed to list sessions: ${listResult.err.message}`);
+    }
+    const sessions = unwrapOk(listResult);
+    if (sessions.length === 0) {
+      throw new Error('No leader sessions found');
+    }
+    targetSessionId = sessions[0]!.sessionId;
+  }
+
+  const loadResult = await sessionEffects.loadSession(targetSessionId);
+  if (isErr(loadResult)) {
+    throw new Error(`Failed to load session: ${loadResult.err.message}`);
+  }
+
+  const session = unwrapOk(loadResult);
+
+  const approvedCandidates = session.taskCandidates.filter(
+    (c) => c.status === TaskCandidateStatus.APPROVED,
+  );
+
+  console.log(`\n${'='.repeat(80)}`);
+  console.log('Execute Approved Candidates');
+  console.log(`${'='.repeat(80)}\n`);
+
+  if (approvedCandidates.length === 0) {
+    console.log('  No approved candidates to execute.\n');
+    console.log(`  Run 'agent lead candidates ${session.sessionId}' to see available candidates.`);
+    console.log(`  Run 'agent lead approve <candidateId>' to approve candidates.`);
+    console.log(`\n${'='.repeat(80)}\n`);
+    return;
+  }
+
+  console.log(`Found ${approvedCandidates.length} approved candidate(s):\n`);
+
+  for (const candidate of approvedCandidates) {
+    console.log(`📋 ${candidate.id}`);
+    console.log(`   Priority:    ${getPriorityIcon(candidate.priority)} ${candidate.priority}`);
+    console.log(`   Category:    ${candidate.category}`);
+    console.log(`   Description: ${candidate.description}`);
+    console.log(`   Related:     ${candidate.relatedTaskId}`);
+    console.log();
+  }
+
+  // TODO: Phase 2 で実際のタスク実行を実装
+  console.log('-'.repeat(80));
+  console.log('⚠️  Task execution is not yet implemented.');
+  console.log('   Approved candidates will be converted to tasks in a future release.');
+  console.log(`\n${'='.repeat(80)}\n`);
+}
+
+/**
+ * タスク候補ステータスに対応するアイコンを取得
+ */
+function getCandidateStatusIcon(status: TaskCandidate['status']): string {
+  switch (status) {
+    case TaskCandidateStatus.PENDING:
+      return '⏳';
+    case TaskCandidateStatus.APPROVED:
+      return '✅';
+    case TaskCandidateStatus.REJECTED:
+      return '❌';
+    case TaskCandidateStatus.EXECUTED:
+      return '🚀';
+    default:
+      return '❓';
+  }
+}
+
+/**
+ * 優先度に対応するアイコンを取得
+ */
+function getPriorityIcon(priority: string): string {
+  switch (priority) {
+    case 'high':
+      return '🔴';
+    case 'medium':
+      return '🟡';
+    case 'low':
+      return '🟢';
+    default:
+      return '⚪';
   }
 }

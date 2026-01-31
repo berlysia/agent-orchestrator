@@ -71,6 +71,101 @@ export const EscalationRecordSchema = z.object({
 export type EscalationRecord = z.infer<typeof EscalationRecordSchema>;
 
 /**
+ * Task Candidate Source
+ *
+ * タスク候補の生成元
+ */
+export const TaskCandidateSource = {
+  WORKER_RECOMMENDATION: 'worker-recommendation',
+  PATTERN_DISCOVERY: 'pattern-discovery',
+  EXPLORATION_FINDING: 'exploration-finding',
+} as const;
+
+export type TaskCandidateSource =
+  (typeof TaskCandidateSource)[keyof typeof TaskCandidateSource];
+
+/**
+ * Task Candidate Category
+ *
+ * タスク候補のカテゴリ
+ */
+export const TaskCandidateCategory = {
+  CODE_QUALITY: 'code-quality',
+  SECURITY: 'security',
+  PERFORMANCE: 'performance',
+  MAINTAINABILITY: 'maintainability',
+  ARCHITECTURE: 'architecture',
+  REFACTORING: 'refactoring',
+  DOCUMENTATION: 'documentation',
+} as const;
+
+export type TaskCandidateCategory =
+  (typeof TaskCandidateCategory)[keyof typeof TaskCandidateCategory];
+
+/**
+ * Task Candidate Status
+ *
+ * タスク候補のステータス
+ */
+export const TaskCandidateStatus = {
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  EXECUTED: 'executed',
+} as const;
+
+export type TaskCandidateStatus =
+  (typeof TaskCandidateStatus)[keyof typeof TaskCandidateStatus];
+
+/**
+ * Task Candidate Schema
+ *
+ * Worker のフィードバックから生成された潜在的なタスク
+ *
+ * WHY: Worker が発見したパターンや推奨アクションを
+ *      Leader が動的にタスク化できるようにする（ADR-024）
+ */
+export const TaskCandidateSchema = z.object({
+  /** 候補 ID */
+  id: z.string(),
+  /** 生成元 */
+  source: z.enum([
+    TaskCandidateSource.WORKER_RECOMMENDATION,
+    TaskCandidateSource.PATTERN_DISCOVERY,
+    TaskCandidateSource.EXPLORATION_FINDING,
+  ]),
+  /** 関連タスク ID */
+  relatedTaskId: z.string().transform(taskId),
+  /** 候補の説明 */
+  description: z.string(),
+  /** 優先度 */
+  priority: z.enum(['low', 'medium', 'high']),
+  /** 自動実行可能か（ユーザー承認不要） */
+  autoExecutable: z.boolean(),
+  /** カテゴリ */
+  category: z.enum([
+    TaskCandidateCategory.CODE_QUALITY,
+    TaskCandidateCategory.SECURITY,
+    TaskCandidateCategory.PERFORMANCE,
+    TaskCandidateCategory.MAINTAINABILITY,
+    TaskCandidateCategory.ARCHITECTURE,
+    TaskCandidateCategory.REFACTORING,
+    TaskCandidateCategory.DOCUMENTATION,
+  ]),
+  /** 生成日時 */
+  createdAt: z.string().datetime(),
+  /** ステータス */
+  status: z.enum([
+    TaskCandidateStatus.PENDING,
+    TaskCandidateStatus.APPROVED,
+    TaskCandidateStatus.REJECTED,
+    TaskCandidateStatus.EXECUTED,
+  ]),
+});
+
+export type TaskCandidate = z.infer<typeof TaskCandidateSchema>;
+
+/**
  * Member Task History Schema
  *
  * メンバータスク実行履歴
@@ -191,6 +286,12 @@ export const LeaderSessionSchema = z.object({
     }),
   /** FAILED 状態時のエラーメッセージ */
   errorMessage: z.string().nullable().optional(),
+  /**
+   * タスク候補リスト（ADR-024）
+   *
+   * WHY: Worker フィードバックから生成された動的タスク候補を管理
+   */
+  taskCandidates: z.array(TaskCandidateSchema).default([]),
   /** 作成日時 */
   createdAt: z.string().datetime(),
   /** 更新日時 */
@@ -228,6 +329,7 @@ export const createLeaderSession = (
       externalAdvisor: 0,
     },
     errorMessage: null,
+    taskCandidates: [],
     createdAt: now,
     updatedAt: now,
     leaderLogPath: null,

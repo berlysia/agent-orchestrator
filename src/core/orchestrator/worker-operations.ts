@@ -879,7 +879,32 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 - DO NOT create VERIFICATION_REPORT.md or any other report files
 - Output verification results directly to logs (stdout/stderr)
 - Use console.log, console.error for verification output
-- Reports are automatically saved to the runs/ directory by the orchestrator`;
+- Reports are automatically saved to the runs/ directory by the orchestrator
+
+## Structured Feedback (Optional)
+
+After completing the task, provide structured feedback in the following JSON format.
+This helps the system learn from your work and identify improvement opportunities.
+
+\`\`\`
+## Feedback
+\\\`\\\`\\\`json
+{
+  "type": "implementation",
+  "result": "success" | "partial" | "failed",
+  "findings": ["Discovery 1", "Discovery 2"],
+  "recommendations": ["Recommended action 1", "Recommended action 2"],
+  "patterns": ["Detected pattern 1", "Detected pattern 2"],
+  "notes": "Additional notes"
+}
+\\\`\\\`\\\`
+\`\`\`
+
+**Field descriptions:**
+- \`findings\`: Facts discovered during work (e.g., "Found duplicate validation logic in src/auth/")
+- \`recommendations\`: Suggested follow-up actions (e.g., "Create common validation function")
+- \`patterns\`: Repeated patterns detected (e.g., "Same error handling code in all API handlers")
+- \`notes\`: Supplementary information, concerns (e.g., "Changes may impact security")`;
 
     // フィードバックがある場合は追加（継続実行のため）
     // WHY: 前回の判定で指摘された問題を明示することで、エージェントが適切に対処できる
@@ -1184,7 +1209,32 @@ ${task.scopePaths.length > 0 ? `## FILES TO CREATE/MODIFY\n${task.scopePaths.joi
 - DO NOT create VERIFICATION_REPORT.md or any other report files
 - Output verification results directly to logs (stdout/stderr)
 - Use console.log, console.error for verification output
-- Reports are automatically saved to the runs/ directory by the orchestrator`;
+- Reports are automatically saved to the runs/ directory by the orchestrator
+
+## Structured Feedback (Optional)
+
+After completing the task, provide structured feedback in the following JSON format.
+This helps the system learn from your work and identify improvement opportunities.
+
+\`\`\`
+## Feedback
+\\\`\\\`\\\`json
+{
+  "type": "implementation",
+  "result": "success" | "partial" | "failed",
+  "findings": ["Discovery 1", "Discovery 2"],
+  "recommendations": ["Recommended action 1", "Recommended action 2"],
+  "patterns": ["Detected pattern 1", "Detected pattern 2"],
+  "notes": "Additional notes"
+}
+\\\`\\\`\\\`
+\`\`\`
+
+**Field descriptions:**
+- \`findings\`: Facts discovered during work (e.g., "Found duplicate validation logic in src/auth/")
+- \`recommendations\`: Suggested follow-up actions (e.g., "Create common validation function")
+- \`patterns\`: Repeated patterns detected (e.g., "Same error handling code in all API handlers")
+- \`notes\`: Supplementary information, concerns (e.g., "Changes may impact security")`;
 
     if (previousFeedback) {
       agentPrompt += `\n\nPrevious task feedback:\n${previousFeedback}`;
