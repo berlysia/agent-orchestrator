@@ -407,6 +407,59 @@ const taskId: TaskId = workerId; // ❌
 - `src/adapters/github/index.ts` - GitHubEffects実装
 - `src/types/github.ts` - GitHub関連型定義
 
+### Prompt Externalization (ADR-026)
+
+✅ 実装完了
+
+- プロンプトのMarkdownファイル外部化
+- 階層読み込み（プロジェクト → グローバル → ビルトイン）
+- 変数展開と自動注入機能
+- ejectコマンドによるカスタマイズ
+
+実装ファイル:
+
+- `src/types/prompt.ts` - 型定義
+- `src/core/runner/prompt-loader.ts` - PromptLoader実装
+- `src/core/runner/builtin-prompts.ts` - ビルトインプロンプト
+- `src/cli/commands/eject.ts` - ejectコマンド
+
+詳細: [docs/decisions/026-prompt-externalization.md](decisions/026-prompt-externalization.md)
+
+### AI Antipattern Review (ADR-031)
+
+✅ Phase 1 実装完了
+
+- AI生成コード特有のアンチパターン検出
+- フォールバック乱用検出（`?? 'default'`等）
+- スコープクリープ検出
+- Judge評価への統合ヘルパー
+
+実装ファイル:
+
+- `src/types/ai-antipattern.ts` - 型定義
+- `src/core/orchestrator/ai-antipattern-reviewer.ts` - レビュアー実装
+- `src/core/orchestrator/judge-ai-antipattern-integration.ts` - Judge統合
+
+詳細: [docs/decisions/031-ai-antipattern-review.md](decisions/031-ai-antipattern-review.md)
+
+### Loop Detection (ADR-033)
+
+✅ 実装完了
+
+- 無限ループ検出と防止機構
+- ステップ反復検出（Worker/Judge/Replan）
+- Jaccard類似度による応答類似度検出
+- 状態遷移パターン検出
+- Orchestrator統合ヘルパー
+
+実装ファイル:
+
+- `src/types/loop-detection.ts` - 型定義
+- `src/core/orchestrator/loop-detector.ts` - LoopDetector実装
+- `src/core/orchestrator/orchestrator-loop-integration.ts` - Orchestrator統合
+
+詳細: [docs/decisions/033-loop-detection-prevention.md](decisions/033-loop-detection-prevention.md)
+
 ## Planned Architecture
 
 ### GitHub Integration (Phase 2)

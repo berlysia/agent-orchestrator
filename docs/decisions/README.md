@@ -36,23 +36,23 @@
 | [023](023-agent-swarm-team-development.md) | エージェントスウォーム擬似チーム開発 | ✅ Accepted | 2026-01-27 |
 | [024](024-worker-feedback-dynamic-task-generation.md) | Workerフィードバック動的タスク生成 | ⏳ Proposed | 2026-01-31 |
 | [025](025-autonomous-exploration-mode.md) | 自律探索モード | ⏳ Proposed | 2026-01-31 |
-| [026](026-prompt-externalization.md) | プロンプト外部化（Markdown分離） | ⏳ Proposed | 2026-01-31 |
+| [026](026-prompt-externalization.md) | プロンプト外部化（Markdown分離） | ✅ Implemented | 2026-01-31 |
 | [027](027-ndjson-session-logging.md) | NDJSONセッションログと継続性管理 | ⏳ Proposed | 2026-01-31 |
 | [028](028-watch-mode.md) | Watchモード（タスク監視自動実行） | ⏳ Proposed | 2026-01-31 |
 | [029](029-github-issue-integration.md) | GitHub Issue連携 | ⏳ Proposed | 2026-01-31 |
 | [030](030-declarative-workflow-definition.md) | 宣言的ワークフロー定義（YAML） | 🔜 Deferred | 2026-01-31 |
-| [031](031-ai-antipattern-review.md) | AI Antipattern Review | ⏳ Proposed | 2026-01-31 |
+| [031](031-ai-antipattern-review.md) | AI Antipattern Review | ✅ Implemented | 2026-01-31 |
 | [032](032-report-generation-traceability.md) | レポート生成とトレーサビリティ | ⏳ Proposed | 2026-01-31 |
-| [033](033-loop-detection-prevention.md) | ループ検出と無限ループ防止 | ⏳ Proposed | 2026-01-31 |
+| [033](033-loop-detection-prevention.md) | ループ検出と無限ループ防止 | ✅ Implemented | 2026-01-31 |
 | [034](034-parallel-execution-aggregation.md) | 並列Worker実行とアグリゲーション評価 | ⏳ Proposed | 2026-01-31 |
 | [035](035-worktree-isolation-strategy.md) | 作業ディレクトリ分離戦略（worktree選定） | ✅ Accepted | 2026-01-31 |
 | [036](036-agent-permission-model.md) | エージェント権限モデル | ⏳ Proposed | 2026-01-31 |
 
 ## サマリー
 
-- **Implemented/Accepted**: 13件
+- **Implemented/Accepted**: 16件
 - **Partially Implemented**: 1件
-- **Proposed**: 14件
+- **Proposed**: 11件
 - **Deferred**: 1件
 - **Rejected**: 1件
 - **Draft**: 1件

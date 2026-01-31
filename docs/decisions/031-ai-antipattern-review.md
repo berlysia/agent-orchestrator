@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Implemented
 
 ## Context
 
@@ -153,9 +153,69 @@ Worker実行 → AI Antipattern Review → Architecture Review → Judge
 
 ## Implementation
 
-### Phase 1: 基本検出
+### 実装済みファイル
+
+| ファイル | 役割 |
+|---------|------|
+| `src/types/ai-antipattern.ts` | 型定義（FallbackViolation, UnusedCodeIssue等） |
+| `src/core/orchestrator/ai-antipattern-reviewer.ts` | AIAntipatternReviewer実装 |
+| `src/core/orchestrator/judge-ai-antipattern-integration.ts` | Judge統合ヘルパー |
+| `tests/unit/ai-antipattern-reviewer.test.ts` | ユニットテスト |
+
+### 実装API
+
+```typescript
+// レビュアー作成
+const reviewer = createAIAntipatternReviewer(config?: Partial<AIAntipatternConfig>);
+
+// コードレビュー実行
+const result = await reviewer.review(files, taskDescription);
+// AIAntipatternReviewResult {
+//   score: number;           // 0-100
+//   shouldReject: boolean;   // rejectThreshold以下でtrue
+//   fallbackViolations: FallbackViolation[];
+//   unusedCodeIssues: UnusedCodeIssue[];
+//   scopeCreepIssues: ScopeCreepIssue[];
+// }
+
+// Judge統合（worktree変更レビュー）
+import { reviewWorktreeChanges, shouldAffectJudgement } from './judge-ai-antipattern-integration';
+
+const reviewResult = await reviewWorktreeChanges(worktreePath, task, config);
+if (shouldAffectJudgement(reviewResult)) {
+  // REJECTまたは警告フィードバック生成
+}
+```
+
+### 検出パターン
+
+| パターン | 実装状態 |
+|---------|---------|
+| Nullish coalescing (`?? 'unknown'`) | ✅ 実装済み |
+| 空catch (`catch { }`) | ✅ 実装済み |
+| 多段フォールバック (`a ?? b ?? c`) | ✅ 実装済み |
+| スコープクリープ | ✅ 基本実装 |
+| 未使用コード | ⏳ 未実装（Phase 2） |
+
+### 設定例
+
+```yaml
+# .agent/config.yaml
+aiAntipattern:
+  enabled: true
+  rejectThreshold: 60
+  fallbackDetection:
+    enabled: true
+    exceptions:
+      - "*.config.ts"
+      - "*.config.js"
+  scopeCreepDetection:
+    enabled: true
+```
+
+### Phase 1: 基本検出 ✅
 1. フォールバック禁止ルールの実装
-2. Judge評価への統合
+2. Judge評価への統合ヘルパー
 
 ### Phase 2: 高度な検出
 

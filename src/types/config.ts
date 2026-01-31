@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import type { RefinementConfig } from './planner-session.ts';
+import { PromptConfigSchema } from './prompt.ts';
+import { LoopDetectionConfigSchema } from './loop-detection.ts';
+import { AIAntipatternConfigSchema } from './ai-antipattern.ts';
 
 /**
  * 既知のモデル名（補完のため）
@@ -355,6 +358,30 @@ export const ConfigSchema = z.object({
 
   /** GitHub設定 */
   github: GitHubConfigSchema.optional(),
+
+  /**
+   * プロンプト外部化設定 (ADR-026)
+   *
+   * WHY: エージェントプロンプトをMarkdownファイルとして外部化することで、
+   *      コード変更なしでプロンプトをカスタマイズ可能にする
+   */
+  prompts: PromptConfigSchema.optional(),
+
+  /**
+   * ループ検出設定 (ADR-033)
+   *
+   * WHY: 無限ループによるリソース浪費を防止し、
+   *      問題の早期検出と適切なエスカレーションを実現
+   */
+  loopDetection: LoopDetectionConfigSchema.optional(),
+
+  /**
+   * AIアンチパターン検出設定 (ADR-031)
+   *
+   * WHY: AI生成コード特有の品質問題（フォールバック乱用、未使用コード等）を
+   *      早期に検出して品質を担保する
+   */
+  aiAntipattern: AIAntipatternConfigSchema.optional(),
 
   /**
    * 後方互換性: maxQualityRetries (非推奨)

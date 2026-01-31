@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Implemented
 
 ## Context
 
@@ -232,19 +232,92 @@ interface LeaderContext {
 
 ## Implementation
 
-### Phase 1: 基本検出
+### 実装済みファイル
+
+| ファイル | 役割 |
+|---------|------|
+| `src/types/loop-detection.ts` | 型定義（LoopDetectionResult, LoopAction等） |
+| `src/core/orchestrator/loop-detector.ts` | LoopDetector実装 |
+| `src/core/orchestrator/orchestrator-loop-integration.ts` | Orchestrator統合ヘルパー |
+| `tests/unit/loop-detector.test.ts` | ユニットテスト |
+
+### 実装API
+
+```typescript
+// ループ検出器作成
+const detector = createLoopDetector(config?: Partial<LoopDetectionConfig>);
+
+// ステップ実行を記録
+const result = detector.recordStepExecution('worker', taskId);
+// LoopDetectionResult
+
+// 応答を記録（類似度検出）
+const result = detector.recordResponse('worker', response);
+
+// 状態遷移を記録
+const result = detector.recordTransition({ from: 'worker', to: 'judge', reason: 'completed' });
+
+// アクション決定
+const action = detector.determineAction(result);
+// LoopAction: { type: 'continue' | 'escalate' | 'abort' | 'retry_with_hint', ... }
+
+// リセット
+detector.reset();
+
+// Orchestrator統合
+import { createLoopDetectionIntegration } from './orchestrator-loop-integration';
+
+const integration = createLoopDetectionIntegration(config);
+const beforeResult = integration.checkBeforeStep('worker', taskId);
+if (beforeResult.type !== 'ok') {
+  const action = integration.handleLoopDetection(beforeResult);
+  // アクションに応じた処理
+}
+```
+
+### 検出機能
+
+| 機能 | 実装状態 |
+|------|---------|
+| ステップ反復検出 | ✅ 実装済み |
+| Jaccard類似度検出 | ✅ 実装済み |
+| 状態遷移パターン検出 | ✅ 実装済み |
+| エスカレーションロジック | ✅ 基本実装 |
+| ヒント付きリトライ | ✅ 基本実装 |
+
+### 設定例
+
+```yaml
+# .agent/config.yaml
+loopDetection:
+  enabled: true
+  maxStepIterations:
+    default: 5
+    worker: 3
+    judge: 3
+    replan: 2
+  similarityDetection:
+    enabled: true
+    threshold: 0.8
+    windowSize: 3
+  transitionPatternDetection:
+    enabled: true
+    minOccurrences: 2
+```
+
+### Phase 1: 基本検出 ✅
 1. `LoopDetector` クラス実装
 2. step_iteration_exceeded 検出
-3. Orchestratorへの統合
+3. Orchestratorへの統合ヘルパー
 
-### Phase 2: 高度な検出
+### Phase 2: 高度な検出 ✅
 1. 類似度検出（Jaccard）
 2. 状態遷移パターン検出
 
-### Phase 3: アクション
+### Phase 3: アクション ✅
 1. エスカレーションロジック
 2. ヒント付きリトライ
-3. Leader統合
+3. Leader統合（統合ヘルパー提供）
 
 ## References
 

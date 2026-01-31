@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Implemented
 
 ## Context
 
@@ -142,16 +142,62 @@ agent eject --all
 
 ## Implementation
 
-### Phase 1: 基盤
+### 実装済みファイル
+
+| ファイル | 役割 |
+|---------|------|
+| `src/types/prompt.ts` | 型定義（AgentRole, PromptVariables, LoadedPrompt等） |
+| `src/core/runner/prompt-loader.ts` | PromptLoader実装（階層読み込み、変数展開、自動注入） |
+| `src/core/runner/builtin-prompts.ts` | ビルトインプロンプト（planner, worker, judge, leader） |
+| `src/cli/commands/eject.ts` | ejectコマンド実装 |
+| `tests/unit/prompt-loader.test.ts` | ユニットテスト |
+
+### 実装API
+
+```typescript
+// プロンプトローダー作成
+const loader = createPromptLoader(config?: Partial<PromptConfig>);
+
+// プロンプト読み込み（階層解決付き）
+const result = await loader.loadPrompt(AgentRole.WORKER);
+// Result<LoadedPrompt, PromptLoadError>
+
+// 変数展開
+const expanded = loader.expandVariables(template, {
+  task: 'Implement feature X',
+  context: 'React project',
+});
+
+// 自動注入付きプロンプト処理（{task}等がなくても自動追加）
+const processed = loader.processPrompt(content, variables);
+
+// キャッシュクリア
+loader.clearCache();
+```
+
+### 設定例
+
+```yaml
+# .agent/config.yaml
+prompts:
+  externalizationEnabled: true
+  cacheEnabled: true
+  projectDir: ".agent/prompts"
+  globalDir: "~/.agent/prompts"
+```
+
+### Phase 1: 基盤 ✅
 1. `PromptLoader` インターフェース定義
 2. Markdown読み込み・変数展開実装
 3. ビルトインプロンプトのMarkdown化
+4. 自動注入機能（`{task}`, `{previous_response}`, `{user_inputs}`）
 
-### Phase 2: CLI統合
-1. `agent init` でプロンプトテンプレート生成オプション追加
-2. `agent eject prompts` でビルトインをコピー（将来）
+### Phase 2: CLI統合 ✅
+1. `agent eject prompts` でビルトインをコピー
+2. `--global` オプションでユーザーグローバルディレクトリにコピー
+3. `--agent` オプションで特定エージェントのみコピー
 
-### Phase 3: 検証
+### Phase 3: 検証（未実装）
 1. プロンプト形式のバリデーション
 2. 必須セクションの検証
 
