@@ -7,6 +7,7 @@
 | **Implemented** | ✅ | 完全に実装済み |
 | **Partially Implemented** | 🔶 | 部分的に実装済み |
 | **Proposed** | ⏳ | 提案中、未実装 |
+| **Deferred** | 🔜 | 将来検討（現時点では見送り） |
 | **Draft** | 📝 | 下書き、要再設計 |
 | **Superseded** | 🔄 | 他のADRに置き換え |
 | **Rejected** | ❌ | 却下 |
@@ -35,15 +36,80 @@
 | [023](023-agent-swarm-team-development.md) | エージェントスウォーム擬似チーム開発 | ✅ Accepted | 2026-01-27 |
 | [024](024-worker-feedback-dynamic-task-generation.md) | Workerフィードバック動的タスク生成 | ⏳ Proposed | 2026-01-31 |
 | [025](025-autonomous-exploration-mode.md) | 自律探索モード | ⏳ Proposed | 2026-01-31 |
+| [026](026-prompt-externalization.md) | プロンプト外部化（Markdown分離） | ⏳ Proposed | 2026-01-31 |
+| [027](027-ndjson-session-logging.md) | NDJSONセッションログと継続性管理 | ⏳ Proposed | 2026-01-31 |
+| [028](028-watch-mode.md) | Watchモード（タスク監視自動実行） | ⏳ Proposed | 2026-01-31 |
+| [029](029-github-issue-integration.md) | GitHub Issue連携 | ⏳ Proposed | 2026-01-31 |
+| [030](030-declarative-workflow-definition.md) | 宣言的ワークフロー定義（YAML） | 🔜 Deferred | 2026-01-31 |
+| [031](031-ai-antipattern-review.md) | AI Antipattern Review | ⏳ Proposed | 2026-01-31 |
+| [032](032-report-generation-traceability.md) | レポート生成とトレーサビリティ | ⏳ Proposed | 2026-01-31 |
+| [033](033-loop-detection-prevention.md) | ループ検出と無限ループ防止 | ⏳ Proposed | 2026-01-31 |
+| [034](034-parallel-execution-aggregation.md) | 並列Worker実行とアグリゲーション評価 | ⏳ Proposed | 2026-01-31 |
+| [035](035-worktree-isolation-strategy.md) | 作業ディレクトリ分離戦略（worktree選定） | ✅ Accepted | 2026-01-31 |
+| [036](036-agent-permission-model.md) | エージェント権限モデル | ⏳ Proposed | 2026-01-31 |
 
 ## サマリー
 
-- **Implemented/Accepted**: 12件
+- **Implemented/Accepted**: 13件
 - **Partially Implemented**: 1件
-- **Proposed**: 4件
+- **Proposed**: 14件
+- **Deferred**: 1件
 - **Rejected**: 1件
 - **Draft**: 1件
+
+## 拡張機能ADR 推奨実装順序
+
+ADR 026-036（拡張機能群）の推奨実装順序：
+
+```
+1. ADR-026 プロンプト外部化（基盤）
+   │  エージェントプロンプトをMarkdownファイルとして外部化
+   │  → カスタマイズ可能性の基盤
+   ↓
+2. ADR-031 AI Antipattern Review（品質向上）
+   │  AI生成コード特有の問題検出
+   │  → フォールバック禁止、未使用コード検出
+   ↓
+3. ADR-033 ループ検出と無限ループ防止（安定性向上）
+   │  同一ステップ反復、類似応答、遷移パターン検出
+   │  → 無限ループによるリソース浪費防止
+   ↓
+4. ADR-032 レポート生成とトレーサビリティ（可視性向上）
+   │  各フェーズでMarkdownレポート生成
+   │  → 計画→実装→レビューの追跡
+   ↓
+5. ADR-027 NDJSONセッションログ（可観測性向上）
+   │  セッションログをNDJSON形式で記録
+   │  → クラッシュ耐性、リアルタイム監視
+   ↓
+6. ADR-029 GitHub Issue連携（統合性向上）
+   │  `agent run "#123"` でIssueをタスク化
+   │  → Issue→タスク→PRの追跡
+   ↓
+7. ADR-028 Watchモード（自動化）
+   │  タスクディレクトリ監視、自動実行
+   │  → CI/CD連携、バッチ処理
+   ↓
+8. ADR-030 宣言的ワークフロー定義（将来検討）
+      YAMLでワークフロー定義
+      → Leaderパターンとの統合が複雑なため保留
+```
+
+### 依存関係
+
+- ADR-026（プロンプト外部化）は他のADRの前提条件ではないが、カスタマイズ基盤として最初に実装推奨
+- ADR-030（YAML定義）はADR-026実装後に再検討
+- ADR-031〜033は独立して実装可能だが、品質→安定性→可視性の順序が効果的
+
+### 補完ADR（論理的整合性評価で追加）
+
+| ADR | 内容 | 補完対象 |
+|-----|------|---------|
+| [034](034-parallel-execution-aggregation.md) | 並列実行と`all()`/`any()`アグリゲーション | ADR-023（Agent Swarm）の並列実行詳細 |
+| [035](035-worktree-isolation-strategy.md) | worktree選定理由の記録 | 作業ディレクトリ分離の技術的判断 |
+| [036](036-agent-permission-model.md) | `permission_mode`設定 | セキュリティ/権限管理 |
 
 ---
 
 *最終更新: 2026-01-31*
+
