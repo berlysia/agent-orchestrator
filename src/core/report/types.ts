@@ -135,3 +135,199 @@ export interface ReportGenerator {
    */
   format(data: ReportData): string;
 }
+
+// ===== ADR-032: トレーサビリティレポート型定義 =====
+
+/**
+ * 明確化（質問と回答のペア）
+ */
+export interface Clarification {
+  question: string;
+  answer: string;
+}
+
+/**
+ * 設計決定
+ */
+export interface DesignDecision {
+  decision: string;
+  rationale: string;
+}
+
+/**
+ * Planning Reportデータ (00-planning.md)
+ */
+export interface PlanningReportData {
+  sessionId: string;
+  originalRequest: string;
+  clarifications: Clarification[];
+  designDecisions: DesignDecision[];
+  approvedScope: string;
+  createdAt: string;
+}
+
+/**
+ * タスク分解項目
+ */
+export interface TaskBreakdownItem {
+  id: string;
+  title: string;
+  dependencies: string[];
+  priority: 'high' | 'normal' | 'low';
+  taskType: 'implementation' | 'documentation' | 'investigation' | 'integration';
+}
+
+/**
+ * Task Breakdown Reportデータ (01-task-breakdown.md)
+ */
+export interface TaskBreakdownData {
+  sessionId: string;
+  createdAt: string;
+  tasks: TaskBreakdownItem[];
+}
+
+/**
+ * ファイル変更情報
+ */
+export interface FileChange {
+  type: 'create' | 'modify' | 'delete';
+  path: string;
+  description?: string;
+  linesAdded?: number;
+  linesRemoved?: number;
+}
+
+/**
+ * Scope Reportデータ (tasks/{taskId}/00-scope.md)
+ */
+export interface ScopeReportData {
+  taskId: string;
+  title: string;
+  description: string;
+  plannedChanges: FileChange[];
+  estimatedSize: 'small' | 'medium' | 'large';
+  impactScope: string[];
+}
+
+/**
+ * 実行されたコマンド
+ */
+export interface ExecutedCommand {
+  command: string;
+  status: 'success' | 'failed';
+  output?: string;
+}
+
+/**
+ * Execution Reportデータ (tasks/{taskId}/01-execution.md)
+ */
+export interface ExecutionReportData {
+  taskId: string;
+  workerId: string;
+  startedAt: string;
+  completedAt: string;
+  duration: number;
+  changes: FileChange[];
+  commands: ExecutedCommand[];
+  notes?: string;
+}
+
+/**
+ * 評価アスペクト
+ */
+export interface EvaluationAspect {
+  aspect: string;
+  result: 'pass' | 'fail' | 'warning';
+  notes?: string;
+}
+
+/**
+ * 検出されたIssue
+ */
+export interface DetectedIssue {
+  severity: 'error' | 'warning' | 'info';
+  location?: string;
+  issue: string;
+  action?: string;
+}
+
+/**
+ * Review Reportデータ (tasks/{taskId}/02-review.md)
+ */
+export interface ReviewReportData {
+  taskId: string;
+  verdict: 'done' | 'needs_continuation' | 'blocked' | 'skipped';
+  evaluations: EvaluationAspect[];
+  issues: DetectedIssue[];
+  continuationGuidance?: string;
+  reviewedAt: string;
+}
+
+/**
+ * Deliverable（成果物）
+ */
+export interface Deliverable {
+  type: 'create' | 'modify' | 'delete';
+  path: string;
+  summary: string;
+}
+
+/**
+ * タスク実行結果
+ */
+export interface TaskExecutionResult {
+  taskId: string;
+  title: string;
+  status: 'done' | 'blocked' | 'skipped';
+  iterations: number;
+}
+
+/**
+ * Summary Reportデータ (summary.md)
+ */
+export interface SummaryReportData {
+  sessionId: string;
+  originalRequest: string;
+  status: 'complete' | 'partial' | 'failed';
+  startedAt: string;
+  completedAt: string;
+  totalDuration: number;
+  deliverables: Deliverable[];
+  taskResults: TaskExecutionResult[];
+  reviewResults: {
+    judge: string;
+    integration?: string;
+  };
+  verificationCommands: string[];
+}
+
+/**
+ * 認知負荷設定
+ */
+export interface CognitiveLoadConfig {
+  maxLines: number;
+  collapseDetails: boolean;
+  prioritySections: string[];
+}
+
+/**
+ * レポートタイプ
+ */
+export type ReportType =
+  | 'planning'
+  | 'task-breakdown'
+  | 'scope'
+  | 'execution'
+  | 'review'
+  | 'summary';
+
+/**
+ * レポートメタデータ
+ */
+export interface ReportMetadata {
+  type: ReportType;
+  sessionId: string;
+  taskId?: string;
+  createdAt: string;
+  filePath: string;
+}
