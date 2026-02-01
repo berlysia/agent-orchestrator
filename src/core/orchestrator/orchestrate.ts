@@ -54,6 +54,17 @@ import {
   type IntegrationStartEvent,
   type OrchestrationCompleteEvent,
 } from '../../types/progress.ts';
+import type { SessionLogger } from '../session/session-logger.ts';
+import {
+  SessionPhase,
+  createPhaseStartRecord,
+  createPhaseCompleteRecord,
+  createTaskCreatedRecord,
+  createErrorRecord,
+} from '../../types/session-log.ts';
+import { sessionId as createSessionId } from '../../types/branded.ts';
+import type { ReportGenerator } from '../report/generator.ts';
+import type { SummaryReportData, TaskBreakdownData } from '../report/types.ts';
 
 /**
  * Orchestrator依存関係
@@ -68,6 +79,10 @@ export interface OrchestrateDeps {
   readonly maxWorkers?: number;
   /** 進捗エミッター（オプショナル） */
   readonly progressEmitter?: ProgressEmitter;
+  /** セッションロガー（オプショナル、ADR-027） */
+  readonly sessionLogger?: SessionLogger;
+  /** レポートジェネレーター（オプショナル、ADR-032） */
+  readonly reportGenerator?: ReportGenerator;
 }
 
 /**
@@ -248,7 +263,8 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     const blockedTaskIds: string[] = [];
     let schedulerState = initialSchedulerState(deps.maxWorkers ?? 3);
     let integrationInfo: IntegrationInfo | undefined = undefined;
-    const { progressEmitter } = deps;
+    const { progressEmitter, sessionLogger, reportGenerator } = deps;
+    let logSessionId: string | undefined;
 
     try {
       // 早期設定検証: PR作成にはGitHub設定が必要
@@ -278,6 +294,14 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       const planningResult = await plannerOps.planTasks(userInstruction);
 
       if (isErr(planningResult)) {
+        // エラーログ（セッションが開始済みの場合）
+        if (sessionLogger && logSessionId) {
+          const errorRecord = createErrorRecord(planningResult.err.message, {
+            errorType: 'PLANNING_ERROR',
+          });
+          await sessionLogger.log(errorRecord);
+          await sessionLogger.abort(planningResult.err.message, 'PLANNING_ERROR');
+        }
         return createErr({
           type: 'PLANNING_ERROR',
           message: planningResult.err.message,
@@ -286,6 +310,15 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
       }
 
       const { taskIds, runId: sessionId } = planningResult.val;
+      logSessionId = sessionId;
+
+      // NDJSONセッションログ開始（ADR-027）
+      if (sessionLogger) {
+        await sessionLogger.start(createSessionId(sessionId), userInstruction);
+        // Planningフェーズ開始
+        const phaseStartRecord = createPhaseStartRecord(SessionPhase.PLANNING, createSessionId(sessionId));
+        await sessionLogger.log(phaseStartRecord);
+      }
 
       // 2. すべてのタスクを取得
       const loadResult = await loadTasks(taskIds, deps.taskStore);
@@ -299,6 +332,47 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
           taskIds: tasks.map((t) => t.id),
         }),
       );
+
+      // タスク作成ログ（ADR-027）
+      if (sessionLogger) {
+        const logSid = createSessionId(sessionId);
+        for (const task of tasks) {
+          const taskCreatedRecord = createTaskCreatedRecord(task.id, task.summary ?? String(task.branch), {
+            taskType: task.taskType ?? 'implementation',
+            dependencies: task.dependencies,
+          });
+          await sessionLogger.log(taskCreatedRecord);
+        }
+        // Planningフェーズ完了
+        const phaseCompleteRecord = createPhaseCompleteRecord(SessionPhase.PLANNING, {
+          sessionId: logSid,
+        });
+        await sessionLogger.log(phaseCompleteRecord);
+      }
+
+      // レポート生成（ADR-032）- タスク分解レポート
+      if (reportGenerator) {
+        try {
+          const taskBreakdownData: TaskBreakdownData = {
+            sessionId,
+            createdAt: new Date().toISOString(),
+            tasks: tasks.map((task) => ({
+              id: String(task.id),
+              title: task.summary ?? String(task.branch),
+              dependencies: task.dependencies.map((d) => String(d)),
+              priority: 'normal' as const,
+              taskType: task.taskType ?? 'implementation',
+            })),
+          };
+
+          const reportResult = await reportGenerator.generateTaskBreakdownReport(taskBreakdownData);
+          if (reportResult.ok) {
+            console.log(`📄 Task breakdown report generated: ${reportResult.val}`);
+          }
+        } catch (reportError) {
+          console.warn('⚠️  Failed to generate task breakdown report:', reportError);
+        }
+      }
 
       // 生成されたタスクを表示
       console.log(`📋 Generated ${tasks.length} tasks`);
@@ -835,6 +909,60 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
         console.log('  Conflicts resolved: ' + integrationInfo.conflictCount);
       }
 
+      // セッション完了ログ（ADR-027）
+      if (sessionLogger) {
+        const summary = success
+          ? `Orchestration completed: ${completedTaskIds.length} tasks done`
+          : `Orchestration finished with errors: ${completedTaskIds.length} completed, ${failedTaskIds.length} failed, ${blockedTaskIds.length} blocked`;
+        await sessionLogger.complete(summary, {
+          tasksCompleted: completedTaskIds.length,
+        });
+      }
+
+      // レポート生成（ADR-032）
+      if (reportGenerator) {
+        try {
+          const startedAt = new Date().toISOString();
+          const completedAt = new Date().toISOString();
+          const taskResults = await Promise.all(
+            tasks.map(async (task) => {
+              const currentResult = await deps.taskStore.readTask(task.id);
+              const isDone = currentResult.ok && currentResult.val.state === TaskState.DONE;
+              const isBlocked = currentResult.ok && (currentResult.val.state === TaskState.BLOCKED || currentResult.val.state === TaskState.CANCELLED);
+              return {
+                taskId: String(task.id),
+                title: task.summary ?? String(task.branch),
+                status: (isDone ? 'done' : isBlocked ? 'blocked' : 'skipped') as 'done' | 'blocked' | 'skipped',
+                iterations: 1, // TODO: Track actual iteration count
+              };
+            }),
+          );
+
+          const summaryData: SummaryReportData = {
+            sessionId,
+            originalRequest: userInstruction,
+            status: success ? 'complete' : failedTaskIds.length > 0 ? 'failed' : 'partial',
+            startedAt,
+            completedAt,
+            totalDuration: 0, // TODO: Track actual duration
+            deliverables: [], // TODO: Collect actual deliverables
+            taskResults,
+            reviewResults: {
+              judge: success ? 'Approved' : 'Requires attention',
+              integration: integrationInfo ? `${integrationInfo.mergedCount} merged, ${integrationInfo.conflictCount} conflicts` : undefined,
+            },
+            verificationCommands: ['pnpm typecheck', 'pnpm test'],
+          };
+
+          const reportResult = await reportGenerator.generateSummaryReport(summaryData);
+          if (reportResult.ok) {
+            console.log(`📄 Summary report generated: ${reportResult.val}`);
+          }
+        } catch (reportError) {
+          console.warn('⚠️  Failed to generate summary report:', reportError);
+        }
+      }
+
       return createOk({
         sessionId,
         taskIds,
@@ -847,6 +975,15 @@ export const createOrchestrator = (deps: OrchestrateDeps) => {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`❌ Orchestration error: ${errorMessage}`);
+
+      // 異常終了ログ（ADR-027）
+      if (sessionLogger) {
+        const errorRecord = createErrorRecord(errorMessage, {
+          errorType: 'UNKNOWN_ERROR',
+        });
+        await sessionLogger.log(errorRecord);
+        await sessionLogger.abort(errorMessage, 'UNKNOWN_ERROR');
+      }
 
       return createErr({
         type: 'UNKNOWN_ERROR',
