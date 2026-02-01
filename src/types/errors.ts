@@ -432,3 +432,158 @@ export const configMergeError = (details: string): ConfigMergeError => ({
   details,
   message: `Configuration merge failed: ${details}`,
 });
+
+// ===== Session Log Errors =====
+
+export type SessionLogError =
+  | SessionLogWriteError
+  | SessionLogReadError
+  | SessionPointerError
+  | SessionResumeError;
+
+export interface SessionLogWriteError {
+  readonly type: 'SessionLogWriteError';
+  readonly sessionId: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface SessionLogReadError {
+  readonly type: 'SessionLogReadError';
+  readonly sessionId: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface SessionPointerError {
+  readonly type: 'SessionPointerError';
+  readonly pointerType: 'latest' | 'previous';
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface SessionResumeError {
+  readonly type: 'SessionResumeError';
+  readonly sessionId: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+// SessionLogError コンストラクタ
+export const sessionLogWriteError = (sessionId: string, cause?: unknown): SessionLogWriteError => ({
+  type: 'SessionLogWriteError',
+  sessionId,
+  cause,
+  message: `Failed to write session log for ${sessionId}: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+export const sessionLogReadError = (sessionId: string, cause?: unknown): SessionLogReadError => ({
+  type: 'SessionLogReadError',
+  sessionId,
+  cause,
+  message: `Failed to read session log for ${sessionId}: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+export const sessionPointerError = (
+  pointerType: 'latest' | 'previous',
+  cause?: unknown,
+): SessionPointerError => ({
+  type: 'SessionPointerError',
+  pointerType,
+  cause,
+  message: `Failed to access ${pointerType} session pointer: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+export const sessionResumeError = (sessionId: string, cause?: unknown): SessionResumeError => ({
+  type: 'SessionResumeError',
+  sessionId,
+  cause,
+  message: `Failed to resume session ${sessionId}: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+// ===== GitHub CLI Errors =====
+
+export type GitHubCliError = GhCliNotInstalledError | GhCliNotAuthenticatedError;
+
+export interface GhCliNotInstalledError {
+  readonly type: 'GhCliNotInstalledError';
+  readonly message: string;
+}
+
+export interface GhCliNotAuthenticatedError {
+  readonly type: 'GhCliNotAuthenticatedError';
+  readonly message: string;
+}
+
+// GitHubCliError コンストラクタ
+export const ghCliNotInstalled = (): GhCliNotInstalledError => ({
+  type: 'GhCliNotInstalledError',
+  message: 'gh CLI is not installed. Install from https://cli.github.com/',
+});
+
+export const ghCliNotAuthenticated = (): GhCliNotAuthenticatedError => ({
+  type: 'GhCliNotAuthenticatedError',
+  message: "gh CLI is not authenticated. Run 'gh auth login' to authenticate.",
+});
+
+// ===== Issue Parse Errors =====
+
+export type IssueParseError = InvalidIssueRefError;
+
+export interface InvalidIssueRefError {
+  readonly type: 'InvalidIssueRefError';
+  readonly input: string;
+  readonly message: string;
+}
+
+// IssueParseError コンストラクタ
+export const invalidIssueRef = (input: string): InvalidIssueRefError => ({
+  type: 'InvalidIssueRefError',
+  input,
+  message: `Invalid issue reference: "${input}". Expected formats: #123, 123, owner/repo#123, or https://github.com/owner/repo/issues/123`,
+});
+
+// ===== Report Errors =====
+
+export type ReportError = ReportWriteError | ReportReadError | ReportNotFoundError;
+
+export interface ReportWriteError {
+  readonly type: 'ReportWriteError';
+  readonly reportPath: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface ReportReadError {
+  readonly type: 'ReportReadError';
+  readonly reportPath: string;
+  readonly cause?: unknown;
+  readonly message: string;
+}
+
+export interface ReportNotFoundError {
+  readonly type: 'ReportNotFoundError';
+  readonly reportPath: string;
+  readonly message: string;
+}
+
+// ReportError コンストラクタ
+export const reportWriteError = (reportPath: string, cause?: unknown): ReportWriteError => ({
+  type: 'ReportWriteError',
+  reportPath,
+  cause,
+  message: `Failed to write report ${reportPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+export const reportReadError = (reportPath: string, cause?: unknown): ReportReadError => ({
+  type: 'ReportReadError',
+  reportPath,
+  cause,
+  message: `Failed to read report ${reportPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+});
+
+export const reportNotFound = (reportPath: string): ReportNotFoundError => ({
+  type: 'ReportNotFoundError',
+  reportPath,
+  message: `Report not found: ${reportPath}`,
+});

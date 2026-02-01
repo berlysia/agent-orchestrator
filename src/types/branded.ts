@@ -14,6 +14,9 @@ export type TaskId = Brand<'TaskId', string>;
 export type RunId = Brand<'RunId', string>;
 export type CheckId = Brand<'CheckId', string>;
 
+// Session関連
+export type SessionId = Brand<'SessionId', string>;
+
 // Worker関連
 export type WorkerId = Brand<'WorkerId', string>;
 
@@ -28,6 +31,7 @@ export const taskId = (raw: string): TaskId => raw as TaskId;
 export const runId = (raw: string): RunId => raw as RunId;
 export const checkId = (raw: string): CheckId => raw as CheckId;
 export const workerId = (raw: string): WorkerId => raw as WorkerId;
+export const sessionId = (raw: string): SessionId => raw as SessionId;
 export const repoPath = (raw: string): RepoPath => raw as RepoPath;
 export const worktreePath = (raw: string): WorktreePath => raw as WorktreePath;
 export const branchName = (raw: string): BranchName => raw as BranchName;
@@ -38,6 +42,7 @@ export const unwrapTaskId = (id: TaskId): string => id as string;
 export const unwrapRunId = (id: RunId): string => id as string;
 export const unwrapCheckId = (id: CheckId): string => id as string;
 export const unwrapWorkerId = (id: WorkerId): string => id as string;
+export const unwrapSessionId = (id: SessionId): string => id as string;
 export const unwrapRepoPath = (path: RepoPath): string => path as string;
 export const unwrapWorktreePath = (path: WorktreePath): string => path as string;
 export const unwrapBranchName = (name: BranchName): string => name as string;

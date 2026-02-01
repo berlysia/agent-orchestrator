@@ -17,6 +17,7 @@ import { createLeadCommand } from './commands/lead.ts';
 import { createCleanupBranchesCommand } from './commands/cleanup-branches.ts';
 import { createExploreCommand } from './commands/explore.ts';
 import { createEjectCommand } from './commands/eject.ts';
+import { createLogsCommand } from './commands/logs.ts';
 import { getVersion } from './utils/get-version.ts';
 
 const program = new Command();
@@ -43,5 +44,6 @@ program.addCommand(createLeadCommand());
 program.addCommand(createCleanupBranchesCommand());
 program.addCommand(createExploreCommand());
 program.addCommand(createEjectCommand());
+program.addCommand(createLogsCommand());
 
 program.parse(process.argv);
