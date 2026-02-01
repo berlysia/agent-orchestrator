@@ -9,6 +9,13 @@ import { loadConfig } from '../utils/load-config.ts';
 import { generateReportSafely } from '../utils/auto-report.ts';
 import { createProgressEmitter } from '../../adapters/progress/progress-emitter-impl.ts';
 import { createTTYRenderer } from '../progress/tty-renderer.ts';
+import { parseIssueRef, isIssueRef } from '../../adapters/github/issue-parser.ts';
+import { checkGhCli } from '../../adapters/github/cli-check.ts';
+import { fetchIssue, getCurrentRepo } from '../../adapters/github/issue-fetcher.ts';
+import { convertIssueToTaskContext, extractSourceIssue } from '../../adapters/github/issue-to-task.ts';
+import type { SourceIssue } from '../../types/github-issue.ts';
+import { NdjsonSessionLogger } from '../../core/session/ndjson-writer.ts';
+import { FileSessionPointerManager } from '../../core/session/session-pointer.ts';
 
 /**
  * `agent run` コマンドの実装
@@ -45,10 +52,75 @@ async function executeRun(params: {
   configPath?: string;
   noReport?: boolean;
 }): Promise<void> {
-  const { instruction, configPath, noReport } = params;
+  const { instruction: rawInstruction, configPath, noReport } = params;
 
   // 設定ファイルを読み込み
   const config = await loadConfig(configPath);
+
+  // GitHub Issue参照の処理（#123 や owner/repo#123 形式）
+  let instruction = rawInstruction;
+  let sourceIssue: SourceIssue | undefined;
+
+  if (isIssueRef(rawInstruction)) {
+    console.log(`🔗 Detected GitHub Issue reference: ${rawInstruction}`);
+
+    // gh CLI の存在確認
+    const cliCheckResult = await checkGhCli();
+    if (isErr(cliCheckResult)) {
+      console.error(`❌ ${cliCheckResult.err.message}`);
+      process.exit(1);
+    }
+
+    // Issue参照をパース
+    const refResult = parseIssueRef(rawInstruction);
+    if (isErr(refResult)) {
+      console.error(`❌ Invalid Issue reference: ${refResult.err.message}`);
+      process.exit(1);
+    }
+
+    let issueRef = refResult.val;
+
+    // owner/repoを取得（ローカルリポジトリから）
+    if (issueRef.type === 'number') {
+      // ローカルリポジトリから取得
+      const repoResult = await getCurrentRepo();
+      if (isErr(repoResult)) {
+        console.error(`❌ Failed to get current repository: ${repoResult.err.message}`);
+        console.error('   Tip: Use full URL or owner/repo#123 format');
+        process.exit(1);
+      }
+      // IssueRefをURL形式に変換（owner/repo情報を含める）
+      issueRef = {
+        type: 'url',
+        owner: repoResult.val.owner,
+        repo: repoResult.val.repo,
+        number: issueRef.number,
+      };
+    }
+
+    const owner = issueRef.owner;
+    const repo = issueRef.repo;
+
+    // Issueを取得
+    console.log(`📥 Fetching Issue #${issueRef.number} from ${owner}/${repo}...`);
+    const issueResult = await fetchIssue(issueRef);
+    if (isErr(issueResult)) {
+      console.error(`❌ Failed to fetch Issue: ${issueResult.err.message}`);
+      process.exit(1);
+    }
+
+    const parsedIssue = issueResult.val;
+    console.log(`   Title: ${parsedIssue.title}`);
+    console.log(`   State: ${parsedIssue.state}`);
+    if (parsedIssue.labels.length > 0) {
+      console.log(`   Labels: ${parsedIssue.labels.join(', ')}`);
+    }
+    console.log('');
+
+    // Issue→タスクコンテキスト変換
+    instruction = convertIssueToTaskContext(parsedIssue);
+    sourceIssue = extractSourceIssue(parsedIssue, issueRef);
+  }
 
   console.log(`📋 Configuration loaded`);
   console.log(`   App Repo: ${config.appRepoPath}`);
@@ -72,6 +144,10 @@ async function executeRun(params: {
   // SessionEffectsを初期化
   const sessionEffects = new PlannerSessionEffectsImpl(config.agentCoordPath);
 
+  // SessionLogger を初期化（ADR-027）
+  const sessionPointerManager = new FileSessionPointerManager(config.agentCoordPath);
+  const sessionLogger = new NdjsonSessionLogger(config.agentCoordPath, sessionPointerManager);
+
   // ProgressEmitterとTTYRendererを初期化
   const progressEmitter = createProgressEmitter();
   const renderer = createTTYRenderer(progressEmitter);
@@ -85,6 +161,7 @@ async function executeRun(params: {
     config,
     maxWorkers: config.maxWorkers,
     progressEmitter,
+    sessionLogger,
   });
 
   // レンダラーを開始
@@ -115,6 +192,9 @@ async function executeRun(params: {
     // 結果を表示
     console.log(`\n${'='.repeat(60)}`);
     console.log(`Orchestration Summary:`);
+    if (sourceIssue) {
+      console.log(`  Source Issue: #${sourceIssue.number} (${sourceIssue.owner}/${sourceIssue.repo})`);
+    }
     console.log(`  Total tasks: ${result.taskIds.length}`);
     console.log(`  Completed: ${result.completedTaskIds.length}`);
     console.log(`  Failed: ${result.failedTaskIds.length}`);

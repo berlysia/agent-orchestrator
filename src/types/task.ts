@@ -342,6 +342,22 @@ export const TaskSchema = z.object({
    * - `baseCommit..HEAD` で Worker が実際に行った変更のみを取得できる
    */
   baseCommit: z.string().nullable().optional(),
+
+  /**
+   * タスクのソースとなったGitHub Issue情報（ADR-029）
+   *
+   * WHY: Issue→タスク→PRのトレーサビリティを確保する
+   */
+  sourceIssue: z
+    .object({
+      number: z.number(),
+      title: z.string(),
+      url: z.string(),
+      owner: z.string().optional(),
+      repo: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 /**
@@ -367,6 +383,13 @@ export function createInitialTask(params: {
   rootSessionId?: string | null;
   plannerLogPath?: string | null;
   plannerMetadataPath?: string | null;
+  sourceIssue?: {
+    number: number;
+    title: string;
+    url: string;
+    owner?: string;
+    repo?: string;
+  } | null;
 }): Task {
   const now = new Date().toISOString();
   return {
@@ -392,5 +415,6 @@ export function createInitialTask(params: {
     plannerMetadataPath: params.plannerMetadataPath ?? null,
     latestRunId: null,
     integrationRetried: false,
+    sourceIssue: params.sourceIssue ?? null,
   };
 }
